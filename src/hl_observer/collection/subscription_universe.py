@@ -186,7 +186,15 @@ def diff_souscriptions(ancien: dict | None, nouveau: dict) -> dict[str, Any]:
 
 #: poids par defaut du score d'activite (somme ponderee des signaux normalises).
 POIDS_ACTIVITE_DEFAUT = {
-    "taux": 3.0,       # fills/min recents (signal le plus fort)
+    # 16/11/2026 — LE VOLUME BRUT N'EST PAS LE BON CRITERE (chantier 3 de l'audit).
+    # `docs/LOIS_MESUREES.md` : 61,8 % des fills collectes venaient d'operateurs a haute
+    # frequence NON COPIABLES, et 47,2 % des episodes etaient deja clos quand leur ouverture
+    # devenait observable. Donner un slot WS rare au leader le plus BAVARD, c'est donc souvent
+    # payer pour du bruit. Le poids dominant va desormais aux signaux dont la chaine causale est
+    # COMPLETE (reference pre-signal + entree + sortie observees), mesures par
+    # `tools/tunnel_executabilite.py`.
+    "copiables": 4.0,  # signaux a chaine causale complete par jour — le seul qui soit copiable
+    "taux": 3.0,       # fills/min recents (activite brute : utile a defaut de mesure)
     "recence": 2.0,    # a tradé il y a peu -> va probablement retrader
     "twap": 1.5,       # TWAP/metaorder en cours -> fills imminents garantis
     "notional": 1.0,   # grosse position ouverte -> gestion active probable
@@ -194,6 +202,17 @@ POIDS_ACTIVITE_DEFAUT = {
     "horaire": 1.0,    # actif a l'heure courante (profil horaire)
 }
 _RECENCE_DEMIVIE_MS = 120_000.0   # un fill vieux de 2 min vaut la moitie
+#: Saturation douce du nombre de signaux copiables par jour. 50/jour sature a ~0,98 : au-dela,
+#: c'est le capital et non l'opportunite qui borne (cf. 240 cycles/jour maximum a 350 USD).
+_COPIABLES_REF_PAR_JOUR = 50.0
+#: Echantillon minimal avant de PENALISER un leader pour zero signal copiable. En dessous,
+#: « pas encore mesure » et « mesure a zero » sont indistinguables, et l'inconnu ne condamne pas.
+MIN_FILLS_POUR_JUGER_COPIABILITE = 30
+#: Prime a la copiabilite PROUVEE. Sans elle, un leader jamais mesure mais tres bavard devancait
+#: un leader dont la copiabilite est mesuree positive (4,92 contre 4,49 sur l'exemple du 16/11) :
+#: le volume presume battait la mesure. On prefere donc explicitement le MESURE au PRESUME pour
+#: les slots CORE ; l'exploration de l'inconnu reste le role des slots CHALLENGERS (UCB).
+PRIME_COPIABILITE_MESUREE = 2.0
 _NOTIONAL_REF_USD = 100_000.0     # normalisation log du notional ouvert
 
 
@@ -229,9 +248,13 @@ def score_activite_leader(
 
     ``stat`` champs (tous optionnels) : ``fills_par_min`` ou (``fills_recents`` +
     ``fenetre_min``) ; ``dernier_fill_ms`` ; ``twap_actif`` ; ``notional_ouvert_usd`` ;
-    ``volatilite`` (0..1) ; ``activite_horaire_courante`` (0..1) ou ``profil_horaire``.
+    ``volatilite`` (0..1) ; ``activite_horaire_courante`` (0..1) ou ``profil_horaire`` ;
+    ``signaux_copiables_par_jour`` + ``fills_observes_pour_copiabilite`` (16/11/2026).
+
     Un leader ``snapshot_only`` (jamais de fill forward) renvoie ``-inf`` : il ne doit
-    JAMAIS consommer un slot WS (repli poll).
+    JAMAIS consommer un slot WS (repli poll). Un leader dont la copiabilite est MESUREE a zero
+    sur au moins ``MIN_FILLS_POUR_JUGER_COPIABILITE`` fills renvoie aussi ``-inf`` : son volume
+    brut ne doit pas pouvoir lui acheter un slot rare.
     """
     if not isinstance(stat, Mapping):
         return 0.0
@@ -243,6 +266,25 @@ def score_activite_leader(
 
     taux = _taux_fills_par_min(stat)
     taux_n = taux / (taux + 1.0)  # saturation douce (0..1)
+
+    # Signaux COPIABLES : `None` (jamais mesure) n'est PAS `0` (mesure a zero). L'inconnu retombe
+    # sur l'activite brute ; un zero MESURE sur un echantillon suffisant demote, parce qu'un
+    # operateur dont aucun episode n'est copiable ne rendra jamais un slot WS rentable.
+    copiables = stat.get("signaux_copiables_par_jour")
+    observes = stat.get("fills_observes_pour_copiabilite")
+    copiables_n = 0.0
+    copiabilite_mesuree = (
+        isinstance(copiables, (int, float)) and not isinstance(copiables, bool)
+        and float(copiables) >= 0.0
+        and isinstance(observes, (int, float)) and not isinstance(observes, bool)
+        and float(observes) >= MIN_FILLS_POUR_JUGER_COPIABILITE
+    )
+    if copiabilite_mesuree:
+        valeur = max(0.0, float(copiables))
+        copiables_n = valeur / (valeur + _COPIABLES_REF_PAR_JOUR)
+        if valeur <= 0.0:
+            # Zero copiable MESURE : le volume brut ne doit plus pouvoir lui acheter un slot.
+            return float("-inf")
 
     dernier = stat.get("dernier_fill_ms")
     if isinstance(dernier, (int, float)) and dernier > 0:
@@ -264,8 +306,10 @@ def score_activite_leader(
 
     horaire = _activite_horaire(stat, now_ms)
 
+    prime = PRIME_COPIABILITE_MESUREE if copiabilite_mesuree else 0.0
     return (
-        w["taux"] * taux_n + w["recence"] * recence + w["twap"] * twap
+        prime + w.get("copiables", 0.0) * copiables_n
+        + w["taux"] * taux_n + w["recence"] * recence + w["twap"] * twap
         + w["notional"] * notion_n + w["volatilite"] * vol_n + w["horaire"] * horaire
     )
 

@@ -28,6 +28,13 @@ def test_registre_canonique_coherent():
         assert (root / c["script"]).exists(), c["script"]
 
 
+def test_disabled_carry_ne_peut_pas_entrer_dans_un_profil_collecteur():
+    for profil in CR.PROFILS_VALIDES:
+        assert "paper-carry-inverse" not in {
+            collector["nom"] for collector in CR.collecteurs_pour_profil(profil)
+        }
+
+
 def test_execution_capability_ne_depends_jamais_du_nom():
     assert CR.contrat_collecteur("pipeline-reel")["execution_capability"] == CR.EXECUTION_CAPABILITY_NONE
     assert CR.contrat_collecteur_valide("pipeline-reel") is True

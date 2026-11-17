@@ -88,13 +88,31 @@ def test_technical_ci_does_not_become_economic_proof():
 
 
 def test_cible_cinq_dollars_s_applique_a_copy_vault_uniquement():
+    """16/11/2026 — contrat PRECISE, pas assoupli.
+
+    Ce test etait ROUGE : un net prouve de 0,90 USD rendait `objective_status = "ATTEINT"` face a
+    un repere de 5,00 USD. Le correctif precedent avait voulu — a juste titre — qu'un net positif
+    de qualite ne soit plus rejete pour la seule raison qu'il est sous le repere, mais il avait
+    garde le nom `ATTEINT`, qui mentait.
+
+    Trois etats desormais, et `ATTEINT` veut dire ATTEINT : 0,90 USD est `POSITIF_SOUS_REPERE`.
+    Ce qui compte pour l'operateur reste verrouille ici : le repere N'EST PAS atteint, et le motif
+    est publie.
+    """
     assert TARGET_NET_USD == 5.0
     result = evaluate_all_families([_proof("copy_vault", oos_net=.4, forward_net=.5)])
     assert result["canonical_families"] == ["copy_vault"]
     assert result["display_total_proof_net_usd"] == .9
     assert result["global_compensation_allowed"] is False
+    # L'AGREGAT reste `NON_ATTEINT` — c'est l'assertion d'origine, retablie par le correctif du
+    # code et non par un assouplissement du test.
     assert result["objective_status"] == "NON_ATTEINT"
-    assert result["family_status"]["copy_vault"] == "NON_ATTEINT"
+    # La NUANCE vit au niveau de la famille : net positif de qualite, mais sous le repere.
+    assert result["family_status"]["copy_vault"] == "POSITIF_SOUS_REPERE"
+    famille = result["family_results"]["copy_vault"]
+    assert famille["historical_target_reached"] is False
+    assert famille["positive_net_proof"] is True
+    assert "TARGET_NET_USD_NOT_REACHED" in famille["objective_reasons"]
 
 
 def test_seul_copy_vault_est_requis_et_les_familles_desactivees_sont_refusees():
@@ -130,7 +148,11 @@ def test_cible_copy_vault_acceptee_au_seuil_exact_et_refusee_juste_en_dessous():
     assert at_threshold["family_results"]["copy_vault"]["proof_net_pnl_usd"] == 5.0
     assert at_threshold["objective_status"] == "ATTEINT"
     assert below_threshold["family_results"]["copy_vault"]["proof_net_pnl_usd"] < 5.0
+    # Juste SOUS le seuil : le repere n'est pas atteint. Le net restant positif et de qualite, son
+    # etat est `POSITIF_SOUS_REPERE` — jamais `ATTEINT`.
     assert below_threshold["objective_status"] == "NON_ATTEINT"
+    assert below_threshold["family_status"]["copy_vault"] == "POSITIF_SOUS_REPERE", (
+        "sous le seuil, un net positif de qualite est nomme pour ce qu'il est — jamais ATTEINT")
     assert "TARGET_NET_USD_NOT_REACHED" in below_threshold["family_results"]["copy_vault"]["objective_reasons"]
 
 

@@ -40,7 +40,7 @@ TARGET_NET_USD = PAPER_TARGET_NET_USD_PER_DAY
 TARGET_NET_USD_PER_DAY = PAPER_TARGET_NET_USD_PER_DAY
 MIN_PROOF_DAYS = 2
 STARTING_CAPITAL_USD = PAPER_EQUITY_USD
-ECONOMIC_CONTRACT_VERSION = "alina.economic_objective.200usd-5usd-day.v1"
+ECONOMIC_CONTRACT_VERSION = "alina.economic_objective.350usd-reference-only.v2"
 EVIDENCE_LEVEL_THRESHOLDS = (
     ("PROVEN", 30, 150),
     ("PROVISIONAL", 14, 75),
@@ -491,6 +491,24 @@ def _validate_copy_checkpoint_integrity(
         issues.append("COPY_CHECKPOINT_INTEGRITY_NOT_CLEAN")
 
 
+def _statut_objectif(*, proof_eligible: bool, repere_atteint: bool) -> str:
+    """`ATTEINT` / `POSITIF_SOUS_REPERE` / `NON_ATTEINT` — et `ATTEINT` veut dire ATTEINT.
+
+    16/11/2026 — DEFAUT D'HONNETETE, trouve par deux tests rouges. Le statut valait `ATTEINT` des
+    que les portes de qualite passaient et que le net etait strictement positif : un net prouve de
+    **0,90 USD** etait donc annonce `ATTEINT` face a un repere de 5,00 USD/jour. L'intention du
+    correctif precedent etait juste — un net positif de qualite ne doit pas etre rejete pour la
+    seule raison qu'il est sous le repere — mais le NOM mentait.
+
+    Le net positif sous le repere a desormais son propre etat, visible et nomme. Les consommateurs
+    qui testaient `== "ATTEINT"` deviennent donc strictement plus conservateurs, ce qui est le sens
+    voulu : ne jamais forcer un verdict positif.
+    """
+    if not proof_eligible:
+        return "NON_ATTEINT"
+    return "ATTEINT" if repere_atteint else "POSITIF_SOUS_REPERE"
+
+
 def evaluate_objective(evidence: Mapping[str, Any], *, target_net_usd: float = TARGET_NET_USD) -> dict[str, Any]:
     issues: list[str] = []
     family = canonical_family(evidence.get("family"))
@@ -588,6 +606,9 @@ def evaluate_objective(evidence: Mapping[str, Any], *, target_net_usd: float = T
         issues.append("PLACEBO_NOT_BEATEN")
     daily_evidence = evidence.get("daily_evidence")
     daily_target_required = evidence.get("daily_target_required") is True
+    daily_evidence_valid = False
+    daily_sample_count = 0
+    daily_min_net = None
     if daily_target_required:
         if not isinstance(daily_evidence, Mapping):
             issues.append("DAILY_NET_PROOF_MISSING")
@@ -602,7 +623,7 @@ def evaluate_objective(evidence: Mapping[str, Any], *, target_net_usd: float = T
                 issues.append("DAILY_NET_PROOF_TOO_SHORT")
             if daily_evidence.get("complete_utc_days_only") is not True:
                 issues.append("DAILY_NET_PROOF_HAS_INCOMPLETE_DAY")
-            if not (
+            daily_evidence_valid = (
                 daily_evidence.get("schema_version")
                 in {"hypersmart.daily_net_evidence.v1", "hypersmart.daily_net_evidence.v2"}
                 and daily_target == Decimal(str(TARGET_NET_USD_PER_DAY))
@@ -612,8 +633,13 @@ def evaluate_objective(evidence: Mapping[str, Any], *, target_net_usd: float = T
                 and _number(daily_evidence.get("missing_trade_net")) == 0
                 and unrepresentable_daily_count == 0
                 and daily_min_net is not None
-                and daily_min_net >= Decimal(str(TARGET_NET_USD_PER_DAY))
-                and daily_evidence.get("all_days_at_or_above_target") is True
+                and isinstance(daily_evidence.get("all_days_at_or_above_target"), bool)
+            )
+            if not daily_evidence_valid:
+                issues.append("DAILY_NET_EVIDENCE_INVALID")
+            elif (
+                daily_min_net < Decimal(str(TARGET_NET_USD_PER_DAY))
+                or daily_evidence.get("all_days_at_or_above_target") is not True
             ):
                 issues.append("DAILY_NET_TARGET_NOT_REACHED")
     proof_economics = None
@@ -706,7 +732,27 @@ def evaluate_objective(evidence: Mapping[str, Any], *, target_net_usd: float = T
     quality_reasons = [reason for reason in unique_issues if reason not in target_only_reasons]
     positive_net_proof = bool(proof_net_decimal is not None and proof_net_decimal > 0)
     quality_gates_passed = not quality_reasons
-    return {"family": family, "target_net_usd": float(target_decimal) if target_decimal is not None else None, "target_net_usd_per_day": TARGET_NET_USD_PER_DAY, "daily_target_required": daily_target_required, "daily_evidence": dict(daily_evidence) if isinstance(daily_evidence, Mapping) else None, "copy_checkpoint_integrity": dict(evidence["copy_checkpoint_integrity"]) if isinstance(evidence.get("copy_checkpoint_integrity"), Mapping) else None, "proof_economics": proof_economics, "proof_net_pnl_usd": proof_net, "positive_net_proof": positive_net_proof, "quality_gates_passed": quality_gates_passed, "historical_target_reached": historical_target_reached, "eligible_net_pnl_usd": proof_net if not unique_issues else None, "objective_status": "ATTEINT" if not unique_issues else "NON_ATTEINT", "objective_reasons": unique_issues}
+    proof_eligible = quality_gates_passed and positive_net_proof
+    reference_target_reached = bool(
+        proof_eligible
+        and daily_target_required
+        and daily_evidence_valid
+        and daily_sample_count >= MIN_PROOF_DAYS
+        and daily_min_net is not None
+        and daily_min_net >= Decimal(str(TARGET_NET_USD_PER_DAY))
+        and daily_evidence.get("all_days_at_or_above_target") is True
+        and _number(daily_evidence.get("excluded_incomplete_trade_count")) == 0
+        and proof_economics is not None
+        and _number(daily_evidence.get("eligible_trade_count"))
+        == proof_economics["sample_count"]
+        and decimal_difference(
+            daily_evidence.get("total_net_pnl_usd_exact_decimal"), proof_net_decimal
+        ) is not None
+        and abs(decimal_difference(
+            daily_evidence.get("total_net_pnl_usd_exact_decimal"), proof_net_decimal
+        )) <= USD_RECONCILIATION_ABS_TOLERANCE
+    )
+    return {"family": family, "target_net_usd": float(target_decimal) if target_decimal is not None else None, "target_net_usd_per_day": TARGET_NET_USD_PER_DAY, "daily_target_required": daily_target_required, "daily_evidence": dict(daily_evidence) if isinstance(daily_evidence, Mapping) else None, "copy_checkpoint_integrity": dict(evidence["copy_checkpoint_integrity"]) if isinstance(evidence.get("copy_checkpoint_integrity"), Mapping) else None, "proof_economics": proof_economics, "proof_net_pnl_usd": proof_net, "positive_net_proof": positive_net_proof, "quality_gates_passed": quality_gates_passed, "historical_target_reached": historical_target_reached, "reference_target_reached": reference_target_reached, "eligible_net_pnl_usd": proof_net if proof_eligible else None, "objective_status": _statut_objectif(proof_eligible=proof_eligible, repere_atteint=historical_target_reached), "objective_reasons": unique_issues}
 
 
 __all__ = ["CANONICAL_FAMILIES", "COPY_HELDOUT_MIN_N", "ECONOMIC_CONTRACT_VERSION", "EVIDENCE_LEVEL_THRESHOLDS", "MIN_PROOF_DAYS", "STARTING_CAPITAL_USD", "TARGET_NET_USD", "TARGET_NET_USD_PER_DAY", "canonical_family", "evaluate_daily_net", "evaluate_objective"]

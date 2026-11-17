@@ -24,6 +24,21 @@ def test_local_bbo_marks_fail_closed_without_positions_or_tape(tmp_path, monkeyp
     assert status._local_bbo_marks(settings, raw_positions=[{"coin": "BTC"}], current_ms=1_000)["read_status"] == "LOCAL_BBO_MISSING"
 
 
+def test_local_bbo_marks_never_use_an_unrelated_working_directory(tmp_path, monkeypatch) -> None:
+    isolated_state = tmp_path / "runtime" / "ui_simulation_state.json"
+    unrelated = tmp_path / "unrelated"
+    tape = unrelated / "runtime" / "data" / "bbo_tape.jsonl"
+    tape.parent.mkdir(parents=True)
+    tape.write_text(json.dumps({"coin": "ETH", "venue": "HL", "bid": 50, "ask": 51,
+                                "ts_wall_ms": 2_000_000_000_000}) + "\n", encoding="utf-8")
+    monkeypatch.setattr(status, "simulation_state_path", lambda _settings: isolated_state)
+    monkeypatch.chdir(unrelated)
+    result = status._local_bbo_marks(
+        SimpleNamespace(), raw_positions=[{"coin": "ETH"}], current_ms=2_000_000_000_000
+    )
+    assert result["read_status"] == "LOCAL_BBO_MISSING"
+
+
 def test_local_bbo_marks_ignore_invalid_stale_and_non_hyperliquid_rows(tmp_path, monkeypatch) -> None:
     tape = _prepare_runtime_tape(tmp_path, monkeypatch)
     current_ms = 2_000_000_000_000

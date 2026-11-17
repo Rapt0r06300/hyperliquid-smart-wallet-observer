@@ -275,6 +275,15 @@ def _copy_checkpoint_integrity(report: Mapping[str, Any]) -> dict[str, Any]:
         "writer_role": receipt.get("writer_role"),
         "writer_run_id": writer_run_id or None,
         "clean_epoch_ms": clean_epoch_ms or None,
+        # 16/11/2026 — la segmentation des trous doit VOYAGER jusqu'a la porte de preuve, sinon
+        # elle ne protege rien : un rapport pourrait montrer un recu valide sans dire combien de
+        # lignes sont tombees dans un trou ni quelle part du temps est reellement couverte.
+        "gap_segmentation_reason": receipt.get("gap_segmentation_reason"),
+        "safe_interval_count": receipt.get("safe_interval_count"),
+        "safe_coverage_ms": receipt.get("safe_coverage_ms"),
+        "epoch_span_ms": receipt.get("epoch_span_ms"),
+        "rows_inside_gap_window": receipt.get("rows_inside_gap_window"),
+        "collector_gap_count": receipt.get("collector_gap_count"),
         "duplicate_checkpoint_ids": receipt.get("duplicate_checkpoint_ids"),
         "quarantined_checkpoint_metaorders": receipt.get(
             "quarantined_checkpoint_metaorders"

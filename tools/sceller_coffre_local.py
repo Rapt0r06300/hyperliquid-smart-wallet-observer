@@ -42,11 +42,20 @@ sys.path.insert(0, str(ROOT / "src"))
 from hl_observer.datasets.coffre_certifie import (  # noqa: E402
     FAMILLE_BBO, FAMILLE_BOOK_L2, FAMILLE_FILLS_BACKFILL, FAMILLE_FILLS_FORWARD,
     FAMILLE_VENUE,
+    FAMILLE_POSITION, FAMILLE_TRADES,
     PASS, QUARANTAINE, REPARE, StatsCertif, certifier_record, detecter_famille,
     identite, motif_non_certifie, nouvellement_accepte, sniffer_famille, version_certificateur,
 )
+from hl_observer.ops import verrou_pid  # noqa: E402
 
 COFFRE_RELDIR = Path("runtime") / "coffre_certifie"
+#: 16/11 — VERROU DU SCELLEUR. Il n'en avait aucun, et la campagne le relance deja toutes les
+#: 30 min (collecteur « coffre-certificateur »). Depuis que le rattrapage scelle lui-meme a la fin
+#: de son passage, deux scellages peuvent tomber en meme temps : ils ecrivent le MEME
+#: SOURCES_TRAITEES.json, et le dernier a ecrire efface les decalages d'octets de l'autre. La
+#: donnee survit, le registre de ce qui est scelle non — et c'est lui qui dit au labo ce qu'il
+#: peut lire.
+VERROU_RELPATH = Path("runtime") / "data" / "coffre_certificateur.lock"
 #: Dossiers où les collecteurs écrivent leurs rubans. Le second (microstructure Hyperliquid :
 #: BBO dense, carnets L2, transactions) n'était jamais visité : 1,4 Go restaient hors coffre.
 DOSSIERS_COLLECTE = (
@@ -125,6 +134,24 @@ def _jour_utc(ts_ms: int | None) -> str:
 
 
 def _ts_primaire(record: dict[str, Any], famille: str) -> int | None:
+    """L'horloge qui DATE une ligne de cette famille, pour l'histogramme de jours de l'index.
+
+    16/11/2026 — DEFAUT MESURE PAR LA MATRICE DU COFFRE. Le repli `record.get("ts_ms")` ne
+    convenait pas a deux familles qui ne portent PAS ce champ :
+
+    * `position` (171 shards, 870 142 lignes) n'a que `received_at_ms` ;
+    * `trades_marche` (192 shards, 24 095 493 lignes) a `exchange_ts_ms` et `received_at_ms`.
+
+    Resultat : leurs 363 shards etaient indexes avec `jours = ["0000-00-00"]`, le sentinelle
+    « jour inconnu ». Consequence directe sur la recherche : **aucune etude ne peut decouper ces
+    familles par jour**, alors que la seule hypothese non refutee par `docs/LOIS_MESUREES.md`
+    (operateurs lents, replication d'inventaire) exige justement des TRANSITIONS DE POSITION sur
+    des jours independants. Le pont du labo avait recu ce correctif le 16/11 ; le scelleur, non.
+
+    Les shards deja scelles gardent leur sentinelle : rien n'est reecrit retroactivement. Seuls
+    les nouveaux lots porteront la vraie date, et un reindexage explicite serait necessaire pour
+    les anciens.
+    """
     if famille == "candle":
         return record.get("open_ts_ms")
     if famille == FAMILLE_BOOK_L2:
@@ -133,6 +160,10 @@ def _ts_primaire(record: dict[str, Any], famille: str) -> int | None:
         return record.get("recv_wall_ts_ms")
     if famille == FAMILLE_VENUE:
         return record.get("snapshot_ts_ms")
+    if famille == FAMILLE_POSITION:
+        return record.get("received_at_ms")
+    if famille == FAMILLE_TRADES:
+        return record.get("exchange_ts_ms") or record.get("received_at_ms")
     return record.get("ts_ms")
 
 
@@ -178,7 +209,7 @@ def _sha256_prefixe(path: Path, octets: int) -> str:
         while restant > 0:
             bloc = handle.read(min(4 * 1024 * 1024, restant))
             if not bloc:
-                break
+                raise OSError(f"source raccourcie pendant le hash du prefixe : {path}")
             h.update(bloc)
             restant -= len(bloc)
     return h.hexdigest()
@@ -270,6 +301,7 @@ def sceller_fichier(
     source: Path, coffre: Path, batch_id: str, *, source_tag: str, famille: str,
     now_ms: int, deja_vus: set, log, prefixe: str = "",
     debut_octets: int = 0, fin_octets: int | None = None, rattrapage: bool = False,
+    expected_source_sha256: str | None = None, source_snapshot_octets: int | None = None,
 ) -> dict[str, Any] | None:
     """Certifie un fichier source, écrit le shard scellé + la quarantaine.
 
@@ -353,6 +385,13 @@ def sceller_fichier(
                 if tsp:
                     ts_min = tsp if ts_min is None else min(ts_min, tsp)
                     ts_max = tsp if ts_max is None else max(ts_max, tsp)
+            if expected_source_sha256 is not None:
+                if source_snapshot_octets is None:
+                    raise ValueError("source_snapshot_octets manquant")
+                after_sha = (_sha256_fichier(source) if source.suffix == ".gz"
+                             else _sha256_prefixe(source, source_snapshot_octets))
+                if after_sha != expected_source_sha256:
+                    raise RuntimeError(f"source modifiee pendant la certification : {source}")
     except BaseException:
         try:
             shard_abs.unlink()   # interruption : aucun fichier partiel ne survit
@@ -867,6 +906,10 @@ def main(argv: list[str] | None = None) -> int:
                 src_etat = _etat_source(source)
             except OSError:
                 continue
+            # Les collecteurs continuent d'écrire pendant ce lot. L'horloge de validité
+            # doit suivre la frontière du fichier capturée ici, pas le début du lot.
+            # --now-ms reste une horloge fixe injectable pour les tests/replays.
+            source_cutoff_ms = args.now_ms if args.now_ms else int(time.time() * 1000)
             taille = src_etat["taille"]
             pct = faits_octets / total_octets * 100
             ecoule = time.monotonic() - t0
@@ -879,7 +922,9 @@ def main(argv: list[str] | None = None) -> int:
                            eta_s=round(eta, 1), batch_id=batch_id,
                            debit_mo_s=round((faits_octets / 1048576) / ecoule, 2) if ecoule > 0 else 0.0)
             cle_src = str(source.relative_to(root)) if root in source.parents else str(source)
-            sha_src = _sha256_fichier(source)
+            # Le hash et la lecture portent sur le même préfixe d'un ruban vivant.
+            sha_src = (_sha256_fichier(source) if source.suffix == ".gz"
+                       else _sha256_prefixe(source, taille))
             ancien = etat.get(cle_src)
             version = version_certificateur(source.name)
             if ancien and ancien.get("sha256") == sha_src and int(ancien.get("certif_version", 1)) >= version:
@@ -930,11 +975,13 @@ def main(argv: list[str] | None = None) -> int:
                               f"je ne scelle que la suite.")
             entree = sceller_fichier(
                 source, coffre, batch_id, source_tag=source_tag, famille=famille,
-                now_ms=now_ms, deja_vus=deja_vus, log=log, prefixe=tete,
+                now_ms=source_cutoff_ms, deja_vus=deja_vus, log=log, prefixe=tete,
                 debut_octets=debut, fin_octets=fin, rattrapage=rattrapage,
+                expected_source_sha256=sha_src, source_snapshot_octets=taille,
             )
             faits_octets += taille
             if entree is not None:
+                entree["source_cutoff_ms"] = source_cutoff_ms
                 entrees_manifeste.append(entree)
                 st = entree.get("stats", {})
                 total.entrees += st.get("entrees", 0)
@@ -942,6 +989,8 @@ def main(argv: list[str] | None = None) -> int:
                 total.repares += st.get("repares", 0)
                 total.quarantaine += st.get("quarantaine", 0)
                 total.doublons += st.get("doublons", 0)
+                for raison, count in st.get("raisons", st.get("raisons_top", {})).items():
+                    total.raisons[raison] = total.raisons.get(raison, 0) + count
                 if entree.get("deposes") and source.name in FLUX_VIVANTS and source.parent.name == "data":
                     scelles_pour_reset.append(source)
             etat[cle_src] = {"sha256": sha_src, **src_etat, "batch": batch_id, "certif_version": version}
@@ -1174,8 +1223,51 @@ def _journaliser(coffre: Path, manifeste: dict[str, Any]) -> None:
         h.write(json.dumps(ligne, ensure_ascii=False) + "\n")
 
 
-def _point_d_entree(argv: list[str] | None = None) -> int:
-    """Aiguille entre une passe unique et la boucle, en retirant `--boucle-s` de la ligne passee."""
+def _racine_des_args(args: list[str]) -> Path:
+    """La racine demandee sur la ligne de commande, pour poser le verrou au bon endroit.
+
+    `main()` la lit avec argparse, mais le verrou se prend AVANT d'entrer dans `main()` : deux
+    analyses de la meme option, c'est le prix d'un verrou qui protege aussi la boucle continue.
+    """
+    for i, a in enumerate(args):
+        if a == "--root" and i + 1 < len(args):
+            return Path(args[i + 1])
+        if a.startswith("--root="):
+            return Path(a.split("=", 1)[1])
+    return ROOT
+
+
+def _aiguiller(nettoye: list[str], intervalle: float) -> int:
+    """Une passe unique, ou la boucle continue. Separe du verrou pour etre appelable sans lui."""
+    if intervalle <= 0:
+        try:
+            return main(nettoye)
+        except KeyboardInterrupt:
+            # 16/11 — la passe UNIQUE n'attrapait pas le Ctrl+C : elle rendait une pile d'erreur
+            # (vue dans coffre_session.log du 12/11, remontee en « erreur grave » par le rapport).
+            # Le scellage est INCREMENTAL : tout ce qui est deja scelle le reste, et la passe
+            # suivante reprend au dernier saut de ligne complet. Il n'y a rien a reparer, juste a
+            # le dire — exigence de Florent : un Ctrl+C ne doit jamais perdre de donnee.
+            print("[coffre] Ctrl+C — arret propre. Tout ce qui etait deja scelle le RESTE ; "
+                  "la passe suivante reprend ou celle-ci s'arrete.", flush=True)
+            return 130
+    print(f"[coffre] certification EN CONTINU toutes les {intervalle / 60:.0f} min. "
+          "Ctrl+C pour arreter.", flush=True)
+    try:
+        return boucler(nettoye, intervalle)
+    except KeyboardInterrupt:
+        print("[coffre] arret demande — la derniere passe complete reste certifiee.", flush=True)
+        return 130
+
+
+def _point_d_entree(argv: list[str] | None = None, *, verrouiller: bool = True) -> int:
+    """Aiguille entre une passe unique et la boucle, en retirant `--boucle-s` de la ligne passee.
+
+    ``verrouiller=False`` pour les tests qui verifient l'AIGUILLAGE des arguments : sans racine
+    explicite le verrou se poserait dans l'arbre reel du projet, et un test interrompu y laisserait
+    un verrou qui bloquerait la certification de la campagne pendant 6 h (defaut vu le 16/11, la
+    suite de tests l'a attrape le jour meme).
+    """
     import sys as _sys
     args = list(_sys.argv[1:] if argv is None else argv)
     intervalle = 0.0
@@ -1192,15 +1284,23 @@ def _point_d_entree(argv: list[str] | None = None) -> int:
             continue
         nettoye.append(args[i])
         i += 1
-    if intervalle <= 0:
-        return main(nettoye)
-    print(f"[coffre] certification EN CONTINU toutes les {intervalle / 60:.0f} min. "
-          "Ctrl+C pour arreter.", flush=True)
+    if not verrouiller:
+        return _aiguiller(nettoye, intervalle)
+    verrou = _racine_des_args(nettoye) / VERROU_RELPATH
+    obtenu, mot = verrou_pid.prendre(verrou, quoi="un scellage")
+    if not obtenu:
+        # Rendre 0 et non une erreur : rien n'a echoue. Un autre scellage couvre les memes
+        # octets a cet instant, il est INCREMENTAL, et la campagne relance celui-ci dans 30 min.
+        # Rougir ici ferait croire a une panne du coffre a chaque passage superpose.
+        print(f"[coffre] RIEN A SCELLER MAINTENANT : {mot}. Le scellage en cours couvre les "
+              "memes octets et reprend ou il s'arrete.", flush=True)
+        return 0
+    if mot:
+        print(f"[coffre] {mot}", flush=True)
     try:
-        return boucler(nettoye, intervalle)
-    except KeyboardInterrupt:
-        print("[coffre] arret demande — la derniere passe complete reste certifiee.", flush=True)
-        return 130
+        return _aiguiller(nettoye, intervalle)
+    finally:
+        verrou_pid.rendre(verrou)
 
 
 if __name__ == "__main__":  # pragma: no cover

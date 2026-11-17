@@ -93,3 +93,76 @@ def test_une_coupure_reseau_ne_tue_pas_la_passe(tmp_path, monkeypatch):
 def test_resume_est_honnete_quand_vide(tmp_path):
     m = _mod()
     assert m.resume(tmp_path)["verdict"] == "AUCUN_OVERSHOOT_ENCORE_COLLECTE"
+
+
+# ─────── 17/11/2026 : UN PERP DÉLISTÉ N'EST PAS UN ÉVÉNEMENT, ET UN PRIX ABSENT N'EST PAS ZÉRO ───────
+#
+# MESURÉ SUR LE COFFRE. La famille `overshoot` compte 175 238 lignes ; **67,3 % ont leurs quatre
+# prix futurs identiques au prix de l'événement**, et 69,1 % une « réversion » de 0,0. Les coins
+# touchés à 100 % — RNDR, FTM, FXS, HPOS, UNIBOT, OX, FRIEND, SHIA, exactement 3 693 lignes
+# chacun — sont des perps DÉLISTÉS : mark et oracle y sont figés avec un écart permanent
+# (RNDR : −191,75 bps), donc le seuil de 30 bps était franchi à chaque cycle et le collecteur
+# écrivait un « dépassement » toutes les deux minutes, pour toujours. Sur ETH, SOL et HYPE : 0 %.
+#
+# Deux défauts distincts :
+#   1. le collecteur ignorait `isDelisted`, que `collection/univers_perps.py` applique déjà ;
+#   2. `mf = ev.get(...) or m0` recopiait le prix de l'événement quand le prix futur manquait :
+#      une observation ABSENTE devenait une réversion de 0,0.
+def _payload(*actifs):
+    """[meta, contextes] : chaque actif est (nom, oracle, mark, deliste)."""
+    return [{"universe": [{"name": n, **({"isDelisted": True} if d else {})} for n, _, _, d in actifs]},
+            [{"oraclePx": str(o), "markPx": str(m)} for _, o, m, _ in actifs]]
+
+
+def test_un_perp_DELISTE_n_entre_pas_dans_les_contextes():
+    m = _mod()
+    payload = _payload(("ETH", 100.0, 99.9, False), ("RNDR", 7.03, 6.8952, True))
+    ctxs = m.parser_ctxs(payload)
+    assert set(ctxs) == {"ETH"}, "un marche deliste ne doit jamais devenir un evenement"
+    assert m.coins_delistes(payload) == ["RNDR"], "ce qu'on ecarte doit pouvoir etre nomme"
+
+
+def test_un_ecart_PERMANENT_sur_un_deliste_ne_declenche_plus_rien():
+    """Le cas exact du coffre : RNDR, −191,75 bps, à chaque cycle."""
+    m = _mod()
+    ctxs = m.parser_ctxs(_payload(("RNDR", 7.03, 6.8952, True)))
+    assert m.detecter({"RNDR": 6.8952}, ctxs) == []
+
+
+def test_un_deliste_ne_decale_pas_l_appariement_des_AUTRES_actifs():
+    """`universe[i]` correspond à `contextes[i]` : sauter un délisté ne doit rien désaligner."""
+    m = _mod()
+    ctxs = m.parser_ctxs(_payload(("AAA", 1.0, 1.0, False), ("MORT", 9.0, 5.0, True),
+                                  ("ZZZ", 3.0, 2.9, False)))
+    assert ctxs == {"AAA": {"oracle": 1.0, "mark": 1.0}, "ZZZ": {"oracle": 3.0, "mark": 2.9}}
+
+
+def test_un_prix_futur_ABSENT_rend_une_reversion_INCONNUE_et_non_nulle():
+    """L'ancien `or m0` transformait une observation manquante en mesure de 0,0."""
+    m = _mod()
+    ouverts = {"ETH": {"coin": "ETH", "ts0": 1000.0, "mid_at_event": 100.0, "oracle_px": 100.4,
+                       "mark_px": 100.2, "overshoot_bps": -40.0, "sens": "SELL_OVERSHOOT"}}
+    finis = m.avancer(ouverts, {}, 1000.0 + max(m.HORIZONS_S))      # le coin a disparu des mids
+    assert len(finis) == 1
+    assert finis[0]["reversion_bps"] is None, "une absence n'est jamais un zero"
+    assert finis[0]["reversion_inconnue"] is True
+    assert finis[0]["prix_fige"] is False, "sans prix futur, on ne peut pas dire qu'il est fige"
+
+
+def test_un_prix_reste_EXACTEMENT_egal_est_MARQUE_fige_et_jamais_ecarte():
+    m = _mod()
+    ouverts = {"ILL": {"coin": "ILL", "ts0": 1000.0, "mid_at_event": 6.8952, "oracle_px": 7.03,
+                       "mark_px": 6.8952, "overshoot_bps": -191.75, "sens": "SELL_OVERSHOOT"}}
+    for dt in m.HORIZONS_S:                                           # chaque horizon voit le meme prix
+        finis = m.avancer(ouverts, {"ILL": 6.8952}, 1000.0 + dt)
+    assert len(finis) == 1, "la ligne est gardee : l'etude decide, mais elle le sait"
+    assert finis[0]["prix_fige"] is True
+    assert finis[0]["reversion_bps"] == 0.0, "ici le zero est OBSERVE, pas suppose"
+
+
+def test_un_prix_qui_BOUGE_n_est_pas_marque_fige():
+    m = _mod()
+    ouverts = {"ETH": {"coin": "ETH", "ts0": 1000.0, "mid_at_event": 100.0, "oracle_px": 100.4,
+                       "mark_px": 100.2, "overshoot_bps": -40.0, "sens": "SELL_OVERSHOOT"}}
+    finis = m.avancer(ouverts, {"ETH": 100.2}, 1000.0 + max(m.HORIZONS_S))
+    assert finis[0]["prix_fige"] is False and finis[0]["reversion_bps"] > 0

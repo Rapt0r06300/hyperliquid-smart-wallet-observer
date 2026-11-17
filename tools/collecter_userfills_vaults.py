@@ -30,6 +30,7 @@ sys.path.insert(0, str(RACINE / "tools"))
 
 from hl_observer.collection import userfills_live as UL  # noqa: E402
 from hl_observer.collection import verrou_instance as VI  # noqa: E402
+from hl_observer.collection import slots_userfills as SLOTS  # noqa: E402
 from hl_observer.backtesting.copy_vault_executable import (  # noqa: E402
     CHECKPOINT_COLLECTOR_PROTOCOL,
     COPY_DELAY_MS as COPY_VAULT_DELAY_MS,
@@ -277,7 +278,8 @@ def _core_slots() -> int:
     return max(1, min(requested, MAX_SLOTS))
 
 
-def vaults_et_roles(root: Path, *, n_candidats: int = MAX_SLOTS, rotation_index: int = 0) -> list[tuple[str, str, str]]:
+def vaults_et_roles(root: Path, *, n_candidats: int = MAX_SLOTS, rotation_index: int = 0,
+                    indice: dict | None = None, en_place: tuple = ()) -> list[tuple[str, str, str]]:
     """(vault, role, raison) sur ≤10 places WS : CORE configurables (retenus stricts) + ≤3
     LIQUIDATOR_SENTINELS ÉPINGLÉS (top liquidateurs confirmés — pour capter les liquidations forward) +
     le reste en CANDIDATS OBSERVÉS par ROTATION = activité live + qualité shadow + copyabilité. Total borné
@@ -320,6 +322,12 @@ def vaults_et_roles(root: Path, *, n_candidats: int = MAX_SLOTS, rotation_index:
     for public in _univers_observation(root):
         if public["vault"] not in pris:
             candidats_par_vault.setdefault(public["vault"], public)
+    if indice is not None:
+        # 17/11/2026 : « actif » ne voulait dire que « vu en direct ». Un leader sans emplacement
+        # ne pouvait donc jamais le devenir : 61 % des fills de ses rafales etaient manques.
+        # Le poll REST voit tout le monde en quelques minutes ; voir `slots_userfills`.
+        act = SLOTS.activite_effective(candidats_par_vault, act, indice)
+        a_max = max(act.values()) if act else 1
     cands = sorted(
         candidats_par_vault.values(),
         key=lambda c: (_rotation(c), float((c.get("facteurs") or {}).get("tvl_usd") or 0.0), c["vault"]),
@@ -332,14 +340,21 @@ def vaults_et_roles(root: Path, *, n_candidats: int = MAX_SLOTS, rotation_index:
         # pour continuer a decouvrir de l'activite. Maximise les fills/jour.
         actifs = [c for c in cands if act.get(c["vault"], 0) > 0]
         silencieux = [c for c in cands if act.get(c["vault"], 0) <= 0]
+        if indice is not None:
+            actifs = SLOTS.ordonner_les_actifs(actifs, plan=indice.get("plan"), en_place=en_place)
         selection = actifs[:reste]
         libres = reste - len(selection)
-        if libres > 0 and silencieux:
+        if libres > 0 and silencieux and indice is not None:
+            selection += SLOTS.choisir_les_libres(
+                silencieux, libres=libres, rotation_index=rotation_index, indice=indice, en_place=en_place)
+        elif libres > 0 and silencieux:
             start = (max(0, int(rotation_index)) * libres) % len(silencieux)
             selection += [
                 silencieux[(start + offset) % len(silencieux)]
                 for offset in range(min(libres, len(silencieux)))
             ]
+        if indice is not None:
+            selection = SLOTS.ordre_stable(selection, en_place)
     else:
         selection = []
     for c in selection:
@@ -2031,7 +2046,9 @@ async def _superviser_rotation_vaults(root: Path, file: asyncio.Queue) -> None:
                 last_universe_refresh = time.monotonic()
 
             page = _prochain_index_rotation(root)
-            roles = vaults_et_roles(root, rotation_index=page)
+            # Lecture du ruban du poll dans un fil : elle ne retient pas la boucle qui horodate.
+            indice = await asyncio.to_thread(SLOTS.indice_d_attribution, root)
+            roles = vaults_et_roles(root, rotation_index=page, indice=indice, en_place=running_vaults)
             if not roles:
                 print("[userfills] aucun vault valide; nouvelle tentative dans 30s", flush=True)
                 await asyncio.sleep(30.0)
@@ -2047,11 +2064,15 @@ async def _superviser_rotation_vaults(root: Path, file: asyncio.Queue) -> None:
             # captes. On ne reconstruit que lorsque l'ensemble change reellement
             # (rotation d'un slot silencieux). Fail-closed inchange : au moindre
             # changement on retombe sur le comportement complet (aucune regression).
-            if (
+            maintenue = bool(
                 tuple(vaults) == running_vaults
                 and running_tasks
                 and all(not task.done() for task in running_tasks)
-            ):
+            )
+            # Une ligne par cycle : qui etait abonne, et quand. Sans elle, « pas abonne » se lit
+            # comme « aucun fill ».
+            SLOTS.journaliser_page(root, page=page, roles=roles, maintenue=maintenue, indice=indice)
+            if maintenue:
                 print(
                     "[userfills] ensemble de vaults stable -> connexions maintenues "
                     "(aucune reconnexion, zero trou causal)",

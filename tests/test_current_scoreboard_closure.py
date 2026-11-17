@@ -38,11 +38,9 @@ def _campaign():
 def _scoreboard():
     return {
         "schema_version": "hypersmart.economic_family_scoreboards.v2",
-        "families": {
-            "copy_vault": {"verdict": "MORE_DATA"},
-            "lead_lag": {"verdict": "MORE_DATA"},
-            "cross_venue_dislocation_v2": {"verdict": "KILL"},
-        },
+        "families": {"copy_vault": {"verdict": "MORE_DATA"}},
+        "active_families": ["copy_vault"],
+        "starting_capital_usd": 350.0,
         "paper_read_only": True,
         "real_execution": False,
     }
@@ -96,6 +94,21 @@ def test_current_scoreboard_receipt_validates_exact_epoch_binding(tmp_path):
     assert reason == "CURRENT_SCOREBOARD_RECEIPT_VALID"
     assert scoreboard == receipt["scoreboard"]
     assert loaded["dataset_selection_id"] == "phase-2-cutoff"
+
+
+def test_legacy_multifamily_scoreboard_is_rejected_even_with_valid_hash(tmp_path):
+    receipt = _write_receipt(tmp_path)
+    receipt["scoreboard"]["active_families"] = ["copy_vault", "lead_lag"]
+    receipt["scoreboard"]["families"]["lead_lag"] = {"verdict": "MORE_DATA"}
+    receipt["scoreboard_sha256"] = digest(receipt["scoreboard"])
+    receipt.pop("receipt_digest")
+    receipt["receipt_digest"] = digest(receipt)
+    (tmp_path / "catalog/ANALYSIS_SCOREBOARD_RECEIPT.json").write_text(
+        json.dumps(receipt), encoding="utf-8"
+    )
+    valid, _, reason, _ = validate_current_scoreboard_receipt(tmp_path, _phase())
+    assert valid is False
+    assert reason == "CURRENT_SCOREBOARD_ACTIVE_SCOPE_INVALID"
 
 
 def test_stale_phase_epoch_is_rejected(tmp_path):

@@ -161,7 +161,12 @@ def test_le_cmd_bloque_si_ouverture_session_echoue():
     debut = txt.index('session_harvest ouvrir')
     fin = txt.index('REM === ITEM 9', debut)
     bloc = txt[debut:fin]
-    assert 'if errorlevel 1' in bloc
+    # 17/11/2026 — même évolution que la barrière READY_CORE : le code de sortie est capturé dans
+    # une variable sur la ligne qui suit l'appel, parce que la journalisation intercalée
+    # écraserait ERRORLEVEL. L'ancien texte `if errorlevel 1` n'existe plus ; la barrière, si.
+    assert bloc.split("\n", 2)[1].strip() == 'set "RC_SESSION=%ERRORLEVEL%"', (
+        "le code d'ouverture de session doit etre capture sur la ligne qui suit l'appel")
+    assert 'if not "%RC_SESSION%"=="0" (' in bloc
     assert 'call :stop_impl' in bloc
     assert 'set "RC=5"' in bloc
     assert 'goto :fin' in bloc

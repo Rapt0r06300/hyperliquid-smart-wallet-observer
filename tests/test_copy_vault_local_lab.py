@@ -25,6 +25,42 @@ from hl_observer.backtesting.copy_vault_local_lab import (
 )
 
 
+def test_chargeurs_de_signaux_lisent_les_rubans_materialises_et_excluent_local(tmp_path: Path) -> None:
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    (data / "copy_vault_active_asset_ctx_tape.jsonl").write_text(
+        json.dumps({"coin": "ETH", "received_at_ms": 2000,
+                    "context": {"markPx": "101", "oraclePx": "100"}}) + "\n",
+        encoding="utf-8",
+    )
+    (data / "vault_fills_live.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in (
+            {"vault": "0xSAFE", "ts_ms": 1000, "received_at_ms": 1500,
+             "isSnapshot": False, "source": "LIVE_POLL", "closed_pnl": 2.5,
+             "source_quality_status": "SAFE", "source_manifest_verified": True},
+            {"vault": "0xLOCAL", "ts_ms": 1100, "received_at_ms": 1150,
+             "isSnapshot": False, "source": "LIVE_POLL", "closed_pnl": 1000,
+             "provenance_tier": "LOCAL"},
+            {"vault": "0xUNVERIFIED", "ts_ms": 1200, "received_at_ms": 1250,
+             "isSnapshot": False, "source": "LIVE_POLL", "closed_pnl": 1000,
+             "source_quality_status": "SAFE", "source_manifest_verified": False},
+            {"vault": "0xBACKFILL", "ts_ms": 1200, "received_at_ms": 1250,
+             "isSnapshot": False, "source": "REST_BACKFILL", "closed_pnl": 1000,
+             "source_quality_status": "SAFE", "source_manifest_verified": True},
+        )), encoding="utf-8",
+    )
+    assert local_lab._charger_asset_ctx_safe(tmp_path) == [
+        {"coin": "ETH", "ts_ms": 2000, "mark": 101.0, "oracle": 100.0}
+    ]
+    assert local_lab._charger_leader_fills_safe(tmp_path) == [
+        {"vault": "0xSAFE", "ts_ms": 1500, "closed_pnl": 2.5}
+    ]
+    from hl_observer.backtesting.leader_quality_signal import build_leader_quality_index, leader_prior_pnl_at
+    index = build_leader_quality_index(local_lab._charger_leader_fills_safe(tmp_path))
+    assert leader_prior_pnl_at(index, "0xSAFE", 1499) is None
+    assert leader_prior_pnl_at(index, "0xSAFE", 1500) == 2.5
+
+
 def test_train_active_day_mean_uses_exact_daily_pnl_values() -> None:
     train = {
         "active_day_mean_net_pnl_usd": 999.0,

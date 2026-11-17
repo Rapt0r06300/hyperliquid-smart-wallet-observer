@@ -21,6 +21,18 @@ ANALYSIS_KINDS = (
 )
 
 
+def scoreboard_scope_issue(scoreboard: Mapping[str, Any]) -> str | None:
+    """Reject legacy multi-family and non-350 USD economic receipts."""
+    if scoreboard.get("active_families") != ["copy_vault"]:
+        return "CURRENT_SCOREBOARD_ACTIVE_SCOPE_INVALID"
+    if scoreboard.get("starting_capital_usd") != 350.0:
+        return "CURRENT_SCOREBOARD_CAPITAL_INVALID"
+    families = scoreboard.get("families")
+    if not isinstance(families, Mapping) or set(families) != {"copy_vault"}:
+        return "CURRENT_SCOREBOARD_FAMILY_SCOPE_INVALID"
+    return None
+
+
 def load(path: Path, default=None):
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -111,6 +123,9 @@ def validate_current_scoreboard_receipt(
         return False, {}, "CURRENT_SCOREBOARD_HASH_MISMATCH", receipt
     if scoreboard.get("paper_read_only") is not True or scoreboard.get("real_execution") is not False:
         return False, {}, "CURRENT_SCOREBOARD_NOT_PAPER_ONLY", receipt
+    scope_issue = scoreboard_scope_issue(scoreboard)
+    if scope_issue:
+        return False, {}, scope_issue, receipt
 
     campaign_id = str(receipt.get("campaign_id") or "")
     if not campaign_id:
@@ -464,11 +479,7 @@ def main() -> int:
     scoreboard_families = scoreboard.get("families") if scoreboard_valid else {}
     if not isinstance(scoreboard_families, dict):
         scoreboard_families = {}
-    source_names = {
-        "copy_vault": "copy_vault",
-        "lead_lag": "lead_lag",
-        "cross_venue_dislocation": "cross_venue_dislocation_v2",
-    }
+    source_names = {"copy_vault": "copy_vault"}
     for family, source_name in source_names.items():
         source = scoreboard_families.get(source_name)
         if not isinstance(source, dict):

@@ -184,6 +184,74 @@ LOIS: tuple[Loi, ...] = (
         ou_verifier="backtesting/copy_vault_copiability.py (mirror_copy_episodes, "
                     "slow_replication_persistence)"),
 
+    Loi(cle="replication_meilleur_leader_du_tableau",
+        titre="Choisir le meilleur leader du tableau de réplication",
+        verdict=VERDICT_REFUTE,
+        chiffre="réplication 350 USD, prix observés, 105 comptes sur 5 jours : le meilleur leader "
+                "du tableau affiche **+18,85 USD/jour**, mais le meilleur leader SOUS PLACEBO (le "
+                "même portefeuille confronté au chemin de prix d'un autre jour, 6 décalages) fait "
+                "en moyenne **+19,16** et jusqu'à **+34,63** (p95). Écart au p95 du hasard : "
+                "**−15,78 USD/jour** pour une marge de bruit de 1,06. Net d'ensemble "
+                "−0,19 USD/jour, IC 95 % [−1,31 ; +0,81]. Le sommet du tableau est du bruit de "
+                "sélection",
+        date="2026-11-17",
+        condition_de_reouverture="un leader désigné EX ANTE (sur des jours antérieurs à ceux où "
+                                 "on le mesure) dont le net dépasse le p95 du placebo plus la "
+                                 "marge de bruit, sur ≥ 20 jours indépendants",
+        mots_cles=("meilleur leader", "top leader", "leader du tableau",
+                   "classement des leaders", "meilleurs leaders"),
+        ou_verifier="tools/etude_copiabilite.py --replication-350 (borne_du_hasard_replication) "
+                    "+ backtesting/overfit_selection.py"),
+
+    Loi(cle="famille_overshoot_comme_entree",
+        titre="Utiliser la famille `overshoot` du coffre comme entrée de décision",
+        verdict=VERDICT_REFUTE,
+        chiffre="175 238 lignes : **100 %** portent `mid_fwd_15s…120s` et `reversion_bps`, des "
+                "prix POSTÉRIEURS à l'événement — s'en servir comme caractéristique est un "
+                "look-ahead par construction. De plus **67,3 %** des lignes viennent de 8 perps "
+                "délistés aux prix figés (RNDR, FTM, FXS, HPOS, UNIBOT, OX, FRIEND, SHIA), que "
+                "le collecteur prenait pour des événements à chaque cycle",
+        date="2026-11-17",
+        condition_de_reouverture="aucune pour un usage en entrée (look-ahead par construction) ; "
+                                 "comme étiquette de résultat seulement, sur des lignes collectées "
+                                 "après la correction du collecteur (`isDelisted` écarté) et non "
+                                 "marquées `prix_fige`",
+        mots_cles=("famille overshoot", "mid_fwd", "reversion_bps", "overshoots_liquidation"),
+        ou_verifier="tools/collecter_overshoots.py + backtesting/copy_vault_roles_familles.py "
+                    "(resultat_overshoot)"),
+
+    Loi(cle="conditionnement_microstructure",
+        titre="Conditionner les entrées Copy-Vault sur la microstructure (OFI, carnet fin)",
+        verdict=VERDICT_LIMITE,
+        chiffre="les flux `micro_l2` / `micro_trades` couvrent 24 coins ; sur 67 367 ouvertures "
+                "copiables (fills WS non-snapshot, 15–17/11), seules **10 739 (15,9 %)** tombent "
+                "sur ces coins. Un conditionnement de microstructure est structurellement aveugle "
+                "aux 84 % restants, quelle que soit sa qualité",
+        date="2026-11-17",
+        condition_de_reouverture="une couverture `micro_l2` / `micro_trades` étendue aux coins "
+                                 "qui portent la majorité des ouvertures copiables, ET une "
+                                 "hypothèse préenregistrée avec ablation",
+        mots_cles=("microstructure", " ofi ", "order flow imbalance", "desequilibre de carnet",
+                   "déséquilibre de carnet", "micro_l2", "micro_trades"),
+        ou_verifier="tools/matrice_coffre.py --roles (applicabilite_microstructure)"),
+
+    Loi(cle="capacite_ordre_paper",
+        titre="Supposer qu'un ordre paper de 350 USD passe sans impact",
+        verdict=VERDICT_LIMITE,
+        chiffre="13 291 471 trades de marché sur 180 coins (15–17/11) : pour le coin médian, une "
+                "minute de marché n'échange que **1,51 fois** l'ordre de 350 USD, et 5 % des coins "
+                "seulement dépassent 100 fois. Confronté au volume réellement répliqué "
+                "(366 192 USD, 99 coins) : **2,8 %** du volume sur des coins où une minute médiane "
+                "échange moins que l'ordre, 0,6 % de capacité inconnue, 96,7 % mesurée suffisante. "
+                "Le coût simulé (frais taker + demi-écart) ne contient pas d'impact",
+        date="2026-11-17",
+        condition_de_reouverture="un modèle d'impact calibré sur les trades de marché, ou une "
+                                 "stratégie dont la part étroite + inconnue dépasse 10 % du volume",
+        mots_cles=("capacite du marche", "capacité du marché", "capacite de l'ordre",
+                   "capacité de l'ordre", "impact de marche", "impact de marché"),
+        ou_verifier="backtesting/copy_vault_roles_familles.py (capacite_par_coin, "
+                    "exposition_a_la_capacite)"),
+
     Loi(cle="market_making_spread",
         titre="Faire le marché à l'intérieur du spread (T1/T1b)",
         verdict=VERDICT_REFUTE,

@@ -6,7 +6,7 @@
 > Les verdicts de mesure sont historiques; l'autorité `active_scope` décide de l'exécution.
 > Carry et les autres familles désactivées restent `DISABLED_BY_SCOPE` ici.
 
-## 🔴 Réfuté par la mesure (16)
+## 🔴 Réfuté par la mesure (18)
 
 ### Lead-lag cross-venue Binance→HL en TAKER scalp : aucun edge (le choc ne précède pas HL) — `cross_venue_leadlag_taker_no_edge`
 
@@ -64,6 +64,20 @@
 - **pour rouvrir** : un univers d'opérateurs LENTS (rotation ≤ 3× l'exposition par jour) dont la réplication d'inventaire gagne en marche avant sur ≥ 20 jours indépendants (aujourd'hui : MORE_DATA, 1 jour exploitable)
 - **où vérifier** : `backtesting/copy_vault_copiability.py (mirror_copy_episodes, slow_replication_persistence)`
 
+### Choisir le meilleur leader du tableau de réplication — `replication_meilleur_leader_du_tableau`
+
+- **le chiffre** : réplication 350 USD, prix observés, 105 comptes sur 5 jours : le meilleur leader du tableau affiche **+18,85 USD/jour**, mais le meilleur leader SOUS PLACEBO (le même portefeuille confronté au chemin de prix d'un autre jour, 6 décalages) fait en moyenne **+19,16** et jusqu'à **+34,63** (p95). Écart au p95 du hasard : **−15,78 USD/jour** pour une marge de bruit de 1,06. Net d'ensemble −0,19 USD/jour, IC 95 % [−1,31 ; +0,81]. Le sommet du tableau est du bruit de sélection
+- **mesuré le** : 2026-11-17
+- **pour rouvrir** : un leader désigné EX ANTE (sur des jours antérieurs à ceux où on le mesure) dont le net dépasse le p95 du placebo plus la marge de bruit, sur ≥ 20 jours indépendants
+- **où vérifier** : `tools/etude_copiabilite.py --replication-350 (borne_du_hasard_replication) + backtesting/overfit_selection.py`
+
+### Utiliser la famille `overshoot` du coffre comme entrée de décision — `famille_overshoot_comme_entree`
+
+- **le chiffre** : 175 238 lignes : **100 %** portent `mid_fwd_15s…120s` et `reversion_bps`, des prix POSTÉRIEURS à l'événement — s'en servir comme caractéristique est un look-ahead par construction. De plus **67,3 %** des lignes viennent de 8 perps délistés aux prix figés (RNDR, FTM, FXS, HPOS, UNIBOT, OX, FRIEND, SHIA), que le collecteur prenait pour des événements à chaque cycle
+- **mesuré le** : 2026-11-17
+- **pour rouvrir** : aucune pour un usage en entrée (look-ahead par construction) ; comme étiquette de résultat seulement, sur des lignes collectées après la correction du collecteur (`isDelisted` écarté) et non marquées `prix_fige`
+- **où vérifier** : `tools/collecter_overshoots.py + backtesting/copy_vault_roles_familles.py (resultat_overshoot)`
+
 ### Faire le marché à l'intérieur du spread (T1/T1b) — `market_making_spread`
 
 - **le chiffre** : 0 gagnant sur 29 coins, mesuré à 100 % de fill (borne HAUTE, impossible en vrai) ; le prix bouge 5 à 30× le spread
@@ -120,7 +134,7 @@
 - **pour rouvrir** : un funding franchement AU-DESSUS du plancher (le garde du plancher réactive alors le z-score automatiquement)
 - **où vérifier** : `funding/carry_optimizer.py:facteur_zscore + carry_allocation_nette.py`
 
-## 🟠 Réel mais insuffisant en l'état (2)
+## 🟠 Réel mais insuffisant en l'état (4)
 
 ### Le coût all-in d'un aller-retour d'arbitrage vaut 16 bps, pas 8 — `arb_dislocation_cout_all_in`
 
@@ -128,6 +142,20 @@
 - **mesuré le** : 2026-07-22
 - **pour rouvrir** : aucune — arithmétique de frais (doc HL tier 0). Si HL change ses frais, on re-mesure
 - **où vérifier** : `funding/arb_cout_all_in.py`
+
+### Conditionner les entrées Copy-Vault sur la microstructure (OFI, carnet fin) — `conditionnement_microstructure`
+
+- **le chiffre** : les flux `micro_l2` / `micro_trades` couvrent 24 coins ; sur 67 367 ouvertures copiables (fills WS non-snapshot, 15–17/11), seules **10 739 (15,9 %)** tombent sur ces coins. Un conditionnement de microstructure est structurellement aveugle aux 84 % restants, quelle que soit sa qualité
+- **mesuré le** : 2026-11-17
+- **pour rouvrir** : une couverture `micro_l2` / `micro_trades` étendue aux coins qui portent la majorité des ouvertures copiables, ET une hypothèse préenregistrée avec ablation
+- **où vérifier** : `tools/matrice_coffre.py --roles (applicabilite_microstructure)`
+
+### Supposer qu'un ordre paper de 350 USD passe sans impact — `capacite_ordre_paper`
+
+- **le chiffre** : 13 291 471 trades de marché sur 180 coins (15–17/11) : pour le coin médian, une minute de marché n'échange que **1,51 fois** l'ordre de 350 USD, et 5 % des coins seulement dépassent 100 fois. Confronté au volume réellement répliqué (366 192 USD, 99 coins) : **2,8 %** du volume sur des coins où une minute médiane échange moins que l'ordre, 0,6 % de capacité inconnue, 96,7 % mesurée suffisante. Le coût simulé (frais taker + demi-écart) ne contient pas d'impact
+- **mesuré le** : 2026-11-17
+- **pour rouvrir** : un modèle d'impact calibré sur les trades de marché, ou une stratégie dont la part étroite + inconnue dépasse 10 % du volume
+- **où vérifier** : `backtesting/copy_vault_roles_familles.py (capacite_par_coin, exposition_a_la_capacite)`
 
 ### Arbitrer une dislocation de prix Hyperliquid ↔ Binance — `arbitrage_cross_venue`
 

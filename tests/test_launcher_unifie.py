@@ -163,6 +163,10 @@ def test_la_racine_contient_uniquement_les_lanceurs_principaux_et_alinasync():
         "RAPPORT-COLLECTEURS.cmd",
         "Noeud-HL.cmd",
         "Installer Noeud HL.cmd",
+        # 16/11/2026 : les deux manquants. CERTIFIER_EN_CONTINU.cmd etait deja sur
+        # origin/main sans role — ce test etait donc rouge sur le HEAD publie.
+        "CERTIFIER_EN_CONTINU.cmd",
+        "RATTRAPAGE.cmd",
     }
     assert {name for name in cmd_racine if name in ENTRYPOINT_ROLES} == cmd_racine   # tous classés
     assert (RACINE / "ALINA_SYNC_COMPLETE.sh").is_file()

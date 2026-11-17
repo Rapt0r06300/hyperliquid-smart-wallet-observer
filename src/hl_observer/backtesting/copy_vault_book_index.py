@@ -42,6 +42,7 @@ résultat : au pire l'index est recalculé.
 """
 from __future__ import annotations
 
+import bisect
 import sys
 from typing import Any
 
@@ -248,6 +249,55 @@ def oublier_les_index() -> None:
     global _plafond_courant
     _INDEX.clear()
     _plafond_courant = MAX_LISTES          # nouveau corpus : on repart du plafond nominal
+
+
+# ───────── 17/11/2026 : recherche d'un carnet PAR LE TEMPS ─────────
+# Ces quatre fonctions vivaient dans `copy_vault_executable.py`, que les gardes de réception
+# explicite avaient porté de 1 304 à 1 324 lignes au-dessus de son plafond historique. Elles ne
+# font que chercher dans l'index que CE module possède : elles sont donc mieux ici, et
+# l'exécuteur les réimporte sous leurs noms d'origine.
+def _strict_positive_timestamp(value: object) -> int | None:
+    """Require an observed integer timestamp; do not parse or truncate input."""
+    if type(value) is not int or value <= 0:
+        return None
+    return value
+
+
+def _strict_nonnegative_int(value: object) -> int | None:
+    """Require an exact integer for causal lag/age parameters."""
+    if type(value) is not int or value < 0:
+        return None
+    return value
+
+
+def _first_at_or_after(
+    rows: list[dict[str, Any]], target_ms: int, max_lag_ms: int, book_index: Any = None,
+) -> tuple[dict[str, Any] | None, int | None]:
+    target = _strict_positive_timestamp(target_ms)
+    max_lag = _strict_nonnegative_int(max_lag_ms)
+    exact_timestamps = (book_index or index_des_carnets(rows)).horodatages_exacts()
+    if target is None or max_lag is None or exact_timestamps is None:
+        return None, None
+    index = bisect.bisect_left(exact_timestamps, target)
+    if index >= len(rows):
+        return None, None
+    lag = exact_timestamps[index] - target
+    return (rows[index], lag) if 0 <= lag <= max_lag else (None, lag)
+
+
+def _last_at_or_before(
+    rows: list[dict[str, Any]], target_ms: int, max_age_ms: int, book_index: Any = None,
+) -> tuple[dict[str, Any] | None, int | None]:
+    target = _strict_positive_timestamp(target_ms)
+    max_age = _strict_nonnegative_int(max_age_ms)
+    exact_timestamps = (book_index or index_des_carnets(rows)).horodatages_exacts()
+    if target is None or max_age is None or exact_timestamps is None:
+        return None, None
+    index = bisect.bisect_right(exact_timestamps, target) - 1
+    if index < 0:
+        return None, None
+    age = target - exact_timestamps[index]
+    return (rows[index], age) if 0 <= age <= max_age else (None, age)
 
 
 __all__ = [

@@ -35,11 +35,9 @@ def _campaign():
 def _scoreboard():
     return {
         "schema_version": "hypersmart.economic_family_scoreboards.v2",
-        "families": {
-            "copy_vault": {"verdict": "MORE_DATA"},
-            "lead_lag": {"verdict": "MORE_DATA"},
-            "cross_venue_dislocation_v2": {"verdict": "KILL"},
-        },
+        "families": {"copy_vault": {"verdict": "MORE_DATA"}},
+        "active_families": ["copy_vault"],
+        "starting_capital_usd": 350.0,
         "paper_read_only": True,
         "real_execution": False,
     }
@@ -87,7 +85,7 @@ def test_closure_uses_only_current_epoch_scoreboard_receipt(tmp_path):
     assert valid is True
     assert reason == "CURRENT_SCOREBOARD_RECEIPT_VALID"
     assert loaded["receipt_digest"] == receipt["receipt_digest"]
-    assert scoreboard["families"]["cross_venue_dislocation_v2"]["verdict"] == "KILL"
+    assert scoreboard["families"]["copy_vault"]["verdict"] == "MORE_DATA"
 
 
 def test_closure_rejects_stale_or_tampered_scoreboard_receipt(tmp_path):

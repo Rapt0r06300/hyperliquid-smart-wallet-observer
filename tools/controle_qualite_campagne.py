@@ -55,7 +55,12 @@ def _collecteurs_attendus() -> list[tuple[str, float, str]]:
     spec.loader.exec_module(watch)
     from hl_observer.ops import collecteur_registry as registre
 
-    par_nom = {c["nom"]: c for c in registre.REGISTRE}
+    # 16/11/2026 — MEME PIEGE QUE LE TEST DU LANCEUR, ET ICI IL PRODUISAIT UN FAUX « MORT ».
+    # `copy-vault-checkpoints` vit dans COLLECTEURS_CAMPAGNE, pas dans REGISTRE. Avec REGISTRE
+    # seul, son `script` valait "" : aucun processus ne pouvait correspondre, et le controle
+    # declarait MORT le compagnon qui ecrivait a la seconde meme. La resolution reelle du lanceur
+    # (`bounded_collection._registry`) lit REGISTRE + COLLECTEURS_CAMPAGNE : on lit la MEME chose.
+    par_nom = {c["nom"]: c for c in (*registre.REGISTRE, *registre.COLLECTEURS_CAMPAGNE)}
     sortie = []
     for nom in watch.DEFAULT_NAMES:
         config = par_nom.get(nom) or {}
@@ -90,6 +95,42 @@ def _scripts_vivants() -> set[str] | None:
     return vivants
 
 
+def _rubans_par_script() -> dict[str, list[tuple[str, str]]]:
+    """``script producteur -> [(dossier, fichier)]``, lu de la declaration du depot.
+
+    On ne devine pas quel collecteur ecrit quoi : `couverture_donnees.FLUX` le declare deja, et
+    c'est la meme source que la matrice de couverture. Si un flux change de producteur, ce
+    controle suit automatiquement.
+    """
+    try:
+        from hl_observer.datasets.couverture_donnees import FLUX
+    except Exception:                      # noqa: BLE001 — un controle ne doit jamais planter
+        return {}
+    par_script: dict[str, list[tuple[str, str]]] = {}
+    for flux in FLUX:
+        producteur = Path(str(getattr(flux, "producteur", ""))).name
+        fichier = str(getattr(flux, "fichier", ""))
+        dossier = str(getattr(flux, "dossier", ""))
+        if producteur and fichier and "*" not in fichier:
+            par_script.setdefault(producteur, []).append((dossier, fichier))
+    return par_script
+
+
+def _age_des_rubans_produits(root: Path, script: str, maintenant: float) -> float | None:
+    """Age du ruban le PLUS FRAIS que ce script est declare produire, ou ``None``."""
+    nom = Path(str(script)).name
+    if not nom:
+        return None
+    ages: list[float] = []
+    for dossier, fichier in _rubans_par_script().get(nom, ()):
+        for base in (root / dossier, root / "runtime" / "data", root / "runtime" / dossier):
+            age = _age_s(base / fichier, maintenant)
+            if age is not None:
+                ages.append(age)
+                break
+    return min(ages) if ages else None
+
+
 def _age_s(chemin: Path, maintenant: float) -> float | None:
     try:
         return maintenant - chemin.stat().st_mtime
@@ -112,6 +153,23 @@ def controler(root: Path, *, maintenant: float | None = None) -> dict:
         journal = root / "runtime" / "logs" / f"economic-{nom}.log"
         age = _age_s(journal, maintenant)
         seuil = max(PLANCHER_FRAICHEUR_S, cadence * FACTEUR_FRAICHEUR)
+        # Le BATTEMENT CANONIQUE prime sur le mtime du journal. Un journal n'est ecrit que sur
+        # evenement : six collecteurs etaient annonces « figes depuis 1320 min » alors que leur
+        # battement datait de la seconde. Le battement, lui, est ecrit pour dire « je vis ».
+        age_battement = _age_s(
+            root / "runtime" / "research_lab" / "heartbeats" / f"{nom}.json", maintenant)
+        if age_battement is not None and age_battement <= seuil:
+            frais += 1
+            continue
+        # Pas de battement canonique ? Alors on regarde ce que le collecteur PRODUIT. Le depot
+        # declare deja quel script ecrit quel ruban (`couverture_donnees.FLUX`). Mesure du 16/11 :
+        # `userfills-poll` etait annonce « fige depuis 5 588 min » alors que son ruban faisait
+        # 1 051,8 Mo et venait d'etre ecrit a la seconde. Un journal n'est pas une preuve de vie ;
+        # une donnee fraiche, si.
+        age_ruban = _age_des_rubans_produits(root, script, maintenant)
+        if age_ruban is not None and age_ruban <= seuil:
+            frais += 1
+            continue
         if age is None:
             sans_journal += 1
             anomalies.append(f"collecteur {nom} : AUCUN JOURNAL (jamais lance ?)")

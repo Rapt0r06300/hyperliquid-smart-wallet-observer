@@ -840,3 +840,27 @@ def test_le_rapport_dit_pourquoi_rien_n_est_mesurable_et_ne_pretend_rien_de_prou
     assert "128 essais terminés pendant ce passage" in page and "En attente du premier essai" not in page
     assert "essais terminé ; aucune amélioration prouvée" in page
     assert "Aucun trade exécutable" not in page
+
+
+def test_le_message_de_rejet_du_gel_cite_le_seuil_REEL_et_non_200_USD():
+    """17/11/2026 — le message opérateur disait « la limite de 200 USD de capital paper ».
+
+    Le seuil appliqué est `MAX_GROSS_EXPOSURE_USD` (350 USD : capital paper sans levier), et
+    AGENTS.md déclare les mentions de 200 USD « historiques et inactives ». Le rejet lui-même est
+    juste — le gel v21 porte `core_notional_usd = 600` — mais l'opérateur lisait un seuil faux.
+    Le message est désormais dérivé de la constante : il ne peut plus diverger d'elle.
+    """
+    import importlib.util
+    from pathlib import Path
+
+    from hl_observer.backtesting.copy_vault_protocol import MAX_GROSS_EXPOSURE_USD
+
+    racine = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location(
+        "console_message_gel", racine / "tools" / "alina_quant_lab_console.py")
+    console = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(console)
+    message = console.REASON_LABELS["COPY_V21_PAPER_GROSS_EXPOSURE_LIMIT_EXCEEDED"]
+    assert f"{MAX_GROSS_EXPOSURE_USD:.0f} USD" in message
+    assert "200 USD" not in message
+    assert "sans levier" in message

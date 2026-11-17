@@ -62,23 +62,13 @@ REGISTRE: tuple[dict[str, Any], ...] = (
     # BORNES RESPECTEES : 3 000 (bougies) + 7 200 (funding) = 10 200 s < 14 400 s d'intervalle, et
     # la limite de 480 min (28 800 s) reste tres au-dessus. On NE lance PAS de passe concurrente :
     # deux processus partageraient le meme fichier `.tmp` d'etat, et l'entrelacement peut corrompre.
-    # 15/11/2026 — EXECUTEUR PAPER DU LIVRE TRANSVERSAL INVERSE.
-    # Cadence 12 h = le pas de tranche du protocole gele (`docs/PREENREGISTREMENT_5USD_V2.md`).
-    # Il DECIDE au fil du temps, donc sa decision est ecrite AVANT que le resultat n'existe :
-    # c'est la difference entre « la strategie aurait gagne » et « la strategie a gagne ».
-    # Lecture seule (il ne lit que le coffre), idempotent (un instant deja decide est ignore),
-    # et son grand livre est ecrit de facon atomique.
-    # INVARIANT ANTI-RELANCE : limite_minutes x 60 = 72 000 > intervalle_s x 1,5 = 64 800.
-    # ATTENTION : la campagne en cours ne le prendra PAS — le lanceur lit `DEFAULT_NAMES` de
-    # `watch_economic_collectors.py` au demarrage, et on ne redemarre pas une collecte vivante.
-    # En attendant : `python tools/paper_carry_inverse.py --root . --capital 350`.
-    {"nom": "paper-carry-inverse", "script": "tools/paper_carry_inverse.py",
-     "intervalle_s": 43200, "args": ("--une-fois",), "limite_minutes": 1200.0},
     {"nom": "backfill-candles-vaults", "script": "tools/backfill_candles_vaults.py",
      "intervalle_s": 14400,
-     # `--intervalles` inclut desormais **1d** : c'est le seul pas qui remonte a 1 101 jours, donc
-     # le seul qui donne un prix au funding rattrape (l'horaire plafonne a 208 jours).
-     "args": ("--une-fois", "--intervalles", "1h,5m,1d", "--budget-funding-s", "7200"),
+     # `--intervalles` inclut **1d** (seul pas qui remonte a 1 101 jours, donc le seul qui donne un
+     # prix au funding rattrape) et, depuis le 15/11, **4h** : 833 jours a 6 points par jour, le
+     # pas qui garde l'HEURE d'entree la ou le journalier l'efface. Un pas deja a jour ne coute
+     # qu'une requete par coin et par passe, donc l'ajout est quasi gratuit en regime permanent.
+     "args": ("--une-fois", "--intervalles", "1h,4h,5m,1d", "--budget-funding-s", "7200"),
      "limite_minutes": 480.0},
     {"nom": "pipeline-reel", "script": "tools/pipeline_copie_reel.py",
      "intervalle_s": 1800, "args": ("--une-fois",), "limite_minutes": 60.0,

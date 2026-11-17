@@ -11,9 +11,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 try:
-    from tools.build_global_implementation_closure import validate_current_resume_receipt
+    from tools.build_global_implementation_closure import (
+        scoreboard_scope_issue,
+        validate_current_resume_receipt,
+    )
 except ModuleNotFoundError:
-    from build_global_implementation_closure import validate_current_resume_receipt
+    from build_global_implementation_closure import (
+        scoreboard_scope_issue,
+        validate_current_resume_receipt,
+    )
 
 
 def load(path: Path, default=None):
@@ -226,6 +232,9 @@ def _validated_current_scoreboard(root, phase, current_campaigns):
         return False, {}, receipt, "CURRENT_SCOREBOARD_HASH_MISMATCH"
     if scoreboard.get("paper_read_only") is not True or scoreboard.get("real_execution") is not False:
         return False, {}, receipt, "CURRENT_SCOREBOARD_NOT_PAPER_ONLY"
+    scope_issue = scoreboard_scope_issue(scoreboard)
+    if scope_issue:
+        return False, {}, receipt, scope_issue
 
     campaign_id = str(receipt.get("campaign_id") or "")
     campaign = next(
@@ -470,7 +479,7 @@ def main() -> int:
                     )
                     if scoreboard_artifact:
                         break
-    family_names = ("copy_vault", "lead_lag", "cross_venue_dislocation")
+    family_names = ("copy_vault",)
     scoreboard_families = (
         current_scoreboard.get("families")
         if current_scoreboard_valid
@@ -480,8 +489,6 @@ def main() -> int:
     )
     family_aliases = {
         "copy_vault": ("copy_vault",),
-        "lead_lag": ("lead_lag",),
-        "cross_venue_dislocation": ("cross_venue_dislocation", "cross_venue_dislocation_v2"),
     }
     valid_module_statuses = {"PROVEN", "MORE_DATA", "UNMEASURABLE", "KILL"}
     modules = {}
@@ -561,8 +568,8 @@ def main() -> int:
         "uncompressed_size_exact_assets": current_dataset_coverage["uncompressed_size_exact_assets"],
         "uncompressed_size_unavailable_assets": current_dataset_coverage["uncompressed_size_unavailable_assets"],
         "copy_vault_status": modules["copy_vault"]["status"],
-        "lead_lag_status": modules["lead_lag"]["status"],
-        "cross_venue_status": modules["cross_venue_dislocation"]["status"],
+        "lead_lag_status": "DISABLED_BY_SCOPE",
+        "cross_venue_status": "DISABLED_BY_SCOPE",
         "oos_status": "MORE_DATA" if not complete_analysis else "UNMEASURABLE",
         "forward_status": "MORE_DATA" if not complete_analysis else "UNMEASURABLE",
         "two_segment_resume_status": "PROVEN" if resume_proven else "UNMEASURABLE",

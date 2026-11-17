@@ -34,11 +34,21 @@ if not defined CV_PYTHON (
 )
 
 rem --- Arguments : (defaut) TOUT le projet ; --data = seulement runtime\data ; --reset = remet l affichage a zero ---
+rem     RATTRAPAGE (15/11/2026) : par defaut, le certificateur COMPLETE les donnees avant de les
+rem     sceller. Scelle-t-on un coffre a moitie rempli alors qu'une requete publique suffisait a
+rem     le remplir ? Non : certifier n'est pas qu'un tampon, c'est la garantie que le labo lira
+rem     TOUT ce qui etait disponible. --sans-rattrapage retrouve l'ancien comportement.
 set "MODE=--tout"
 set "RESET="
+set "RATTRAPAGE=1"
+set "RATTRAPAGE_BUDGET=2400"
+set "PLAN_SEUL="
 for %%A in (%*) do (
   if /I "%%~A"=="--data" set "MODE="
   if /I "%%~A"=="--reset" set "RESET=--reset-affichage"
+  if /I "%%~A"=="--sans-rattrapage" set "RATTRAPAGE="
+  if /I "%%~A"=="--rattrapage-long" set "RATTRAPAGE_BUDGET=21600"
+  if /I "%%~A"=="--plan" set "PLAN_SEUL=--plan"
   if /I "%%~A"=="--help" goto :help
   if /I "%%~A"=="-h" goto :help
 )
@@ -47,13 +57,41 @@ echo.
 echo === Certification du coffre-fort "donnees certifiees" (tier LOCAL) ===
 if defined MODE (echo   Source : TOUT le dossier projet) else (echo   Source : runtime\data uniquement)
 if defined RESET echo   Reset affichage : les flux vivants seront remis a zero apres scellage verifie.
-echo   PAPER / LECTURE SEULE - aucun reseau, aucun ordre.
+if defined RATTRAPAGE (
+  echo   Rattrapage : OUI - les donnees sont COMPLETEES avant d'etre scellees ^(budget %RATTRAPAGE_BUDGET% s^)
+) else (
+  echo   Rattrapage : non ^(--sans-rattrapage^) - on scelle ce qui est deja la
+)
+echo   PAPER / LECTURE SEULE - les seules requetes sont candleSnapshot et fundingHistory, publics.
 echo.
 call "%CV_ROOT%tools\launcher_log.cmd" "Certificateur Coffre Fort" START preflight "certification-request" ""
 
 rem Ouvre l'ecran de suivi (%% avancement, debit, ETA) dans une fenetre separee.
 if exist "%CV_ROOT%SUIVI_COFFRE.cmd" start "" "%CV_ROOT%SUIVI_COFFRE.cmd"
 
+rem --- ETAPE 1 : COMPLETER. Une tache a la fois, garde memoire active, une ligne par coin a
+rem     l'ecran. L'ordre est calcule (jours-coins gagnes par seconde de requete), pas devine. ---
+if defined RATTRAPAGE (
+  if exist "%CV_ROOT%tools\rattrapage_complet.py" (
+    echo === ETAPE 1/2 : completer les donnees manquantes ===
+    "%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\rattrapage_complet.py" --root "%CV_ROOT%." --budget-s %RATTRAPAGE_BUDGET% --sans-scellement %PLAN_SEUL%
+    set "RC_RATT=!ERRORLEVEL!"
+    call "%CV_ROOT%tools\launcher_log.cmd" "Certificateur Coffre Fort" RESULT rattrapage "rattrapage_complet.py" "!RC_RATT!"
+    rem Un rattrapage incomplet n'empeche PAS de certifier : il reprendra au passage suivant, et
+    rem sceller ce qui est deja la vaut toujours mieux que de ne rien sceller.
+    if not "!RC_RATT!"=="0" echo [AVERTISSEMENT] Rattrapage interrompu ^(code !RC_RATT!^) : on certifie quand meme ce qui est deja la.
+    echo.
+  ) else (
+    echo [AVERTISSEMENT] tools\rattrapage_complet.py introuvable : certification sans rattrapage.
+  )
+)
+if defined PLAN_SEUL (
+  echo [--plan] Plan affiche, rien n'a ete lance ni scelle.
+  call "%CV_ROOT%tools\launcher_log.cmd" "Certificateur Coffre Fort" EXIT completion "plan-only" "0"
+  endlocal & exit /b 0
+)
+
+echo === ETAPE 2/2 : certifier et sceller ===
 "%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\sceller_coffre_local.py" --root "%CV_ROOT%." %MODE% %RESET%
 set "RC=%ERRORLEVEL%"
 call "%CV_ROOT%tools\launcher_log.cmd" "Certificateur Coffre Fort" RESULT certification "sceller_coffre_local.py" "%RC%"
@@ -70,9 +108,12 @@ endlocal & exit /b %RC%
 
 :help
 call "%CV_ROOT%tools\launcher_log.cmd" "Certificateur Coffre Fort" START help "usage-request" "0"
-echo Usage : Certificateur Coffre Fort.cmd [--data] [--reset]
-echo   (defaut)   certifie TOUTES les donnees du projet et les depose dans le coffre-fort
-echo   --data     limite a runtime\data (collecte courante)
-echo   --reset    remet les flux vivants a zero apres un scellage verifie (affichage repart de 0)
+echo Usage : Certificateur Coffre Fort.cmd [--data] [--reset] [--sans-rattrapage] [--rattrapage-long] [--plan]
+echo   (defaut)            COMPLETE les donnees manquantes (40 min max) puis certifie TOUT le projet
+echo   --data              limite la certification a runtime\data (collecte courante)
+echo   --reset             remet les flux vivants a zero apres un scellage verifie (affichage repart de 0)
+echo   --sans-rattrapage   ne complete rien : scelle uniquement ce qui est deja la
+echo   --rattrapage-long   6 h de rattrapage au lieu de 40 min (pour creuser la profondeur)
+echo   --plan              AFFICHE ce qui manque et ce que ca couterait, puis s'arrete (0 requete)
 call "%CV_ROOT%tools\launcher_log.cmd" "Certificateur Coffre Fort" EXIT help "usage-returned" "0"
 endlocal & exit /b 0

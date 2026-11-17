@@ -129,6 +129,15 @@ FLUX: tuple[Flux, ...] = (
          "bougies 1 j récupérées après coup (1 101 jours, la seule profondeur qui couvre "
          "le funding rattrapé)", "candle", CONSOMME,
          f"{ETUDE} --retrospectif (fenêtre mesurable sur ~3 ans, détention 24 h)"),
+    # 15/11/2026 — LE PAS MANQUANT ENTRE 208 ET 1 101 JOURS. Le plafond de `candleSnapshot` est de
+    # 5 000 BOUGIES : il dépend donc du pas, et 5 000 x 4 h = **833 jours**. C'est le compromis
+    # exact dont la stratégie a besoin : le journalier couvre 1 101 jours mais à 1 point par jour,
+    # ce qui efface l'HEURE d'entrée ; le 4 h en garde 6 par jour sur 4 fois plus d'histoire que
+    # l'horaire.
+    Flux("candles_4h.jsonl", HISTORY, "tools/backfill_candles_vaults.py",
+         "bougies 4 h récupérées après coup (833 jours, le pas intermédiaire : assez fin pour "
+         "placer une entrée horaire, assez profond pour quadrupler l'échantillon)", "candle",
+         CONSOMME, f"{ETUDE} --retrospectif --bougies 4h (horizons 24-96 h sur ~2,3 ans)"),
     Flux("copy_vault_trades_lane.jsonl", DATA, "tools/collecter_market_lane.py",
          "transactions publiques Hyperliquid", "trades_marche", DISPONIBLE, f"{LABO_PRINCIPAL} (signal de contexte)"),
     # ------------------------------------------------------------------ microstructure dense

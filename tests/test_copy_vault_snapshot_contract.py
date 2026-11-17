@@ -4,6 +4,7 @@ from copy import deepcopy
 import hashlib
 import json
 
+from hl_observer.backtesting.copy_vault_protocol import PAPER_EQUITY_USD
 from hl_observer.backtesting.copy_vault_snapshot_contract import (
     NOT_PROVEN,
     PROVEN,
@@ -44,7 +45,7 @@ def _snapshot() -> dict[str, object]:
             "campaign_config": {"family": "copy_vault", "schema": "v1"},
             "proposal_seed": 0,
             "temporal_windows": {"train_start_ms": 10, "train_end_ms": 20},
-            "paper_capital_usd": 200.0,
+            "paper_capital_usd": PAPER_EQUITY_USD,
             "global_trial_count": 7,
         },
         "trial_accounting": {
@@ -108,3 +109,34 @@ def test_empty_source_inventory_is_not_restorable() -> None:
 
     assert report["status"] == NOT_PROVEN
     assert "lineage.source_asset_inventory_count" in report["invalid"]
+
+
+def test_le_capital_exige_est_celui_que_le_LABO_ECRIT_et_non_200_USD() -> None:
+    """17/11/2026 — le contrat exigeait encore 200,0 USD, montant historique et inactif.
+
+    Le labo écrit `PAPER_CAPITAL_USD = PAPER_EQUITY_USD` (350,0 USD) dans chaque instantané de
+    restauration. Avec l'ancienne règle, tout instantané émis par le labo actuel était refusé par
+    son propre validateur, et ce fichier de test ne passait que parce que sa fixture portait 200.
+    """
+    from hl_observer.backtesting import copy_vault_local_lab
+
+    assert copy_vault_local_lab.PAPER_CAPITAL_USD == PAPER_EQUITY_USD, (
+        "le labo et le contrat doivent lire le capital paper a la MEME source")
+    snapshot = _snapshot()
+    snapshot["search"]["paper_capital_usd"] = copy_vault_local_lab.PAPER_CAPITAL_USD  # type: ignore[index]
+    assert verify_snapshot_contract(snapshot)["status"] == PROVEN
+
+
+def test_un_instantane_au_capital_HISTORIQUE_de_200_USD_est_refuse() -> None:
+    snapshot = _snapshot()
+    snapshot["search"]["paper_capital_usd"] = 200.0  # type: ignore[index]
+    receipt = verify_snapshot_contract(snapshot)
+    assert receipt["status"] == NOT_PROVEN
+    assert "search.paper_capital_usd" in json.dumps(receipt)
+
+
+def test_un_capital_BOOLEEN_n_est_pas_un_montant() -> None:
+    """`True == 1` en Python : un booléen ne doit jamais passer pour un capital."""
+    snapshot = _snapshot()
+    snapshot["search"]["paper_capital_usd"] = True  # type: ignore[index]
+    assert verify_snapshot_contract(snapshot)["status"] == NOT_PROVEN

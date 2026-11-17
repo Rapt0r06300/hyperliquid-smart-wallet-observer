@@ -58,6 +58,87 @@ def test_rejette_sha_altere(tmp_path):
     assert res["shards_rejetes"] == 1 and res["_fills"] == []
 
 
+def test_rejette_un_shard_sans_empreinte_dans_l_index(tmp_path):
+    rel = _ecrire_shard(tmp_path, "fills_forward", [
+        {"vault": "0x1", "coin": "ETH", "ts_ms": 1000, "source": "LIVE_POLL"}
+    ])
+    _index(tmp_path, [{"famille": "fills_forward", "shard": rel, "deposes": 1}])
+    res = _charger_tier_local(tmp_path)
+    assert res["shards_rejetes"] == 1
+    assert res["_fills"] == []
+    assert res["statut"] == "REJECTED"
+
+
+def test_rejette_un_shard_hors_du_coffre_meme_avec_un_sha_valide(tmp_path):
+    rel = "runtime/ailleurs/lot.jsonl.gz"
+    path = tmp_path / rel
+    path.parent.mkdir(parents=True)
+    with gzip.open(path, "wt", encoding="utf-8") as handle:
+        handle.write(json.dumps({"vault": "0x1", "coin": "ETH", "ts_ms": 1000}) + "\n")
+    _index(tmp_path, [{"famille": "fills_forward", "shard": rel, "sha256": _sha(tmp_path, rel)}])
+    result = _charger_tier_local(tmp_path)
+    assert result["shards_rejetes"] == 1 and result["_fills"] == []
+    assert result["statut"] == "REJECTED"
+
+
+def test_gzip_incomplet_ne_conserve_ni_fills_ni_signaux_partiels(tmp_path):
+    for famille, row in (
+        ("fills_forward", {"vault": "0x1", "coin": "ETH", "ts_ms": 1000}),
+        ("asset_ctx", {"coin": "ETH", "ts_ms": 1000}),
+    ):
+        rel = _ecrire_shard(tmp_path, famille, [row], nom=f"incomplet__{famille}")
+        path = tmp_path / rel
+        path.write_bytes(path.read_bytes()[:-8])  # footer gzip manquant, SHA de ces octets
+        _index(tmp_path, [{"famille": famille, "shard": rel, "sha256": _sha(tmp_path, rel)}])
+        result = _charger_tier_local(tmp_path, garder_signaux=True)
+        assert result["shards_rejetes"] == 1
+        assert result["_fills"] == [] and result["_signaux"] == {}
+        assert result["signaux_total"] == 0
+
+
+def test_json_invalide_rejette_le_shard_entier(tmp_path):
+    rel = _ecrire_shard(tmp_path, "fills_forward", [
+        {"vault": "0x1", "coin": "ETH", "ts_ms": 1000}
+    ])
+    with gzip.open(tmp_path / rel, "at", encoding="utf-8") as handle:
+        handle.write("{invalide\n")
+    _index(tmp_path, [{"famille": "fills_forward", "shard": rel, "sha256": _sha(tmp_path, rel)}])
+    result = _charger_tier_local(tmp_path)
+    assert result["shards_rejetes"] == 1 and result["_fills"] == []
+
+
+def test_couvre_les_horloges_reelles_de_toutes_les_familles_locales(tmp_path):
+    cas = {
+        "candle": {"coin": "ETH", "open_ts_ms": 1000, "close_ts_ms": 1999},
+        "position": {"coin": "ETH", "vault": "0x1", "received_at_ms": 2000},
+        "trades_marche": {"coin": "ETH", "exchange_ts_ms": 2500, "received_at_ms": 2600},
+        "asset_ctx": {"coin": "ETH", "ts_ms": 3000},
+        "explorer_tx": {"user": "0x1", "ts_ms": 4000},
+    }
+    entrees = []
+    for famille, row in cas.items():
+        rel = _ecrire_shard(tmp_path, famille, [row], nom=f"lot__{famille}")
+        entrees.append({"famille": famille, "shard": rel, "sha256": _sha(tmp_path, rel), "deposes": 1})
+    _index(tmp_path, entrees)
+    gardes = _charger_tier_local(tmp_path)
+    assert {famille: gardes["signaux_par_famille"][famille] for famille in (
+        "candle", "position", "trades_marche", "asset_ctx"
+    )} == {famille: 1 for famille in ("candle", "position", "trades_marche", "asset_ctx")}
+    assert all(len(gardes["_signaux"][famille]) == 1 for famille in (
+        "candle", "position", "trades_marche", "asset_ctx"
+    ))
+    assert gardes["familles_non_chargees"] == {"explorer_tx": {
+        "shards": 1, "lignes_declarees": 1,
+        "motif": "AUCUN_ADAPTATEUR_COPY_VAULT_DANS_LE_PONT_LOCAL",
+    }}
+    legers = _charger_tier_local(tmp_path, garder_signaux=False)
+    assert legers["signaux_par_famille"] == gardes["signaux_par_famille"]
+    assert legers["signaux_gardes_en_memoire"] is False
+    assert all(legers["_signaux"][famille] == [] for famille in (
+        "candle", "position", "trades_marche", "asset_ctx"
+    ))
+
+
 def test_absent_si_pas_de_coffre(tmp_path):
     assert _charger_tier_local(tmp_path)["statut"] == "ABSENT"
 
@@ -289,3 +370,118 @@ def test_les_flux_autrefois_gaches_sont_maintenant_charges_comme_signaux(tmp_pat
     # labo principal (garder_signaux=False) : comptés sans être gardés (aucun coût mémoire)
     legers = _charger_tier_local(tmp_path, garder_signaux=False)
     assert attendus <= set(legers["signaux_par_famille"]) and all(legers["_signaux"][f] == [] for f in attendus)
+
+
+# ─────────── 16/11 : trois gardes, parce qu'il n'y en avait AUCUNE ───────────
+def _fill(ts, i=0):
+    return {"vault": "0xabc", "coin": "ETH", "px": 2000.0, "sz": 1.0, "signe": 1,
+            "ts_ms": ts + i, "source": "LIVE_POLL", "isSnapshot": False,
+            "observed_at_ms": ts + i + 500}
+
+
+def test_le_pont_REFUSE_de_depasser_son_plafond_et_le_DIT(tmp_path):
+    """MESURE DU 16/11 : les familles de replay totalisent 59 832 338 lignes, soit ~13,9 Go de
+    dictionnaires Python — sur une machine de 31,9 Go dont 9 etaient libres, et SANS aucune garde.
+    Le pont chargeait, et la machine mourait. Une troncature silencieuse serait pire encore : on
+    mesurerait sur un echantillon inconnu.
+    """
+    base = 1_799_000_000_000
+    entrees = []
+    for lot in range(4):
+        rel = _ecrire_shard(tmp_path, "fills_forward",
+                            [_fill(base + lot * 1000, i) for i in range(5)], nom=f"lot{lot}")
+        entrees.append({"famille": "fills_forward", "shard": rel, "sha256": _sha(tmp_path, rel),
+                        "deposes": 5, "ts_min_ms": base + lot * 1000,
+                        "ts_max_ms": base + lot * 1000 + 5})
+    _index(tmp_path, entrees)
+
+    res = _charger_tier_local(tmp_path, max_lignes=7)
+    assert res["chargement_arrete"] == "PLAFOND_LIGNES"
+    assert res["shards_non_lus"] > 0, "les shards non lus doivent etre COMPTES"
+    assert res["plafond_lignes"] == 7
+    assert len(res["_fills"]) <= 10, "le plafond borne reellement ce qui est materialise"
+
+
+def test_un_shard_entierement_HORS_FENETRE_n_est_ni_hashe_ni_decompresse(tmp_path):
+    """Le reindexage du 16/11 a donne des bornes a tous les shards : on peut enfin les ecarter
+    sans les ouvrir. Un shard de 2025 n'a rien a faire dans l'etude d'une fenetre de 2026."""
+    vieux_base = 1_700_000_000_000
+    recent_base = 1_799_000_000_000
+    rel_vieux = _ecrire_shard(tmp_path, "fills_forward",
+                              [_fill(vieux_base, i) for i in range(3)], nom="vieux")
+    rel_recent = _ecrire_shard(tmp_path, "fills_forward",
+                               [_fill(recent_base, i) for i in range(3)], nom="recent")
+    _index(tmp_path, [
+        {"famille": "fills_forward", "shard": rel_vieux, "sha256": _sha(tmp_path, rel_vieux),
+         "deposes": 3, "ts_min_ms": vieux_base, "ts_max_ms": vieux_base + 3},
+        {"famille": "fills_forward", "shard": rel_recent, "sha256": _sha(tmp_path, rel_recent),
+         "deposes": 3, "ts_min_ms": recent_base, "ts_max_ms": recent_base + 3},
+    ])
+
+    res = _charger_tier_local(tmp_path, depuis_ms=recent_base - 1000)
+    assert res["shards_hors_fenetre"] == 1
+    assert res["fenetre_depuis_ms"] == recent_base - 1000
+    assert len(res["_fills"]) == 3, "seul le shard de la fenetre doit etre materialise"
+
+
+def test_une_memoire_CRITIQUE_arrete_le_chargement_au_lieu_de_tuer_la_machine(tmp_path, monkeypatch):
+    """« On ralentit ou on retrecit, on ne crashe JAMAIS. » Le pont n'avait aucun gouverneur."""
+    from hl_observer.ops import budget_ram as BR
+
+    base = 1_799_000_000_000
+    entrees = []
+    for lot in range(3):
+        rel = _ecrire_shard(tmp_path, "fills_forward",
+                            [_fill(base + lot * 1000, i) for i in range(2)], nom=f"m{lot}")
+        entrees.append({"famille": "fills_forward", "shard": rel, "sha256": _sha(tmp_path, rel),
+                        "deposes": 2})
+    _index(tmp_path, entrees)
+
+    monkeypatch.setattr(BR, "decision", lambda **kw: {"action": BR.PAUSER, "raison": "test"})
+    res = _charger_tier_local(tmp_path)
+    assert res["chargement_arrete"] == "MEMOIRE_CRITIQUE"
+    assert res["_fills"] == [], "rien ne doit etre materialise quand la memoire est deja critique"
+
+
+def test_sans_garde_declenchee_le_comportement_est_INCHANGE(tmp_path):
+    """Les gardes ne doivent rien changer tant qu'elles ne mordent pas."""
+    base = 1_799_000_000_000
+    rel = _ecrire_shard(tmp_path, "fills_forward", [_fill(base, i) for i in range(3)])
+    _index(tmp_path, [{"famille": "fills_forward", "shard": rel, "sha256": _sha(tmp_path, rel),
+                       "deposes": 3}])
+    res = _charger_tier_local(tmp_path)
+    assert res["chargement_arrete"] is None
+    assert res["shards_hors_fenetre"] == 0 and res["shards_non_lus"] == 0
+    assert len(res["_fills"]) == 3
+
+
+def test_une_FENETRE_FERMEE_permet_de_conduire_le_pont_galerie_par_galerie(tmp_path):
+    """Sans borne haute, une fenêtre n'avait pas de fin — donc aucun parcours par galeries.
+
+    C'est ce qui empêchait d'exploiter les 162 286 723 lignes du coffre autrement qu'en une seule
+    charge tronquée à 8 M lignes : `plan_de_fouille` découpe le temps en galeries, et une galerie
+    est une fenêtre FERMÉE. Le pont doit pouvoir refuser les deux côtés.
+    """
+    base = 1_799_000_000_000
+    entrees = []
+    for lot in range(3):
+        rel = _ecrire_shard(tmp_path, "fills_forward",
+                            [_fill(base + lot * 10_000, i) for i in range(2)], nom=f"g{lot}")
+        entrees.append({"famille": "fills_forward", "shard": rel, "sha256": _sha(tmp_path, rel),
+                        "deposes": 2, "ts_min_ms": base + lot * 10_000,
+                        "ts_max_ms": base + lot * 10_000 + 5})
+    _index(tmp_path, entrees)
+
+    milieu = _charger_tier_local(tmp_path, depuis_ms=base + 10_000, jusqu_ms=base + 10_006)
+    assert milieu["fenetre_depuis_ms"] == base + 10_000
+    assert milieu["fenetre_jusqu_ms"] == base + 10_006
+    assert milieu["shards_hors_fenetre"] == 2, "le shard d'avant ET celui d'apres sont ecartes"
+    assert len(milieu["_fills"]) == 2, "seule la galerie demandee est materialisee"
+
+    # la somme des galeries doit rendre EXACTEMENT le corpus : ni ligne perdue, ni ligne doublee
+    total = 0
+    for lot in range(3):
+        bout = _charger_tier_local(tmp_path, depuis_ms=base + lot * 10_000,
+                                   jusqu_ms=base + lot * 10_000 + 9_999)
+        total += len(bout["_fills"])
+    assert total == len(_charger_tier_local(tmp_path)["_fills"]) == 6

@@ -11,11 +11,13 @@ import math
 import re
 from collections import Counter
 from collections.abc import Iterable, Mapping
-from decimal import ROUND_FLOOR, Decimal
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 from hl_observer.backtesting.copy_vault_book_index import oublier_les_index
+from hl_observer.collection import copy_vault_gap_windows as GAPS
+from hl_observer.collection import copy_vault_reference_binding as LIAISON
 from hl_observer.backtesting.copy_vault_protocol import (
     CHECKPOINT_COLLECTOR_PROTOCOL,
     CHECKPOINT_WRITER_STATE_SCHEMA,
@@ -23,7 +25,12 @@ from hl_observer.backtesting.copy_vault_protocol import (
     canonical_copy_vault_coin,
 )
 from hl_observer.normalization.l2_book import validate_l2_book_sides
-from hl_observer.paper_trading.execution_truth import MAX_SUPPORTED_EPOCH_MS
+from hl_observer.backtesting.copy_vault_epoch_parsing import (
+    _epoch_seconds_to_ms,
+    _exact_non_negative_int,
+    _optional_epoch_ms,
+    _required_epoch_ms,
+)
 
 # Keep this import-free from copy_vault_executable: that module re-exports this
 # loader, so importing it here creates a circular import in a cold interpreter.
@@ -32,46 +39,6 @@ MAX_TARGET_LAG_MS = 30_000
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 CHECKPOINT_INTEGRITY_SCHEMA = "hypersmart.copy_vault_checkpoint_integrity.v1"
 CHECKPOINT_STATE_RELPATH = "runtime/data/copy_vault_checkpoint_tail_state.json"
-
-
-def _epoch_seconds_to_ms(value: object) -> int:
-    """Convert a numeric UTC epoch-seconds value without rounding forward."""
-
-    if type(value) is int:
-        seconds = Decimal(value)
-    elif isinstance(value, Decimal):
-        seconds = value
-    else:
-        raise ValueError("epoch seconds must be a JSON number")
-    milliseconds = seconds * 1_000
-    if (
-        not milliseconds.is_finite()
-        or milliseconds <= 0
-        or milliseconds > MAX_SUPPORTED_EPOCH_MS
-    ):
-        raise ValueError("epoch seconds outside supported UTC range")
-    timestamp_ms = int(milliseconds.to_integral_value(rounding=ROUND_FLOOR))
-    if timestamp_ms <= 0:
-        raise ValueError("epoch seconds below millisecond resolution")
-    return timestamp_ms
-
-
-def _required_epoch_ms(value: object, name: str) -> int:
-    if type(value) is not int or not 0 < value <= MAX_SUPPORTED_EPOCH_MS:
-        raise ValueError(f"{name} must be a supported integer epoch millisecond")
-    return value
-
-
-def _exact_non_negative_int(value: object) -> int | None:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        return None
-    return value
-
-
-def _optional_epoch_ms(value: object) -> int:
-    if type(value) is int and 0 <= value <= MAX_SUPPORTED_EPOCH_MS:
-        return value
-    return 0
 
 
 def _validated_recorded_levels(
@@ -155,8 +122,19 @@ def load_observed_books(
         and writer_run_id
         and clean_epoch_ms > 0
         and output_start_offset >= 0
-        and collector_gap_count == 0
     )
+    # Segmentation des trous : voir `GAPS.segmenter_l_epoque` (un trou non situe ferme l'epoque).
+    intervalles_surs, raison_segmentation, clean_epoch_receipt_valid, etat_ecrivain_ms = (
+        GAPS.segmenter_l_epoque(checkpoint_state, recu_valide=clean_epoch_receipt_valid))
+    # Une ligne recue APRES la derniere ecriture d'etat n'est pas encore couverte par une preuve
+    # de trou : elle attend la prochaine ecriture. On ne certifie pas sur une ignorance.
+    rows_inside_gap_window = 0
+    # 16/11/2026 — VERIFICATION DU LIEN DE REFERENCE (chantier 2). L'ecrivain lie au metaordre un
+    # carnet deja recu avant le signal, avec source, offset et SHA-256 de la ligne exacte. Ici on
+    # REVERIFIE ce lien : une ligne dont les octets ne correspondent plus est refusee, et un ruban
+    # qui a tourne rend le lien INVERIFIABLE — donc exploratoire, jamais preuve.
+    binding_counts: Counter[str] = Counter()
+    _lire_ligne_source = LIAISON.LecteurBorne(resolved_root)
     wanted = {canonical_copy_vault_coin(coin) for coin in coins} if coins is not None else None
     by_coin: dict[str, list[dict[str, Any]]] = {}
     invalid = 0
@@ -401,18 +379,41 @@ def load_observed_books(
                     checkpoint_metaorders.setdefault(checkpoint_id, set()).add(metaorder_id)
                     row_writer_run_id = str(raw.get("writer_run_id") or "").strip()
                     row_clean_epoch_ms = _optional_epoch_ms(raw.get("clean_epoch_ms"))
-                    if (
+                    liaison_brute = raw.get("reference_binding")
+                    if isinstance(liaison_brute, Mapping):
+                        statut_liaison, motif_liaison = LIAISON.verifier_liaison(
+                            liaison_brute, lire=_lire_ligne_source)
+                        binding_counts[statut_liaison] += 1
+                        if statut_liaison == LIAISON.DIVERGENTE:
+                            # Les octets lies ne sont plus ceux qu'on a observes : ce n'est pas une
+                            # preuve absente, c'est une preuve FAUSSE. On refuse la ligne entiere.
+                            l2_rejection_reasons["REFERENCE_BINDING_" + motif_liaison] += 1
+                            continue
+                    else:
+                        statut_liaison = None
+                    dans_une_epoque_propre = (
                         clean_epoch_receipt_valid
                         and row_writer_run_id == writer_run_id
                         and row_clean_epoch_ms == clean_epoch_ms
                         and received >= clean_epoch_ms
-                    ):
+                        # Un lien present mais INVERIFIABLE (ruban tourne, archive) ne peut pas
+                        # soutenir une preuve : la ligne reste exploratoire.
+                        and statut_liaison in (None, LIAISON.VERIFIEE)
+                    )
+                    if dans_une_epoque_propre and not GAPS.est_sur(received, intervalles_surs):
+                        # L'epoque est bonne, mais CETTE ligne est tombee dans une fenetre de trou
+                        # (ou apres la derniere preuve ecrite) : elle reste exploitable en
+                        # exploratoire, jamais en preuve.
+                        rows_inside_gap_window += 1
+                        dans_une_epoque_propre = False
+                    if dans_une_epoque_propre:
                         clean_checkpoint_counts[checkpoint_id] += 1
                         clean_checkpoint_metaorders.setdefault(checkpoint_id, set()).add(
                             metaorder_id
                         )
                 except (KeyError, TypeError, ValueError, OverflowError, json.JSONDecodeError):
                     continue
+        _lire_ligne_source.fermer()
         duplicated_ids = {
             checkpoint_id
             for checkpoint_id, count in checkpoint_counts.items()
@@ -723,6 +724,12 @@ def load_observed_books(
             "clean_epoch_ms": clean_epoch_ms or None,
             "output_start_offset": output_start_offset if output_start_offset >= 0 else None,
             "collector_gap_count": collector_gap_count,
+            "gap_segmentation_reason": raison_segmentation,
+            "safe_interval_count": len(intervalles_surs),
+            "safe_coverage_ms": GAPS.couverture_ms(intervalles_surs),
+            "epoch_span_ms": max(0, etat_ecrivain_ms - clean_epoch_ms) if clean_epoch_ms else 0,
+            "rows_inside_gap_window": rows_inside_gap_window,
+            "reference_binding_counts": dict(sorted(binding_counts.items())),
             "checkpoint_rows": sum(clean_checkpoint_counts.values()),
             "duplicate_checkpoint_ids": len(clean_duplicated_ids),
             "quarantined_checkpoint_metaorders": len(clean_quarantined_metaorders),

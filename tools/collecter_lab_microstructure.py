@@ -127,25 +127,106 @@ def ecrire_micro(root: Path, flux: str, lignes: list[dict], *, seqs: dict | None
     return n
 
 
-def _heartbeat_micro(root: Path, coins, cpt: dict, seqs: dict | None = None) -> None:  # pragma: no cover
+#: Cadence du battement CANONIQUE. `preuve_de_vie.SEUIL_HEARTBEAT_MS` juge figé tout battement de
+#: plus de 60 s : on bat trois fois plus souvent, pour qu'une passe un peu lente ne fasse jamais
+#: passer un collecteur sain pour mort.
+BATTEMENT_CANONIQUE_S = 20.0
+#: Les reconnexions sont comptées SUR UNE FENÊTRE, pas depuis le début. `preuve_de_vie` déclare
+#: « reconnexions excessives » au-delà de 20 : un cumul à vie dépasse 20 en quelques jours de
+#: campagne, et l'indicateur SATURE — il dirait « excessif » pour toujours, donc plus rien du tout.
+#: Un taux horaire, lui, distingue une campagne saine d'une vraie tempête de quota.
+FENETRE_RECONNEXIONS_S = 3600.0
+
+
+def reconnexions_recentes(horodatages, *, maintenant: float,
+                          fenetre_s: float = FENETRE_RECONNEXIONS_S) -> int:
+    """Combien de reconnexions dans la dernière `fenetre_s`. PUR, donc testable sans réseau."""
+    limite = float(maintenant) - max(0.0, float(fenetre_s))
+    total = 0
+    for t in (horodatages or ()):
+        try:
+            if float(t) >= limite:
+                total += 1
+        except (TypeError, ValueError):
+            continue                      # un horodatage illisible ne doit pas faire mentir le compte
+    return total
+
+
+def _heartbeat_micro(root: Path, coins, cpt: dict, seqs: dict | None = None,
+                     hb_mod=None) -> None:  # pragma: no cover
     """Heartbeat ENRICHI (LOT12) : ACK reçus, couverture par coin/flux, messages/s, gaps, reconnexions,
-    schema_version. Sert de preuve de santé du flux dense."""
+    schema_version. Sert de preuve de santé du flux dense.
+
+    15/11/2026 — LE BATTEMENT CANONIQUE NE BATTAIT QU'UNE FOIS, AU DÉMARRAGE.
+    Ce collecteur écrivait fidèlement SON fichier (`micro_heartbeat.json`) dans la boucle, mais il
+    n'appelait `heartbeat_collecteur.battre()` **qu'une seule fois, avant d'ouvrir le WebSocket**.
+    Or c'est ce battement-là — `runtime/research_lab/heartbeats/lab-microstructure.json` — que lit
+    `ops/preuve_de_vie`, la preuve de vie officielle du projet.
+
+    Constat du 15/11 : battement canonique vieux de **31 heures** pendant que les trois rubans
+    `micro_*.jsonl` s'écrivaient à la seconde. La preuve de vie déclarait donc « heartbeat figé »
+    sur un collecteur parfaitement sain — et rien ne permettait de distinguer ce faux mort d'un
+    vrai. **Deux fichiers de santé dont un seul est tenu à jour est pire qu'un seul** : le tableau
+    de bord dit « vivant », la preuve de vie dit « figé », et on ne sait plus lequel croire.
+
+    Les deux battements partent désormais du MÊME endroit : un seul chemin de code, rien à oublier.
+    """
     seqs = seqs or {}
     elapsed = max(1.0, time.monotonic() - cpt.get("t0", time.monotonic()))
     couv = sorted({k for k in seqs if not str(k).startswith("_")})
+    maintenant = time.time()
+    recos = reconnexions_recentes(cpt.get("reco_ts"), maintenant=maintenant)
     try:
         (ISO.lab_root(root) / "micro_heartbeat.json").write_text(
-            json.dumps({"ts_wall_ms": int(time.time() * 1000), "ts_mono_ns": time.monotonic_ns(),
+            json.dumps({"ts_wall_ms": int(maintenant * 1000), "ts_mono_ns": time.monotonic_ns(),
                         "schema_version": 2, "coins": len(coins), "couverture_coins": len(couv),
                         "ack": cpt.get("ack", 0), "reconnexions": cpt.get("reco", 0),
+                        "reconnexions_1h": recos, "ecrites": cpt.get("ecrites", 0),
                         "messages": cpt.get("msgs", 0), "messages_par_s": round(cpt.get("msgs", 0) / elapsed, 2),
                         "gaps": seqs.get("_gaps", 0)}, ensure_ascii=False),
             encoding="utf-8")
-    except OSError:
-        pass
+    except OSError as exc:
+        # Un battement qui échoue EN SILENCE est précisément le défaut qu'on répare ici.
+        print("[micro] heartbeat local non ecrit (%s)" % str(exc)[:60], flush=True)
+
+    if hb_mod is None or (maintenant - float(cpt.get("hb_canon_ts") or 0.0)) < BATTEMENT_CANONIQUE_S:
+        return
+    # `n_ecrites` est un DELTA : `preuve_de_vie` exige que le cumul PROGRESSE (contrôle « flux ne
+    # grossit pas »). Lui passer 0 ferait échouer ce contrôle malgré un battement tout frais.
+    delta = max(0, int(cpt.get("ecrites", 0)) - int(cpt.get("ecrites_battues", 0)))
+    try:
+        hb_mod.battre(root, "lab-microstructure", n_ecrites=delta,
+                      dernier_exchange_ts=cpt.get("ts_ex"),
+                      souscription_ack=bool(cpt.get("ack", 0)),
+                      protocol="hl_ws_public",
+                      note="WS dense %d coins | %d msg/s | %d gaps" % (
+                          len(coins), round(cpt.get("msgs", 0) / elapsed), seqs.get("_gaps", 0)),
+                      metriques={"reconnects": recos})
+    except Exception as exc:  # noqa: BLE001 — un battement raté ne doit JAMAIS tuer la collecte
+        print("[micro] battement canonique rate (%s)" % str(exc)[:60], flush=True)
+        return
+    cpt["hb_canon_ts"] = maintenant
+    cpt["ecrites_battues"] = int(cpt.get("ecrites", 0))
 
 
-async def _une_connexion(root: Path, coins: list[str], seqs: dict, cpt: dict):  # pragma: no cover
+def _noter_ecritures(cpt: dict, lignes: list[dict], ecrites: int) -> None:
+    """Compte ce qui a été écrit ET retient le dernier horodatage EXCHANGE vu.
+
+    Les deux servent au battement canonique : `preuve_de_vie` refuse un battement sans écriture qui
+    progresse (« flux ne grossit pas ») et sans horodatage d'exchange (« horodatages manquants »).
+    Sans ce comptage, le battement serait frais et pourtant jugé malsain — on aurait déplacé le
+    faux négatif au lieu de le corriger.
+    """
+    cpt["ecrites"] = int(cpt.get("ecrites", 0)) + int(ecrites)
+    for ligne in reversed(lignes or ()):
+        ts = ligne.get("ts_ex")
+        if ts is not None:
+            cpt["ts_ex"] = ts
+            return
+
+
+async def _une_connexion(root: Path, coins: list[str], seqs: dict, cpt: dict,
+                         hb_mod=None):  # pragma: no cover
     import asyncio
     import websockets
     async with websockets.connect(WS_URL, ping_interval=30, ping_timeout=30, max_size=None,
@@ -156,7 +237,7 @@ async def _une_connexion(root: Path, coins: list[str], seqs: dict, cpt: dict):  
             for typ in ("l2Book", "trades", "bbo"):
                 await ws.send(json.dumps({"method": "subscribe", "subscription": {"type": typ, "coin": c}}))
                 await asyncio.sleep(0.06)
-        _heartbeat_micro(root, coins, cpt, seqs)
+        _heartbeat_micro(root, coins, cpt, seqs, hb_mod)
         async for brut in ws:
             try:
                 msg = json.loads(brut)
@@ -166,33 +247,40 @@ async def _une_connexion(root: Path, coins: list[str], seqs: dict, cpt: dict):  
             if ch == "l2Book":
                 r = parser_l2book(msg)
                 if r:
-                    ecrire_micro(root, "l2book", [r], seqs=seqs)
+                    _noter_ecritures(cpt, [r], ecrire_micro(root, "l2book", [r], seqs=seqs))
             elif ch == "trades":
-                ecrire_micro(root, "trades", parser_trades(msg), seqs=seqs)
+                lignes = parser_trades(msg)
+                _noter_ecritures(cpt, lignes, ecrire_micro(root, "trades", lignes, seqs=seqs))
             elif ch == "bbo":
                 r = parser_bbo(msg)
                 if r:
-                    ecrire_micro(root, "bbo", [r], seqs=seqs)
+                    _noter_ecritures(cpt, [r], ecrire_micro(root, "bbo", [r], seqs=seqs))
             elif ch in ("subscriptionResponse", "post"):     # ACK d'abonnement HL
                 cpt["ack"] = cpt.get("ack", 0) + 1
             cpt["msgs"] += 1
-            if cpt["msgs"] % 200 == 0:
-                _heartbeat_micro(root, coins, cpt, seqs)
+            # Le battement est désormais cadencé par le TEMPS, plus par le nombre de messages : un
+            # marché calme (moins de 200 messages en 60 s) faisait expirer le battement sur un
+            # collecteur parfaitement connecté. `_heartbeat_micro` décide seul s'il est l'heure.
+            if cpt["msgs"] % 50 == 0:
+                _heartbeat_micro(root, coins, cpt, seqs, hb_mod)
 
 
-async def _boucle_ws(root: Path, coins: list[str]):  # pragma: no cover (réseau, tourne sur Windows)
+async def _boucle_ws(root: Path, coins: list[str], hb_mod=None):  # pragma: no cover (réseau, tourne sur Windows)
     """RECONNEXION robuste : si la connexion tombe (HL ferme, ping timeout), on RECONNECTE après un backoff
     borné — on ne meurt JAMAIS sur une déconnexion (exigence live de Flo). Chaque reconnexion est comptée."""
     import asyncio
     seqs: dict = {}
-    cpt = {"reco": 0, "msgs": 0, "ack": 0, "t0": time.monotonic()}
+    cpt = {"reco": 0, "msgs": 0, "ack": 0, "ecrites": 0, "reco_ts": [], "t0": time.monotonic()}
     while True:
         try:
-            await _une_connexion(root, coins, seqs, cpt)
+            await _une_connexion(root, coins, seqs, cpt, hb_mod)
         except Exception as e:  # noqa: BLE001 (déconnexion/erreur -> on reconnecte, on ne tombe pas)
             print("[micro] deconnexion (%s) -> reconnexion" % str(e)[:80], flush=True)
         cpt["reco"] += 1
-        _heartbeat_micro(root, coins, cpt, seqs)
+        # On garde l'INSTANT de chaque reconnexion, borné : c'est ce qui permet d'en publier un taux
+        # horaire plutôt qu'un cumul à vie qui sature l'indicateur.
+        cpt["reco_ts"] = ([*cpt.get("reco_ts", []), time.time()])[-200:]
+        _heartbeat_micro(root, coins, cpt, seqs, hb_mod)
         await asyncio.sleep(min(2.0 + cpt["reco"], 15.0))
 
 
@@ -246,9 +334,14 @@ def main(argv=None) -> int:
     if HB is not None:
         HB.battre(root, "lab-microstructure", note="connexion WS %d coins" % len(coins))
     print("[micro] connexion HL WS, %d coins: %s" % (len(coins), ",".join(coins)), flush=True)
+    if HB is None:
+        # Sans le module de battement, la preuve de vie officielle restera muette sur ce collecteur.
+        # On le DIT : un angle mort annoncé vaut mieux qu'un angle mort découvert 31 h plus tard.
+        print("[micro] ATTENTION : heartbeat_collecteur introuvable -> aucun battement canonique, "
+              "la preuve de vie jugera ce collecteur fige", flush=True)
     try:
         import asyncio
-        asyncio.run(_boucle_ws(root, coins))
+        asyncio.run(_boucle_ws(root, coins, HB))
     except KeyboardInterrupt:
         print("[micro] arret manuel", flush=True)
     return 0

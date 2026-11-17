@@ -65,12 +65,26 @@ def test_latest_mid_prices_and_snapshot_merge() -> None:
         SimpleNamespace(exchange_ts=100, id=1, raw_json={"prices": {"BTC": 100}}, source="old"),
         SimpleNamespace(exchange_ts=200, id=2, raw_json={"prices": {"BTC": 101, "ETH": 50}}, source="new"),
     ]
-    marks = status._latest_market_marks_from_snapshots(snapshots)
+    marks = status._latest_market_marks_from_snapshots(snapshots, current_ms=200)
     assert marks["prices"] == {"BTC": 101.0, "ETH": 50.0}
     assert marks["sources"] == {"BTC": "new", "ETH": "new"}
     assert marks["latest_exchange_ts"] == 200
+    assert marks["timestamps"] == {"BTC": 200, "ETH": 200}
     assert marks["read_status"] == "OK"
-    assert status._latest_market_marks_from_snapshots([])["read_status"] == "NO_USABLE_MARK"
+    assert status._latest_market_marks_from_snapshots([], current_ms=200)["read_status"] == "NO_USABLE_MARK"
+
+
+def test_snapshot_marks_keep_per_coin_time_and_refuse_stale_or_future_quotes() -> None:
+    current = 1_000_000
+    snapshots = [
+        SimpleNamespace(exchange_ts=current, id=4, raw_json={"BTC": "100"}, source="recent"),
+        SimpleNamespace(exchange_ts=current - 3_000, id=3, raw_json={"ETH": "50"}, source="older"),
+        SimpleNamespace(exchange_ts=current - status.LIVE_MARKS_MAX_STALE_MS - 1, id=2, raw_json={"SOL": "20"}, source="stale"),
+        SimpleNamespace(exchange_ts=current + 1, id=5, raw_json={"AVAX": "30"}, source="future"),
+    ]
+    marks = status._latest_market_marks_from_snapshots(snapshots, current_ms=current)
+    assert marks["prices"] == {"BTC": 100.0, "ETH": 50.0}
+    assert marks["timestamps"] == {"BTC": current, "ETH": current - 3_000}
 
 
 def test_empty_merge_and_live_mark_projection() -> None:

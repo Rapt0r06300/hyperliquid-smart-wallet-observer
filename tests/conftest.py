@@ -233,3 +233,28 @@ def isole_la_porte_unique_de_l_edge(
     vider_le_cache()
     yield
     vider_le_cache()
+
+# ───────── 17/11/2026 : AUCUN TEST NE LAISSE `subprocess` REMPLACÉ DERRIÈRE LUI ─────────
+# Voir `tests/garde_sous_processus.py` pour le défaut mesuré (7 échecs sans rapport apparent, et
+# un nombre inconnu de faux verts). Le contrôle se fait APRÈS la fin des fixtures du test — donc
+# après que `monkeypatch` a défait ses remplacements légitimes — et seulement à la FRONTIÈRE d'un
+# module, pour qu'une fixture de portée module puisse garder son remplacement le temps du module.
+from tests import garde_sous_processus as _garde_sous_processus  # noqa: E402
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_teardown(item, nextitem):
+    resultat = yield
+    if nextitem is not None and getattr(nextitem, "module", None) is getattr(item, "module", None):
+        return resultat
+    fuites = _garde_sous_processus.fuites_et_restauration()
+    if fuites:
+        pytest.fail(
+            "FUITE D'ETAT GLOBAL : ce module de test a laisse remplace(s) "
+            + ", ".join("subprocess." + nom for nom in fuites)
+            + ". Les fonctions reelles ont ete restaurees. Utilise `monkeypatch.setattr` : une "
+            "affectation directe remplace subprocess pour TOUT le processus, et les tests "
+            "suivants recoivent de faux succes.",
+            pytrace=False,
+        )
+    return resultat

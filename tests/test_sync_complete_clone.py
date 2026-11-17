@@ -25,8 +25,16 @@ def _module():
     return module
 
 
-def _stub_main(monkeypatch, module, root, *, dirty=False, origin=None):
+def _stub_main(monkeypatch, module, root, *, dirty=False, origin=None, local_head=None):
+    """Double de git. ``local_head`` : SHA de HEAD AVANT la fusion (défaut = déjà à jour).
+
+    13/11/2026 — `synchronize_main` ne lance plus `merge --ff-only` quand HEAD vaut déjà
+    `origin/main` (le dépôt suit 1 937 328 fichiers : toute commande qui touche l'index de 332 Mo
+    le relit et le réécrit). Le double doit donc pouvoir représenter un HEAD EN RETARD, sinon la
+    fusion n'a jamais lieu et les tests qui la vérifient ne testent plus rien.
+    """
     calls = []
+    etat = {"head": local_head or "b" * 40}
     current_origin = origin or (
         "https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git"
     )
@@ -44,6 +52,10 @@ def _stub_main(monkeypatch, module, root, *, dirty=False, origin=None):
         calls.append(args)
         if args not in responses:
             raise AssertionError(f"unexpected git command {args}")
+        if args == ("rev-parse", "HEAD"):
+            return etat["head"]
+        if args[0] == "merge":
+            etat["head"] = "b" * 40          # l'avance rapide amène HEAD sur origin/main
         return responses[args]
 
     monkeypatch.setattr(module, "_git", command)
@@ -59,12 +71,28 @@ def _stub_main(monkeypatch, module, root, *, dirty=False, origin=None):
 def test_clean_local_main_fetches_then_fast_forwards_without_reset(monkeypatch, tmp_path):
     module = _module()
     root = tmp_path.resolve()
-    calls = _stub_main(monkeypatch, module, root)
+    calls = _stub_main(monkeypatch, module, root, local_head="a" * 40)     # HEAD en retard
     assert module.synchronize_main(root) == "b" * 40
     assert calls.index(("fetch", "--no-tags", "origin", "main")) < calls.index(
         ("merge", "--ff-only", "refs/remotes/origin/main")
     )
     assert not any("reset" in args or "rebase" in args or "stash" in args for args in calls)
+
+
+def test_main_deja_a_jour_ne_lance_AUCUNE_fusion(monkeypatch, tmp_path):
+    """Le raccourci mesuré du 13/11 : HEAD == origin/main => on vérifie, on ne touche pas l'index.
+
+    `rev-parse` ne lit pas l'index ; `merge --ff-only`, si. Sur ce dépôt, la fusion à vide coûtait
+    des dizaines de secondes et entrait en concurrence disque avec les collecteurs. Ce test
+    empêche qu'elle revienne — et vérifie que le contrôle d'identité, lui, a toujours lieu.
+    """
+    module = _module()
+    root = tmp_path.resolve()
+    calls = _stub_main(monkeypatch, module, root)                           # déjà à jour
+    assert module.synchronize_main(root) == "b" * 40
+    assert ("fetch", "--no-tags", "origin", "main") in calls, "on verifie toujours le distant"
+    assert not any(args[0] == "merge" for args in calls)
+    assert ("rev-parse", "refs/remotes/origin/main") in calls
 
 
 def test_dirty_tracked_files_abort_before_fetch(monkeypatch, tmp_path):
@@ -108,7 +136,9 @@ def test_skip_update_keeps_head_and_avoids_network(monkeypatch, tmp_path):
 
 def test_non_fast_forward_fails_without_altering_local_history(monkeypatch, tmp_path):
     module = _module()
-    calls = _stub_main(monkeypatch, module, tmp_path.resolve())
+    # HEAD en retard : sans cela la fusion n'est plus tentée (raccourci du 13/11) et ce test,
+    # qui vérifie le refus d'une avance non rapide, ne vérifiait plus rien.
+    calls = _stub_main(monkeypatch, module, tmp_path.resolve(), local_head="a" * 40)
     original_git = module._git
 
     def git(root, *args):

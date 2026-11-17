@@ -1463,8 +1463,18 @@ def test_dry_run_preview_diff_runs_without_a_failing_git_command(repos, capsys):
     sortie = capsys.readouterr().out
     assert rc == 0 and receipt["status"] == "DRY_RUN_ONLY" and receipt["mutations"] == []
     assert "[ECHEC] Comparer les fichiers suivis par Git" not in sortie
-    assert "Comparer les fichiers suivis par Git | code=0" in sortie
+    # 17/11/2026 — ce test lisait la CONSOLE (`... | code=0`). Le terminal est désormais COMPACT
+    # par défaut : une commande rapide et réussie n'y est plus affichée, et l'assertion rougissait
+    # alors que la régression gardée (un `git diff` à option inconnue, code 129) n'était pas là.
+    # La preuve durable est dans le REÇU, qui enregistre chaque commande avec son code : on y
+    # exige qu'une comparaison ait réellement eu lieu ET qu'aucune n'ait échoué.
+    comparaisons = [c for c in receipt["git_commands"]
+                    if c["operation"] == "Comparer les fichiers suivis par Git"]
+    assert comparaisons, "l'apercu doit avoir reellement lance une comparaison"
+    assert all(c["exit_code"] == 0 for c in comparaisons), comparaisons
     assert receipt["proposed_commit_message"]
+    # ... et le message proposé lit le contenu RÉEL : il nomme le fichier suivi modifié.
+    assert "suivi" in receipt["proposed_commit_message"]
     assert git(local, "rev-parse", "HEAD") == tete and git(origin, "rev-parse", "main") == tete
     assert git(local, "diff", "--cached", "--name-only") == ""
 

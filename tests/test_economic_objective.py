@@ -176,6 +176,49 @@ def test_objectif_strict_atteint_avec_preuve_complete():
     assert result["objective_status"] == "ATTEINT"
     assert result["proof_net_pnl_usd"] == 8.6
     assert result["eligible_net_pnl_usd"] == 8.6
+    # The synthetic daily report has no exact total/trade reconciliation, so
+    # it cannot establish the daily reference even though its flag says True.
+    assert result["reference_target_reached"] is False
+
+
+def test_daily_reference_requires_exact_pooled_reconciliation() -> None:
+    daily = {
+        **_proof()["daily_evidence"],
+        "eligible_trade_count": 4,
+        "excluded_incomplete_trade_count": 0,
+        "total_net_pnl_usd_exact_decimal": "10.6",
+    }
+    result = evaluate_objective(_proof(
+        gross_pnl_usd=11.5,
+        net_pnl_usd=10.6,
+        oos=_segment(
+            gross=5.8, net=5.3, count=2, trade_hash="b", fees=0.2,
+            no_lookahead=True,
+        ),
+        forward=_segment(
+            gross=5.7, net=5.3, count=2, trade_hash="c",
+            post_freeze=True,
+        ),
+        daily_evidence=daily,
+    ))
+    assert result["objective_status"] == "ATTEINT"
+    assert result["reference_target_reached"] is True
+
+    daily["total_net_pnl_usd_exact_decimal"] = "11.6"
+    inconsistent = evaluate_objective(_proof(
+        gross_pnl_usd=11.5,
+        net_pnl_usd=10.6,
+        oos=_segment(
+            gross=5.8, net=5.3, count=2, trade_hash="b", fees=0.2,
+            no_lookahead=True,
+        ),
+        forward=_segment(
+            gross=5.7, net=5.3, count=2, trade_hash="c",
+            post_freeze=True,
+        ),
+        daily_evidence=daily,
+    ))
+    assert inconsistent["reference_target_reached"] is False
 
 
 def test_copy_refuse_heldout_absent_trop_petit_ou_negatif():
@@ -486,7 +529,7 @@ def test_daily_net_report_keeps_exact_values_in_strict_stable_json() -> None:
     assert encoded == json.dumps(report, sort_keys=True, allow_nan=False)
 
 
-def test_daily_target_is_a_strict_per_family_gate() -> None:
+def test_daily_target_is_reported_separately_from_proof_gate() -> None:
     below = evaluate_objective(
         _proof(
             daily_evidence={
@@ -496,11 +539,31 @@ def test_daily_target_is_a_strict_per_family_gate() -> None:
             }
         )
     )
-    assert below["objective_status"] == "NON_ATTEINT"
+    # 16/11/2026 — le repere est « +5 USD PAR JOUR » : un total de 8,60 USD dont un jour a
+    # 3,99 USD ne l'atteint pas. La SEPARATION que ce test defend est intacte (le net reste
+    # eligible et le motif est publie) ; seul le libelle cesse de mentir.
+    assert below["objective_status"] != "ATTEINT"
+    assert below["objective_status"] == "POSITIF_SOUS_REPERE"
+    assert below["eligible_net_pnl_usd"] is not None
+    assert below["reference_target_reached"] is False
     assert "DAILY_NET_TARGET_NOT_REACHED" in below["objective_reasons"]
 
     missing = evaluate_objective(_proof(daily_evidence=None))
     assert "DAILY_NET_PROOF_MISSING" in missing["objective_reasons"]
+    assert missing["objective_status"] == "NON_ATTEINT"
+
+
+def test_invalid_daily_evidence_remains_a_blocking_quality_failure() -> None:
+    invalid = evaluate_objective(
+        _proof(daily_evidence={
+            **_proof()["daily_evidence"],
+            "missing_trade_timestamps": 1,
+            "all_days_at_or_above_target": False,
+        })
+    )
+    assert invalid["objective_status"] == "NON_ATTEINT"
+    assert invalid["eligible_net_pnl_usd"] is None
+    assert "DAILY_NET_EVIDENCE_INVALID" in invalid["objective_reasons"]
 
 
 def test_daily_target_never_rounds_a_below_target_day_up_to_five_usd() -> None:
@@ -699,7 +762,15 @@ def test_small_positive_net_is_separate_from_historical_target_gate() -> None:
     assert result["positive_net_proof"] is True
     assert result["quality_gates_passed"] is True
     assert result["historical_target_reached"] is False
-    assert result["objective_status"] == "NON_ATTEINT"
+    assert result["reference_target_reached"] is False
+    # 16/11/2026 — SEPARATION CONSERVEE, LIBELLE CORRIGE. L'intention de ce test est intacte : un
+    # net positif de qualite n'est plus rejete pour la seule raison qu'il est sous le repere, et
+    # les quatre champs ci-dessus le disent. Mais `ATTEINT` pour 2,40 USD face a un repere de
+    # 5,00 USD etait un nom qui mentait — et `tests/test_pre_run_pnl_301_313.py` rougissait
+    # precisement la-dessus. Le troisieme etat tranche sans rien assouplir.
+    assert result["objective_status"] != "ATTEINT"
+    assert result["objective_status"] == "POSITIF_SOUS_REPERE"
+    assert result["eligible_net_pnl_usd"] == pytest.approx(2.4)
 
 
 @pytest.mark.parametrize("field,value", [

@@ -24,6 +24,7 @@ import subprocess
 import sys
 import time
 from concurrent.futures import ProcessPoolExecutor
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -38,6 +39,9 @@ if str(ROOT / "src") not in sys.path:
 from hl_observer.backtesting import copy_vault_copiability as cop  # noqa: E402
 from hl_observer.backtesting import copy_vault_event_study as evenements  # noqa: E402
 from hl_observer.backtesting import copy_vault_leader_model as leader_model  # noqa: E402
+from hl_observer.backtesting import overfit_selection as OS  # noqa: E402
+from hl_observer.backtesting import copy_vault_roles_familles as ROLES  # noqa: E402
+from hl_observer.backtesting import coffre_tranches as TRANCHES  # noqa: E402
 from hl_observer.backtesting import copy_vault_order_intent as intentions  # noqa: E402
 from hl_observer.backtesting import copy_vault_persistence as persistence  # noqa: E402
 from hl_observer.backtesting import copy_vault_replication_paper as replication  # noqa: E402
@@ -93,23 +97,66 @@ def _jsonable(value: Any) -> Any:
 
 
 def select_shards(
-    root: Path, wanted: dict[str, str] | None = None
+    root: Path, wanted: dict[str, str] | None = None, *,
+    coins: list[str] | None = None, debut_ms: int | None = None, fin_ms: int | None = None,
 ) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, Any]]]:
     """Shards du coffre LOCAL utilisables : présents ET de SHA-256 identique à l'index.
 
-    ``wanted`` : famille -> fragment de nom exigé (vide = tous les shards de la famille)."""
+    ``wanted`` : famille -> fragment de nom exigé (vide = tous les shards de la famille).
+
+    16/11/2026 — SÉLECTION BORNÉE (chantier 10). ``coins``/``debut_ms``/``fin_ms`` restreignent la
+    lecture aux shards qui CROISENT réellement la fenêtre et les coins demandés, en déléguant la
+    règle à ``coffre_tranches.selectionner`` — une seule règle de sélection dans tout le dépôt.
+    Mesure : ``funding_history`` pèse 3 285 943 lignes ; BTC+ETH sur 30 jours en retient 6 shards
+    sur 54. Le gain n'est pas que la mémoire : chaque shard écarté est un SHA-256 de moins à
+    recalculer ici.
+
+    Un shard **sans bornes de temps** (les 171 ``position`` et 192 ``trades_marche`` scellés avant
+    le correctif d'horloge) est **gardé**, jamais écarté : on ne peut pas prouver qu'il est hors
+    fenêtre, et l'exclure rétrécirait le corpus en silence. Il est signalé dans le diagnostic.
+    """
 
     index_path = root / "runtime" / "coffre_certifie" / "LOCAL_INDEX.json"
     index = json.loads(index_path.read_text(encoding="utf-8"))
+    coffre_root = (root / "runtime" / "coffre_certifie" / "local" / "shards").resolve()
     wanted = wanted or {"fills_forward": "vault_fills", "allmids": "", "book_l2": "", "asset_ctx": "",
                         "bbo": "", "micro_bbo": ""}
     selected: dict[str, list[dict[str, Any]]] = {family: [] for family in wanted}
     excluded: list[dict[str, Any]] = []
+    # Pre-filtre borne : on ne garde que les shards qui croisent la fenetre et les coins. La regle
+    # vit dans `coffre_tranches` pour ne pas exister en double dans le depot.
+    retenus_bornes: dict[str, set[str]] = {}
+    if coins or debut_ms is not None or fin_ms is not None:
+        from hl_observer.backtesting import coffre_tranches as _TR
+
+        tous = index.get("shards", [])
+        for family in wanted:
+            tri = _TR.selectionner(tous, famille=family, coins=coins,
+                                   debut_ms=debut_ms, fin_ms=fin_ms)
+            # Les « sans bornes » sont GARDES : on ne peut pas prouver qu'ils sont hors fenetre.
+            retenus_bornes[family] = {str(x.get("shard")) for x in tri["retenus"]} | {
+                str(x.get("shard")) for x in tri["sans_bornes"]}
+            if tri["sans_bornes"]:
+                excluded.append({
+                    "shard": f"<{family}>", "reason": "gardes_sans_bornes_de_temps",
+                    "n": len(tri["sans_bornes"]),
+                    "note": "scelles avant le correctif d'horloge du 16/11 : non datables, donc non ecartables",
+                })
+            if tri["ecartes_temps"] or tri["ecartes_coin"]:
+                excluded.append({
+                    "shard": f"<{family}>", "reason": "hors_fenetre_ou_hors_coins",
+                    "ecartes_temps": tri["ecartes_temps"], "ecartes_coin": tri["ecartes_coin"],
+                })
     for entry in index.get("shards", []):
         family = entry.get("famille")
         if family not in wanted or wanted[family] not in str(entry.get("shard")):
             continue
+        if family in retenus_bornes and str(entry.get("shard")) not in retenus_bornes[family]:
+            continue
         path = root / str(entry["shard"])
+        if not path.resolve().is_relative_to(coffre_root) or path.is_symlink():
+            excluded.append({"shard": entry["shard"], "reason": "chemin_hors_coffre_local"})
+            continue
         if not path.is_file():
             excluded.append({"shard": entry["shard"], "reason": "fichier_absent"})
             continue
@@ -649,13 +696,68 @@ def load_snapshots(shards: list[dict[str, Any]]):
                     yield row
 
 
+def load_positions(shards: list[dict[str, Any]]) -> dict[str, Any]:
+    """Couverture de la famille ``position`` : positions PAR COIN observées en WebSocket.
+
+    16/11/2026 — CETTE FAMILLE N'ÉTAIT LUE PAR PERSONNE. 175 shards, 878 508 lignes, 179 coins,
+    contre 300 262 lignes de ``snapshot`` (portefeuille entier). C'est une seconde source,
+    indépendante et plus fine, de ce que l'étude de réplication mesure justement : l'inventaire
+    des opérateurs lents — la seule hypothèse que `docs/LOIS_MESUREES.md` n'ait pas réfutée.
+
+    **Elle n'est PAS fusionnée** dans le calcul de PnL, et c'est délibéré : un instantané de
+    portefeuille entier et un flux de positions par coin n'ont pas la même sémantique ; les
+    mélanger sans preuve fabriquerait des transitions fantômes. On publie sa COUVERTURE mesurée,
+    pour que la comparaison avec les transitions issues des instantanés se fasse sur des chiffres.
+    """
+    vaults: set[str] = set()
+    coins: set[str] = set()
+    lignes = 0
+    sans_horloge = 0
+    tmin = tmax = None
+    for item in shards or ():
+        try:
+            with gzip.open(item["path"], "rt", encoding="utf-8") as handle:
+                for brut in handle:
+                    try:
+                        row = json.loads(brut)
+                    except ValueError:
+                        continue
+                    if not isinstance(row, dict):
+                        continue
+                    instant = row.get("received_at_ms")
+                    if type(instant) is not int:
+                        sans_horloge += 1
+                        continue
+                    lignes += 1
+                    if row.get("vault"):
+                        vaults.add(str(row["vault"]))
+                    if row.get("coin"):
+                        coins.add(str(row["coin"]))
+                    tmin = instant if tmin is None else min(tmin, instant)
+                    tmax = instant if tmax is None else max(tmax, instant)
+        except (OSError, EOFError, gzip.BadGzipFile):
+            continue
+    return {
+        "famille": "position", "shards_lus": len(shards or ()), "lignes": lignes,
+        "lignes_sans_horloge": sans_horloge,
+        "vaults": len(vaults), "coins": len(coins),
+        "ts_min_ms": tmin, "ts_max_ms": tmax,
+        "jours_couverts": round((tmax - tmin) / 86_400_000.0, 2) if (tmin and tmax) else 0.0,
+        "role": "DIAGNOSTIC_OBSERVE", "fusion_pnl": False,
+        "pourquoi_pas_fusionnee": (
+            "semantiques differentes (instantane de portefeuille entier vs flux par coin) : une "
+            "fusion non prouvee fabriquerait des transitions fantomes"),
+    }
+
+
 def run_positions(root: Path, *, price: str, write: bool = True) -> dict[str, Any]:
     """Réplication lente des PORTEFEUILLES OBSERVÉS des vaults (instantanés certifiés du coffre)."""
 
     started = time.time()
     config = cop.CopiabilityConfig(rebalance_minutes=(60, 240))
     shards, excluded = select_shards(root, {"snapshot": "", "book_l2": "", "allmids": "", "bbo": "",
-                                            "micro_bbo": "", "asset_ctx": "", "funding_history": "", "candle": "candles_5m"})
+                                            "micro_bbo": "", "asset_ctx": "", "funding_history": "", "candle": "candles_5m",
+                                            "position": ""})
     if not shards["snapshot"]:
         return {"status": "UNMEASURABLE", "reason": "aucun instantané de vault au coffre : lancez le Certificateur"}
     identity = experiment_identity(root, {k: shards[k] for k in ("snapshot", "book_l2")}, config, f"positions|{price}")
@@ -664,16 +766,12 @@ def run_positions(root: Path, *, price: str, write: bool = True) -> dict[str, An
     events, seen, rejects = cop.position_events_from_snapshots(complets)
     for reason, count in rejets_fusion.items():
         rejects[reason] = rejects.get(reason, 0) + count
+    panel, tier_prix, refus = _panneau_de_prix(root, shards, price=price,
+                                               stale_ms=config.stale_price_ms, identity=identity)
+    if refus is not None:
+        return refus
     if price == "mids":
-        panel = load_mid_panel(shards["allmids"], config.stale_price_ms)
         panel, _ = cop.alias_legacy_symbols(panel, events["coin"].unique())
-        tier_prix = "prix observés en temps réel (allMids)"
-    else:
-        candles, identity["candles_source"] = bougies(root, shards)
-        if candles is None:
-            return {"status": "UNMEASURABLE", "reason": f"bougies absentes : {CANDLES_PATH.as_posix()}"}
-        panel = cop.build_candle_panel(candles, interval_ms=CANDLE_INTERVAL_MS)
-        tier_prix = "prix reconstruits (bougies 5 min récupérées après coup)"
     identity["corpus_tier"] = EVIDENCE_TIER_POSITIONS
     half_spreads = load_half_spreads(spread_shards(shards))
     funding = cop.build_funding_rates(load_funding(funding_shards(shards)), panel)
@@ -681,9 +779,14 @@ def run_positions(root: Path, *, price: str, write: bool = True) -> dict[str, An
           f"{sum(len(v) for v in seen.values()):,} instantanés · panel {panel.px.shape}", flush=True)
     report = _jsonable(cop.run_position_replication_study(events, seen, panel, half_spreads, config,
                                                           funding_rates=funding))
+    couverture_positions = load_positions(shards.get("position") or [])
+    print(f"[positions] famille `position` observee : {couverture_positions['lignes']:,} lignes · "
+          f"{couverture_positions['vaults']} vaults · {couverture_positions['coins']} coins · "
+          f"{couverture_positions['jours_couverts']} jours (diagnostic mesure, non fusionne)", flush=True)
     run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ") + "-positions"
     result = {
         "run_id": run_id, "identity": identity, "rejects": dict(sorted(rejects.items())),
+        "couverture_famille_position": couverture_positions,
         "integrity_excluded_shards": excluded, "elapsed_seconds": round(time.time() - started, 1),
         "evidence_tier": EVIDENCE_TIER_POSITIONS, "price_tier": tier_prix, "report": report,
     }
@@ -999,14 +1102,198 @@ def render_ouvertures_report(report: dict[str, Any], identity: dict[str, Any]) -
     return "\n".join(lignes)
 
 
-def run_replication_350(root: Path, *, price: str, write: bool = True, min_snapshots: int = 50) -> dict[str, Any]:
+#: Nombre minimal de points du panneau de prix OBSERVÉ en dessous duquel on refuse de mesurer.
+#: Mesure du 17/11 sur le coffre : le panneau observé (`allMids`) rend **112 729 points sur
+#: 408 coins**, péremption 120 s. Le panneau de bougies 5 min a une péremption de 360 s. Demander
+#: 1 000 points garde une marge large tout en refusant un panneau vide.
+MIN_POINTS_PANNEAU_OBSERVE = 1_000
+
+
+def _panneau_de_prix(root: Path, shards: dict[str, list[dict[str, Any]]], *, price: str,
+                     stale_ms: int, identity: dict[str, Any]) -> tuple[Any, str, dict | None]:
+    """Le panneau de prix demandé — et un REFUS explicite plutôt qu'un repli muet.
+
+    17/11/2026 — DÉFAUT CORRIGÉ. Le choix de la source s'écrivait :
+
+        price="mids" if "--prix" in (argv or sys.argv) and args.prix == "mids" else "bougies"
+
+    Autrement dit, les prix OBSERVÉS n'étaient utilisés que si l'opérateur tapait explicitement
+    `--prix mids`. En omettant l'option — pourtant documentée comme le DÉFAUT — l'étude retombait
+    **en silence** sur des bougies 5 min récupérées après coup : péremption 360 s au lieu de 120 s,
+    et provenance rétrospective au lieu d'observée, alors que 112 729 points observés étaient
+    disponibles au coffre. Le défaut annoncé mentait, et il mentait vers la source de MOINDRE
+    provenance — l'inverse de fail-closed.
+
+    Désormais : la source demandée est la source utilisée. Si la source observée est trop pauvre,
+    on rend UNMEASURABLE en NOMMANT le repli explicite, au lieu de le prendre soi-même.
+    """
+    if price == "mids":
+        panel = load_mid_panel(shards["allmids"], stale_ms)
+        if int(len(panel.ts)) < MIN_POINTS_PANNEAU_OBSERVE:
+            return None, "", {
+                "status": "UNMEASURABLE",
+                "reason": (f"panneau de prix OBSERVÉ trop pauvre : {len(panel.ts)} points pour "
+                           f"{MIN_POINTS_PANNEAU_OBSERVE} requis. Aucun repli automatique : la "
+                           f"source rétrospective change la provenance ET la péremption "
+                           f"(360 s contre 120 s). Pour l'utiliser, demandez-la : `--prix prints`."),
+                "points_observes": int(len(panel.ts)),
+            }
+        return panel, "prix observés en temps réel (allMids)", None
+    candles, identity["candles_source"] = bougies(root, shards)
+    if candles is None:
+        return None, "", {"status": "UNMEASURABLE",
+                          "reason": f"bougies absentes : {CANDLES_PATH.as_posix()}"}
+    return (cop.build_candle_panel(candles, interval_ms=CANDLE_INTERVAL_MS),
+            "prix reconstruits (bougies 5 min récupérées après coup)", None)
+
+
+#: PLACEBOS DE LA RÉPLICATION — le correctif d'essais multiples qui manquait.
+#:
+#: 17/11/2026 — LE CHIFFRE LE PLUS DANGEREUX DU RAPPORT. Le tableau par leader classait 105 comptes
+#: par net/jour et affichait **+18,85 USD/jour sur 350 USD** en tête, soit +539 bps/jour. Aucun
+#: correctif d'essais multiples n'était appliqué : prendre le meilleur de 105 comptes sur 4 jours
+#: produit un maximum élevé même sans aucune compétence. Un lecteur — ou une politique gelée à
+#: partir de ce tableau — aurait pris du bruit de sélection pour un edge.
+#:
+#: LE NULL CHOISI : le portefeuille EXACT du leader, confronté au chemin de prix d'un AUTRE jour.
+#: Coins, tailles, notionnels, rotation, ordre minimal, frais : tous identiques. Seul l'alignement
+#: entre les décisions du leader et les prix réalisés est détruit. Si le meilleur de 105 sous
+#: placebo atteint le même sommet, le sommet réel ne dit rien.
+#:
+#: Le verdict est rendu par `overfit_selection.borne_du_hasard`, déjà écrite et déjà déboguée
+#: (elle compare `max_reel > p95` quel que soit le SIGNE — un seuil écrasé à zéro rendait autrefois
+#: « bruit » mécanique sur des données perdantes).
+PLACEBO_DECALAGES_H: tuple[int, ...] = (-72, -48, -24, 24, 48, 72)
+
+
+def _portefeuille_decale(portefeuille: list, decalage_ms: int) -> list:
+    """Le même portefeuille, aux mêmes tailles, daté d'un autre jour."""
+    return [(int(t) + int(decalage_ms), valeur, tailles) for (t, valeur, tailles) in portefeuille]
+
+
+def borne_du_hasard_replication(portefeuilles: Mapping[str, list], panel: Any,
+                                half_spreads: Mapping[str, float], config: Any, *,
+                                funding: Mapping[str, Any], min_snapshots: int,
+                                max_reel: float, n_scenarios: int,
+                                marge_usd: float = 0.0,
+                                decalages_h: tuple[int, ...] = PLACEBO_DECALAGES_H) -> dict[str, Any]:
+    """Le meilleur leader dépasse-t-il le meilleur leader SOUS PLACEBO ?
+
+    Rend le verdict de `borne_du_hasard` plus le détail de chaque scénario, pour qu'on puisse voir
+    combien de leaders et combien de journées chaque placebo a réellement mesurés. Un placebo qui
+    mesure moins de journées que le réel est DIT, jamais lissé.
+    """
+    maxima: list[float] = []
+    scenarios: list[dict[str, Any]] = []
+    for heures in decalages_h:
+        decalage = int(heures) * 3_600_000
+        nets: list[float] = []
+        jours: set[int] = set()
+        for portefeuille in portefeuilles.values():
+            if len(portefeuille) < min_snapshots:
+                continue
+            resultat = replication.run_replication(
+                _portefeuille_decale(portefeuille, decalage), panel, half_spreads, config,
+                funding_rates=funding)
+            net = resultat.get("net_usd_per_day")
+            if isinstance(net, (int, float)) and not isinstance(net, bool) and resultat.get("complete_days"):
+                nets.append(float(net))
+                jours.update(int(j) for j in (resultat.get("days_utc") or ()))
+        if not nets:
+            scenarios.append({"decalage_h": int(heures), "leaders": 0, "jours": 0,
+                              "raison": "aucun leader mesurable sous ce decalage"})
+            continue
+        ordonnes = sorted(nets)
+        maxima.append(ordonnes[-1])
+        scenarios.append({
+            "decalage_h": int(heures), "leaders": len(nets), "jours": len(jours),
+            "max_usd_par_jour": round(ordonnes[-1], 4),
+            "median_usd_par_jour": round(ordonnes[len(ordonnes) // 2], 4),
+            "min_usd_par_jour": round(ordonnes[0], 4),
+        })
+    borne = OS.borne_du_hasard(max_reel=float(max_reel), maxima_permutes=maxima,
+                               n_scenarios=int(n_scenarios), marge_usd=float(marge_usd))
+    return {
+        "null": ("portefeuille EXACT du leader confronte au chemin de prix d'un autre jour "
+                 "(coins, tailles, notionnels, rotation et frais identiques)"),
+        "decalages_h": list(decalages_h),
+        "scenarios": scenarios,
+        # MARGE ADDITIVE, ET POURQUOI ELLE N'EST PAS ZERO. Depasser le p95 du hasard de 0,50 USD/jour
+        # sur une fenetre de 4 jours n'est pas une preuve : c'est en dessous du bruit de mesure de
+        # l'ensemble. La marge est donc la DEMI-LARGEUR de l'intervalle a 95 % du net moyen, mesuree
+        # sur les memes donnees — pas un seuil choisi a la main.
+        "marge_usd": round(float(marge_usd), 4),
+        "marge_origine": "demi-largeur de l'intervalle 95 % du net moyen de l'ensemble",
+        "verdict": borne.as_dict(),
+    }
+
+
+def capacite_de_la_fenetre(root: Path, *, debut_ms: int, fin_ms: int) -> dict[str, Any]:
+    """Capacité du marché par coin sur la fenêtre de l'étude, lue en flux depuis le coffre.
+
+    Rend la sortie de ``capacite_par_coin`` plus ce que la lecture a coûté et refusé. Un shard
+    refusé reste visible : une capacité mesurée sur un corpus amoindri serait trop optimiste.
+    """
+    index = json.loads((root / "runtime" / "coffre_certifie" / "LOCAL_INDEX.json")
+                       .read_text(encoding="utf-8"))
+    shards = [x for x in index.get("shards") or [] if isinstance(x, dict)]
+    selection = TRANCHES.selectionner(shards, famille="trades_marche",
+                                      debut_ms=debut_ms, fin_ms=fin_ms)
+    compteurs: dict[str, Any] = {}
+    capacite = ROLES.capacite_par_coin(
+        TRANCHES.flux(root, selection["retenus"], famille="trades_marche",
+                      debut_ms=debut_ms, fin_ms=fin_ms, compteurs=compteurs))
+    capacite["lecture_du_coffre"] = {
+        "shards_retenus": len(selection["retenus"]),
+        "shards_lus": compteurs.get("shards_lus", 0),
+        "shards_refuses": compteurs.get("shards_refuses", []),
+        "fenetre_ms": [int(debut_ms), int(fin_ms)],
+    }
+    return capacite
+
+
+def resumer_la_capacite(par_leader: Mapping[str, Mapping[str, Any]],
+                        capacite: Mapping[str, Any]) -> dict[str, Any]:
+    """Part du volume répliqué qui tombe sur des coins étroits ou de capacité inconnue.
+
+    Agrégé sur le VOLUME (somme des notionnels traités), pas en moyenne de leaders : un leader qui
+    ne traite presque rien ne doit pas peser autant qu'un leader qui tourne tout son capital.
+    """
+    total: dict[str, float] = {}
+    for resultat in par_leader.values():
+        for coin, volume in (resultat["full"].get("volume_usd_par_coin") or {}).items():
+            total[coin] = total.get(coin, 0.0) + float(volume)
+    exposition = ROLES.exposition_a_la_capacite(total, capacite)
+    # Le seuil de 1 x est INDULGENT : un ordre egal a une minute mediane entiere de marche reste
+    # lourd. On publie donc aussi des seuils plus stricts, et le volume par coin lui-meme, pour
+    # qu'un autre seuil puisse etre recalcule sans rejouer l'etude (45 minutes).
+    par_seuil = {
+        f"moins_de_{int(seuil)}x": ROLES.exposition_a_la_capacite(
+            total, capacite, seuil_etroit=seuil)["part_volume_coins_etroits"]
+        for seuil in (1.0, 10.0, 100.0)}
+    return {
+        **exposition,
+        "part_du_volume_par_seuil": par_seuil,
+        "volume_usd_par_coin": {c: round(v, 2) for c, v in sorted(total.items())},
+        "coins_traites": len(total),
+        "capacite_multiple_median": capacite.get("multiple_median"),
+        "capacite_coins_mesures": capacite.get("coins"),
+        "lecture_du_coffre": capacite.get("lecture_du_coffre"),
+        "portee": ("le cout simule = frais taker + demi-ecart, sans impact ; sur la part "
+                   "etroite ou inconnue du volume, le net est optimiste d'un montant non chiffre"),
+    }
+
+
+def run_replication_350(root: Path, *, price: str, write: bool = True, min_snapshots: int = 50,
+                        placebos: bool = True) -> dict[str, Any]:
     """Un compte PAPER de 350 USD qui tient le portefeuille observé d'un leader : frais, écart, funding,
     ordre minimal de 10 USD, délai — et ce que chaque friction coûte."""
 
     started = time.time()
     config = replication.ReplicationConfig()
     shards, excluded = select_shards(root, {"snapshot": "", "book_l2": "", "allmids": "", "bbo": "",
-                                            "micro_bbo": "", "asset_ctx": "", "funding_history": "", "candle": "candles_5m"})
+                                            "micro_bbo": "", "asset_ctx": "", "funding_history": "", "candle": "candles_5m",
+                                            "position": ""})
     if not shards["snapshot"]:
         return {"status": "UNMEASURABLE", "reason": "aucun instantané de portefeuille au coffre : lancez le Certificateur"}
     identity = experiment_identity(root, {k: shards[k] for k in ("snapshot", "book_l2")}, config,
@@ -1014,15 +1301,10 @@ def run_replication_350(root: Path, *, price: str, write: bool = True, min_snaps
     identity["source_sha256"]["copy_vault_replication_paper.py"] = _sha256_file(Path(replication.__file__))
     identity["corpus_tier"] = EVIDENCE_TIER_REPLICATION
     portefeuilles, rejets = replication.portefeuilles_depuis_instantanes(load_snapshots(shards["snapshot"]))
-    if price == "mids":
-        panel = load_mid_panel(shards["allmids"], 120_000)
-        tier_prix = "prix observés en temps réel (allMids)"
-    else:
-        candles, identity["candles_source"] = bougies(root, shards)
-        if candles is None:
-            return {"status": "UNMEASURABLE", "reason": f"bougies absentes : {CANDLES_PATH.as_posix()}"}
-        panel = cop.build_candle_panel(candles, interval_ms=CANDLE_INTERVAL_MS)
-        tier_prix = "prix reconstruits (bougies 5 min récupérées après coup)"
+    panel, tier_prix, refus = _panneau_de_prix(root, shards, price=price, stale_ms=120_000,
+                                               identity=identity)
+    if refus is not None:
+        return refus
     half_spreads = load_half_spreads(spread_shards(shards))
     funding = cop.build_funding_rates(load_funding(funding_shards(shards)), panel)
     par_leader: dict[str, Any] = {}
@@ -1032,6 +1314,38 @@ def run_replication_350(root: Path, *, price: str, write: bool = True, min_snaps
         par_leader[compte] = replication.decomposer_les_pertes(portefeuille, panel, half_spreads, config,
                                                                funding_rates=funding)
     synthese = _jsonable(replication.synthese_replication(par_leader, config))
+    # 17/11 — CAPACITE : mesuree sur la fenetre du panneau de prix, puis confrontee au volume
+    # reellement traite par la replication. Un net lu sans cette part serait lu a tort.
+    capacite_resume = None
+    if par_leader and len(panel.ts) > 1:
+        capacite = capacite_de_la_fenetre(root, debut_ms=int(panel.ts[0]), fin_ms=int(panel.ts[-1]))
+        capacite_resume = _jsonable(resumer_la_capacite(par_leader, capacite))
+        print(f"[replication-350] capacite : {capacite_resume['part_volume_coins_etroits']} du volume "
+              f"sur des coins etroits, {capacite_resume['part_volume_capacite_inconnue']} sur des "
+              f"coins de capacite inconnue", flush=True)
+    nets_reels = [r["full"].get("net_usd_per_day") for r in par_leader.values()
+                  if isinstance(r["full"].get("net_usd_per_day"), (int, float))
+                  and not isinstance(r["full"].get("net_usd_per_day"), bool)]
+    selection = None
+    if placebos and nets_reels:
+        print(f"[replication-350] placebos : {len(PLACEBO_DECALAGES_H)} decalages x "
+              f"{len(par_leader)} leaders — correctif d'essais multiples", flush=True)
+        intervalle = synthese.get("interval_95")
+        marge = 0.0
+        if isinstance(intervalle, (list, tuple)) and len(intervalle) == 2:
+            try:
+                bas, haut = float(intervalle[0]), float(intervalle[1])
+                if bas == bas and haut == haut:          # ni NaN ni None
+                    marge = abs(haut - bas) / 2.0
+            except (TypeError, ValueError):
+                marge = 0.0
+        selection = borne_du_hasard_replication(
+            {c: p for c, p in portefeuilles.items() if len(p) >= min_snapshots},
+            panel, half_spreads, config, funding=funding, min_snapshots=min_snapshots,
+            max_reel=max(nets_reels), n_scenarios=len(nets_reels), marge_usd=marge)
+        v = selection["verdict"]
+        print(f"[replication-350] meilleur REEL {v['max_reel']:+.3f} USD/j vs "
+              f"p95 du hasard {v['max_hasard_p95']:+.3f} -> {v['verdict']}", flush=True)
     print(f"[replication-350] {len(portefeuilles)} comptes · {len(par_leader)} simulés · "
           f"{synthese['leader_days']} journées-leader sur {synthese['distinct_days']} jour(s) · {tier_prix}", flush=True)
     lignes_leaders = sorted(
@@ -1043,12 +1357,16 @@ def run_replication_350(root: Path, *, price: str, write: bool = True, min_snaps
         key=lambda ligne: (ligne["net_usd_per_day"] is None, -(ligne["net_usd_per_day"] or 0.0)))
     run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ") + "-replication350"
     report = {"config": config.as_dict(), "summary": synthese, "leaders": _jsonable(lignes_leaders),
+              "selection_vs_hasard": _jsonable(selection),
+              "capacite": capacite_resume,
               "inputs": {"comptes": len(portefeuilles), "comptes_simules": len(par_leader), "rejets": rejets,
                          "coins_avec_ecart": len(half_spreads), "coins_avec_funding": len(funding),
                          "prix": tier_prix, "panel_points": int(len(panel.ts))},
               "verdicts": [{"hypothesis": synthese["hypothesis"], "status": synthese["status"],
                             "reason": synthese["reason"]}],
               "caveats": [
+                  "Le meilleur leader du tableau est le MAXIMUM de dizaines de comptes sur peu de jours : "
+                  "il ne vaut que comparé au maximum sous placebo (`selection_vs_hasard`), jamais seul.",
                   "Chaque leader est répliqué SEUL avec tout le capital ; une combinaison de leaders diviserait "
                   "les lignes et heurterait plus souvent l'ordre minimal.",
                   "Portefeuille entier = dex principal + dex HIP-3 quand ils sont observés ensemble ; avant le suivi "
@@ -1102,6 +1420,58 @@ def render_replication_report(report: dict[str, Any], identity: dict[str, Any]) 
         "", "## Verdict", "",
     ]
     lignes += [f"- `{v['hypothesis']}` : **{v['status']}** — {v['reason']}" for v in report["verdicts"]]
+    capacite = report.get("capacite")
+    if capacite:
+        def pct(valeur: Any) -> str:
+            return "n/d" if valeur is None else f"{float(valeur) * 100:.1f} %"
+        lignes += [
+            "", "## Capacité : sur quelle part du volume le coût simulé est-il optimiste ?", "",
+            f"- Volume répliqué total : {num(capacite['volume_total_usd'], 0)} USD sur "
+            f"{capacite['coins_traites']} coins ; capacité du marché mesurée sur "
+            f"{capacite.get('capacite_coins_mesures')} coins (multiple médian "
+            f"{capacite.get('capacite_multiple_median')} fois l'ordre).",
+            f"- Sur des coins **étroits** (une minute médiane de marché échange moins que "
+            f"l'ordre) : **{pct(capacite['part_volume_coins_etroits'])}** du volume.",
+            f"- Sur des coins de capacité **inconnue** (aucun trade de marché observé) : "
+            f"**{pct(capacite['part_volume_capacite_inconnue'])}** — non mesuré, donc non supposé "
+            f"suffisant.",
+            f"- Sur des coins de capacité mesurée suffisante : "
+            f"{pct(capacite['part_volume_capacite_mesuree_suffisante'])}.",
+            "- Le seuil de 1 × est indulgent. Part du volume sur des coins où une minute médiane "
+            "échange moins de : "
+            + " · ".join(f"{nom.replace('moins_de_', '').replace('x', ' ×')} l'ordre → {pct(part)}"
+                         for nom, part in (capacite.get("part_du_volume_par_seuil") or {}).items())
+            + ".",
+            f"- Portée : {capacite['portee']}.",
+        ]
+    # Le correctif d'essais multiples se lit AVANT le tableau par leader : le maximum de dizaines
+    # de comptes sur peu de jours est élevé même sans compétence, et c'est ce maximum que l'oeil
+    # retient. Le mettre après serait l'enterrer.
+    selection = report.get("selection_vs_hasard")
+    if selection:
+        v = selection["verdict"]
+        lignes += [
+            "", "## Essais multiples : le meilleur leader vaut-il mieux que le hasard ?", "",
+            f"- Null : {selection['null']}.",
+            f"- Meilleur leader RÉEL : **{num(v['max_reel'])} USD/jour**, choisi parmi "
+            f"{v['n_scenarios']} comptes.",
+            f"- Meilleur leader SOUS PLACEBO : moyenne {num(v['max_hasard_moyen'])} · "
+            f"p95 **{num(v['max_hasard_p95'])}** USD/jour sur {v['n_permutations']} scénario(s) "
+            f"({', '.join(str(h) + ' h' for h in selection['decalages_h'])}).",
+            f"- Écart au p95 du hasard : **{num(v['ecart_vs_p95'])} USD/jour**, à comparer à la "
+            f"marge de bruit de {num(selection.get('marge_usd'))} USD/jour "
+            f"({selection.get('marge_origine')}) → verdict **{v['verdict']}**.", "",
+            "| décalage | leaders | jours | max USD/j | médiane | min |",
+            "|---|---:|---:|---:|---:|---:|",
+        ]
+        for sc in selection["scenarios"]:
+            if sc.get("leaders"):
+                lignes.append(
+                    f"| {sc['decalage_h']:+d} h | {sc['leaders']} | {sc['jours']} | "
+                    f"{num(sc['max_usd_par_jour'])} | {num(sc['median_usd_par_jour'])} | "
+                    f"{num(sc['min_usd_par_jour'])} |")
+            else:
+                lignes.append(f"| {sc['decalage_h']:+d} h | 0 | 0 | — | — | {sc.get('raison', '')} |")
     lignes += ["", "## Par leader (trié par net/jour)", "",
                "| compte | jours | net USD/j | ordres | refus ordre min. | rotation/j | exposition | coins non négociables |",
                "|---|---:|---:|---:|---:|---:|---:|---:|"]
@@ -1306,6 +1676,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--prix", choices=("mids", "prints"), default="mids",
                         help="mids = allMids observés (dex principal) ; prints = prix des transactions (repli, tous coins)")
     parser.add_argument("--workers", type=int, default=min(8, max(1, (os.cpu_count() or 2) // 2)))
+    parser.add_argument("--sans-placebo", action="store_true",
+                        help="saute le correctif d'essais multiples (plus rapide, moins honnête)")
     parser.add_argument("--verifier-registre", action="store_true", help="revérifie la chaîne du registre et sort")
     parser.add_argument("--sans-ecriture", action="store_true", help="calcule sans écrire rapport, registre ni besoins")
     args = parser.parse_args(argv)
@@ -1318,9 +1690,8 @@ def main(argv: list[str] | None = None) -> int:
         print("[NO_GO] coffre LOCAL absent : lancez d'abord « Certificateur Coffre Fort.cmd ».")
         return 2
     if args.replication_350:
-        result = run_replication_350(
-            root, price="mids" if "--prix" in (argv or sys.argv) and args.prix == "mids" else "bougies",
-            write=not args.sans_ecriture)
+        result = run_replication_350(root, price=args.prix, write=not args.sans_ecriture,
+                                     placebos=not args.sans_placebo)
         if "report" not in result:
             print(f"[{result['status']}] {result['reason']}")
             return 2
@@ -1364,7 +1735,7 @@ def main(argv: list[str] | None = None) -> int:
         print("[FIN] étude de persistance (historique relu, exploratoire) ; aucune rentabilité n'est prouvée.")
         return 0
     if args.positions:
-        result = run_positions(root, price="mids" if "--prix" in (argv or sys.argv) and args.prix == "mids" else "bougies",
+        result = run_positions(root, price=args.prix,
                                write=not args.sans_ecriture)
         if "report" not in result:
             print(f"[{result['status']}] {result['reason']}")

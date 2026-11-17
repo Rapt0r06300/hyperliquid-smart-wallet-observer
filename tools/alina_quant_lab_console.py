@@ -28,6 +28,10 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "src"))
 
 from tools.sous_processus_isole import creationflags  # noqa: E402
+from hl_observer.backtesting import copy_vault_fenetre_locale as FENETRE_LOCALE  # noqa: E402
+from hl_observer.backtesting.copy_vault_protocol import (  # noqa: E402
+    MAX_GROSS_EXPOSURE_USD as _LIMITE_EXPOSITION_USD,
+)
 
 CORE_TESTS = (
     "tests/test_copy_vault_v21_frozen.py",
@@ -808,8 +812,12 @@ REASON_LABELS = {
     "SAFE_PAYLOAD_ROWS_REJECTED": "des enregistrements SAFE ont été écartés car leur contenu est invalide ou non causal",
     "SAFE_WRAPPERS_REJECTED": "des enveloppes SAFE ne passent pas la vérification de contenu",
     "FILLS_OR_L2_MISSING": "les fills leader ou les carnets L2 vérifiés manquent",
+    # 17/11/2026 : ce message disait « la limite de 200 USD », montant historique et inactif
+    # (AGENTS.md). Le seuil réellement appliqué est MAX_GROSS_EXPOSURE_USD = capital paper ×
+    # levier paper : il est donc lu de la constante, pour ne plus pouvoir diverger d'elle.
     "COPY_V21_PAPER_GROSS_EXPOSURE_LIMIT_EXCEEDED": (
-        "le réglage actuellement gelé dépasse la limite de 200 USD de capital paper"
+        f"le réglage actuellement gelé dépasse la limite de {_LIMITE_EXPOSITION_USD:.0f} USD "
+        "d'exposition brute paper (capital paper sans levier)"
     ),
 }
 
@@ -2316,6 +2324,9 @@ def run_economic_lab(
             + _human_reason(economic_result.get("reason"))
             + "."
         )
+    # Un « trop peu de jours » sur une lecture interrompue decrirait la lecture, pas le coffre.
+    freeze_verdict += FENETRE_LOCALE.mention_de_lecture(
+        safe_inputs.get("coffre_local") if isinstance(safe_inputs, Mapping) else None)
     improvement_history = load_improvement_history(ROOT)
     summary = {
         "run_id": run_id,

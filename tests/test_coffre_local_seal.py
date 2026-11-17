@@ -6,6 +6,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
 sys.path.insert(0, str(RACINE / "tools"))
@@ -146,6 +148,75 @@ def test_scellage_bout_en_bout(tmp_path):
     assert coffre_index["tiers"]["LOCAL"]["deposes"] == 1
     assert coffre_index["tiers"]["SAFE_CLOUD"]["catalogue"] == "catalog/DATA_INDEX.json"
     assert (coffre / "CERTIF_JOURNAL.jsonl").exists()
+
+
+def test_scellage_avec_collecte_active_utilise_l_heure_du_snapshot_source(tmp_path, monkeypatch):
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    source = data / "vault_fills_poll.jsonl"
+    source.write_text("\n".join(json.dumps(row) for row in (
+        _fill(tid=1, time=NOW + 30_000, observed_at_ms=NOW + 30_000),
+        _fill(tid=2, time=NOW + 90_000, observed_at_ms=NOW + 90_000),
+    )) + "\n", encoding="utf-8")
+    horloge = [NOW]
+    monkeypatch.setattr(scl.time, "time", lambda: horloge[0] / 1000)
+    etat_source = scl._etat_source
+
+    def snapshot(path):
+        result = etat_source(path)
+        horloge[0] = NOW + 31_000  # le scan d'autres fichiers a pris 31 secondes
+        return result
+
+    monkeypatch.setattr(scl, "_etat_source", snapshot)
+    assert scl.main(["--root", str(tmp_path)]) == 0
+    manifests = list((tmp_path / "runtime" / "coffre_certifie" / "local" / "manifests").glob("*.json"))
+    assert len(manifests) == 1
+    manifest = json.loads(manifests[0].read_text(encoding="utf-8"))
+    assert manifest["genere_ms"] == NOW
+    assert manifest["fichiers"][0]["source_cutoff_ms"] == NOW + 31_000
+    assert manifest["total"]["deposes"] == 1
+    assert manifest["total"]["quarantaine"] == 1
+    assert manifest["total"]["raisons_top"]["timestamp_futur"] == 1
+
+
+def test_scellage_refuse_une_source_reecrite_pendant_la_lecture(tmp_path, monkeypatch):
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    source = data / "vault_fills_poll.jsonl"
+    source.write_text(json.dumps(_fill(tid=1)) + "\n", encoding="utf-8")
+    lire_lignes = scl._lire_lignes
+
+    def lecture_avec_reecriture(path, *, debut=0, fin=None):
+        for ligne in lire_lignes(path, debut=debut, fin=fin):
+            yield ligne
+            source.write_text(json.dumps(_fill(tid=2)) + "\n", encoding="utf-8")
+
+    monkeypatch.setattr(scl, "_lire_lignes", lecture_avec_reecriture)
+    with pytest.raises(RuntimeError, match="source modifiee pendant la certification"):
+        scl.main(["--root", str(tmp_path), "--now-ms", str(NOW)])
+    coffre = tmp_path / "runtime" / "coffre_certifie"
+    assert not list((coffre / "local" / "shards").rglob("*.jsonl.gz"))
+    assert not (coffre / "SOURCES_TRAITEES.json").exists()
+
+
+def test_scellage_fige_le_prefixe_si_le_collecteur_ajoute_une_ligne(tmp_path, monkeypatch):
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    source = data / "vault_fills_poll.jsonl"
+    source.write_text(json.dumps(_fill(tid=1)) + "\n", encoding="utf-8")
+    lire_lignes = scl._lire_lignes
+
+    def lecture_avec_append(path, *, debut=0, fin=None):
+        for ligne in lire_lignes(path, debut=debut, fin=fin):
+            yield ligne
+            with source.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(_fill(tid=2)) + "\n")
+
+    monkeypatch.setattr(scl, "_lire_lignes", lecture_avec_append)
+    assert scl.main(["--root", str(tmp_path), "--now-ms", str(NOW)]) == 0
+    monkeypatch.setattr(scl, "_lire_lignes", lire_lignes)
+    assert scl.main(["--root", str(tmp_path), "--now-ms", str(NOW)]) == 0
+    assert sorted(t for lot in _shards_fills(tmp_path) for t in lot) == [1, 2]
 
 
 def test_scellage_idempotent(tmp_path):
@@ -368,3 +439,39 @@ def test_option_famille_ne_certifie_que_la_famille_demandee(tmp_path):
     assert scl.main(["--root", str(tmp_path), "--now-ms", str(NOW)]) == 0               # le reste passe ensuite
     index = json.loads((tmp_path / "runtime" / "coffre_certifie" / "LOCAL_INDEX.json").read_text(encoding="utf-8"))
     assert sorted(s["famille"] for s in index["shards"]) == ["fills_forward", "snapshot"]
+
+
+# ─────────────── 16/11 : deux familles étaient datées « jour inconnu » ───────────────
+def test_position_et_trades_marche_sont_DATEES_et_non_0000_00_00():
+    """DÉFAUT MESURÉ PAR LA MATRICE DU COFFRE, conséquence directe sur la recherche.
+
+    `_ts_primaire` repliait sur `record["ts_ms"]`, que ces deux familles ne portent pas :
+    `position` n'a que `received_at_ms`, `trades_marche` a `exchange_ts_ms`. Leurs 363 shards
+    (870 142 + 24 095 493 lignes) étaient donc indexés avec `jours = ["0000-00-00"]`, le sentinelle
+    « jour inconnu ». Aucune étude ne pouvait les découper par jour — alors que la seule hypothèse
+    non réfutée par `docs/LOIS_MESUREES.md` (opérateurs lents, réplication d'inventaire) exige des
+    TRANSITIONS DE POSITION sur des jours indépendants.
+    """
+    import importlib.util
+    from pathlib import Path as _Path
+
+    racine = _Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location(
+        "sceller_pour_test", racine / "tools" / "sceller_coffre_local.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    from hl_observer.datasets.coffre_certifie import FAMILLE_POSITION, FAMILLE_TRADES
+
+    instant = 1_794_844_365_779            # 2026-11-16 UTC
+    assert module._jour_utc(
+        module._ts_primaire({"received_at_ms": instant}, FAMILLE_POSITION)) == "2026-11-16"
+    assert module._jour_utc(
+        module._ts_primaire({"exchange_ts_ms": instant, "received_at_ms": 1},
+                            FAMILLE_TRADES)) == "2026-11-16"
+    # repli explicite : un trade sans horloge d'echange garde sa reception
+    assert module._jour_utc(
+        module._ts_primaire({"received_at_ms": instant}, FAMILLE_TRADES)) == "2026-11-16"
+    # une ligne SANS aucune horloge reste inconnue : on ne fabrique pas une date
+    assert module._jour_utc(module._ts_primaire({}, FAMILLE_POSITION)) == "0000-00-00"
+    # les familles deja correctes ne changent pas
+    assert module._jour_utc(module._ts_primaire({"ts_ms": instant}, "fills_forward")) == "2026-11-16"

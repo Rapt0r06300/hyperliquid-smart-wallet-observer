@@ -157,6 +157,96 @@ def memoire_du_processus_octets(*, psutil_mod=None) -> int:
         return 0
 
 
+#: Part de la memoire UTILISEE au-dela de laquelle NOTRE propre arbre de processus est le coupable
+#: de la pression. En dessous, la tension vient d'ailleurs (navigateur, WSL, Salad, antivirus) et
+#: arreter notre travail ne libere presque rien.
+PART_ARBRE_COUPABLE = 0.30
+
+
+def memoire_de_l_arbre_octets(pid: int | None = None, *, psutil_mod=None) -> int:
+    """RSS du processus ET de tous ses descendants : ce que NOTRE travail tient vraiment.
+
+    16/11/2026 — POURQUOI CE N'ETAIT PAS SUFFISANT DE REGARDER LA RAM LIBRE. A 20:20, le
+    rattrapage a vu 2,96 Go libres (9 %) et a tue sa passe funding. Or cette passe ecrit chaque
+    page sur le disque et ne garde qu'UNE page en memoire : elle ne pesait pas les gigaoctets
+    manquants. On a donc perdu 17 458 jours-coins de funding pour liberer environ 0,2 Go.
+
+    Decider sans savoir qui consomme, c'est punir le processus le plus sage. Ne leve jamais : 0
+    si indeterminable, ce qui conduit a conclure « ce n'est pas nous » — le choix prudent, puisque
+    l'autre conclusion detruit du travail.
+    """
+    mod = psutil_mod
+    if mod is None:
+        try:
+            import psutil as mod  # type: ignore
+        except Exception:  # noqa: BLE001
+            return 0
+    try:
+        moi = mod.Process() if pid is None else mod.Process(int(pid))
+        total = int(moi.memory_info().rss)
+        for enfant in moi.children(recursive=True):
+            try:
+                total += int(enfant.memory_info().rss)
+            except Exception:  # noqa: BLE001 — un enfant qui vient de mourir ne compte plus
+                continue
+        return total
+    except Exception:  # noqa: BLE001
+        _LOG.debug("lecture RSS de l'arbre impossible", exc_info=True)
+        return 0
+
+
+def coupable_de_la_pression(*, arbre_octets: int, dispo_octets: int,
+                            total_octets: int) -> dict:
+    """Est-ce NOUS qui saturons la memoire, ou quelqu'un d'autre sur cette machine ?
+
+    Rend ``coupable`` = ``NOUS`` ou ``EXTERIEUR``, et la part de la memoire utilisee que tient
+    notre arbre. Un arbre mesure a 0 (psutil absent, droits refuses) rend ``EXTERIEUR`` : on
+    prefere continuer a travailler plutot que detruire du travail sur une mesure manquante.
+    """
+    utilisee = max(1, int(total_octets) - max(0, int(dispo_octets)))
+    part = max(0.0, float(arbre_octets)) / float(utilisee)
+    coupable = "NOUS" if part >= PART_ARBRE_COUPABLE else "EXTERIEUR"
+    return {
+        "coupable": coupable,
+        "part_arbre": round(part, 4),
+        "arbre_go": round(max(0, int(arbre_octets)) / _GO, 2),
+        "utilisee_go": round(utilisee / _GO, 2),
+        "seuil_part": PART_ARBRE_COUPABLE,
+    }
+
+
+def plus_gros_consommateurs(limite: int = 3, *, psutil_mod=None) -> list[dict]:
+    """Les processus qui tiennent le plus de RAM, pour que l'OPERATEUR sache quoi fermer.
+
+    PUREMENT INFORMATIF, ET C'EST UNE REGLE. Cette fonction LIT et n'agit jamais : rien ici ne
+    tue, ne suspend, ni ne depriorise un processus. Alina ne touche que les processus qu'elle a
+    elle-meme lances. Les gagne-pain de la machine (Salad, navigateur, WSL) ne sont pas ses
+    sujets, meme quand ils sont la cause de la pression — c'est a l'operateur de trancher, et il
+    ne peut trancher que s'il connait les noms.
+
+    Un message « RAM critique » sans nom ne permet aucune action. Ne leve jamais.
+    """
+    mod = psutil_mod
+    if mod is None:
+        try:
+            import psutil as mod  # type: ignore
+        except Exception:  # noqa: BLE001
+            return []
+    vus: list[dict] = []
+    try:
+        for proc in mod.process_iter(["pid", "name", "memory_info"]):
+            try:
+                rss = int(proc.info["memory_info"].rss)
+            except Exception:  # noqa: BLE001
+                continue
+            vus.append({"pid": int(proc.info["pid"]), "nom": str(proc.info["name"] or "?"),
+                        "go": round(rss / _GO, 2)})
+    except Exception:  # noqa: BLE001
+        return []
+    vus.sort(key=lambda v: -v["go"])
+    return vus[:max(1, int(limite))]
+
+
 def niveau_pression(*, dispo_octets: int | None = None, total_octets: int | None = None,
                     psutil_mod=None) -> str:
     """VERT / ORANGE / ROUGE. Prend le PIRE du critère absolu (Go libres) et du critère relatif

@@ -81,4 +81,15 @@ def test_le_cmd_appelle_la_barriere_bloquante_avant_le_moteur():
     i_moteur = txt.index("start_hypersmart_simulation.ps1", i_barriere)
     assert i_barriere < i_moteur
     # ... et l'ancien appel informatif nu (sans --niveau) n'est plus le dernier mot avant le moteur.
-    assert "if errorlevel 1 (" in txt[i_barriere:i_moteur]
+    #
+    # 17/11/2026 — L'IDIOME A CHANGÉ SANS PERDRE LA BARRIÈRE, et ce test cherchait encore l'ancien
+    # texte (`if errorlevel 1 (`). Le lanceur journalise désormais le résultat entre l'appel et le
+    # branchement : un `if errorlevel 1` placé APRÈS cette journalisation lirait le code du
+    # journaliseur, pas celui de la barrière. Il capture donc le code dans une variable, puis
+    # branche dessus. On exige les DEUX, plus strictement qu'avant : la capture doit suivre
+    # IMMÉDIATEMENT l'appel (rien entre les deux ne doit pouvoir écraser le code).
+    segment = txt[i_barriere:i_moteur]
+    assert 'if not "%READY_CORE_RC%"=="0" (' in segment
+    ligne_suivante = txt[i_barriere:].split("\n", 2)[1].strip()
+    assert ligne_suivante == 'set "READY_CORE_RC=%ERRORLEVEL%"', (
+        "le code de la barriere doit etre capture sur la ligne qui suit l'appel")
