@@ -1587,7 +1587,17 @@ class Synchronizer:
             chemin = entree[3:].strip().replace("\\", "/")
             if not chemin:
                 continue
-            (churn if chemin.casefold() in RUNTIME_CHURN_FILES else bloquants).append(chemin)
+            # DEUX familles de churn, et la seconde est l'intention ECRITE de ce module :
+            # « Data collectors may leave generated SAFE files staged while the operator is
+            # editing code. They stay outside code-only checkpoints, but their presence must not
+            # prevent an unrelated code publication. » Mesure du 18/11/2026 : la collecte avait
+            # reecrit 13 200 fichiers de `catalog/` (13,4 M insertions), et la promotion refusait
+            # une publication de code qui n'avait rien a voir. `_can_defer_staged_protected`
+            # applique cette intention en laissant les fichiers SENSIBLES echouer en ferme.
+            if chemin.casefold() in RUNTIME_CHURN_FILES or _can_defer_staged_protected(chemin):
+                churn.append(chemin)
+            else:
+                bloquants.append(chemin)
         if bloquants:
             # On NOMME les chemins : l'ancien message laissait deviner lesquels.
             apercu = ", ".join(sorted(bloquants)[:8])
