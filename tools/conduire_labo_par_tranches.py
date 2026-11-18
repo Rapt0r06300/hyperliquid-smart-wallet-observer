@@ -176,15 +176,38 @@ def empreinte_du_decoupage(
     return hashlib.sha256(graine.encode("utf-8")).hexdigest()[:16]
 
 
-def lire_le_journal(chemin: Path, empreinte: str) -> dict[str, Any]:
-    """Les rapports deja obtenus pour CE decoupage, plus ce qu'on a refuse de lire.
+def identite_de_tranche(tranche: tuple[int, int], lignes: int) -> str:
+    """Ce qui identifie une tranche SEULE : ses bornes et le nombre de fills qu'elles contiennent.
+
+    POURQUOI PAS LE DECOUPAGE ENTIER. Mesure du 18/11/2026 : un corpus de six heures donne six
+    tranches, et trois heures de plus en donnent neuf dont les SIX PREMIERES sont identiques a la
+    borne pres -- le decoupage parcourt les seaux dans l'ordre et accumule, donc une collecte
+    chronologique n'ajoute des tranches qu'a la fin. Identifier par le decoupage entier faisait
+    jeter six tranches deja calculees a chaque nouvelle collecte.
+
+    CE QUE CE CONTROLE VAUT, dit franchement. Il attrape tout ce qui change la QUANTITE de donnees
+    d'une fenetre : ajout, retrait, re-materialisation partielle. Il n'attraperait pas un
+    remplacement ligne pour ligne a nombre constant dans la meme fenetre -- ce qui n'arrive pas dans
+    un coffre append-only certifie, mais qui n'est pas impossible en principe. Le digest du corpus
+    reste PUBLIE dans chaque ligne du journal, pour qu'une reprise traversant deux corpus se voie.
+    """
+    graine = f"{int(tranche[0])}-{int(tranche[1])}-{int(lignes)}"
+    return hashlib.sha256(graine.encode("utf-8")).hexdigest()[:16]
+
+
+def lire_le_journal(chemin: Path, identites: Mapping[tuple[int, int], str]) -> dict[str, Any]:
+    """Les rapports deja obtenus pour les tranches dont l'identite correspond.
+
+    `identites` donne, pour chaque tranche demandee, l'identite attendue. Une ligne du journal n'est
+    reprise que si sa tranche est demandee ET que son identite correspond : une fenetre dont la
+    quantite de donnees a change est donc recalculee, et les autres sont reprises.
 
     Une ligne illisible est COMPTEE et sautee : une interruption peut tronquer la derniere ligne, et
     la deviner serait inventer un rapport.
     """
     deja: dict[tuple[int, int], Mapping[str, Any]] = {}
     illisibles = 0
-    autre_decoupage = 0
+    perimees = 0
     try:
         flux = chemin.open("r", encoding="utf-8")
     except OSError:
@@ -203,8 +226,9 @@ def lire_le_journal(chemin: Path, empreinte: str) -> dict[str, Any]:
             except (ValueError, TypeError, KeyError, IndexError):
                 illisibles += 1
                 continue
-            if signature != empreinte:
-                autre_decoupage += 1
+            attendue = identites.get(cle)
+            if attendue is None or signature != attendue:
+                perimees += 1
                 continue
             if not isinstance(rapport, Mapping):
                 illisibles += 1
@@ -212,18 +236,22 @@ def lire_le_journal(chemin: Path, empreinte: str) -> dict[str, Any]:
             deja[cle] = rapport
     return {
         "rapports": deja, "lignes_illisibles": illisibles,
-        "autre_decoupage": autre_decoupage, "journal": True,
+        "autre_decoupage": perimees, "journal": True,
     }
 
 
 def _noter_au_journal(chemin: Path, empreinte: str, tranche: tuple[int, int],
-                      rapport: Mapping[str, Any]) -> None:
-    """Ecrit APRES la tranche et vidange tout de suite : une coupure ne perd que la derniere."""
+                      rapport: Mapping[str, Any], *, corpus: str = "") -> None:
+    """Ecrit APRES la tranche et vidange tout de suite : une coupure ne perd que la derniere.
+
+    `corpus` est publie sans servir a la comparaison : une reprise qui traverse deux corpus reste
+    acceptee tranche par tranche, mais elle doit se VOIR dans le journal.
+    """
     chemin.parent.mkdir(parents=True, exist_ok=True)
     with open(chemin, "a", encoding="utf-8", newline="") as flux:
         flux.write(json.dumps(
             {"empreinte": empreinte, "tranche": [int(tranche[0]), int(tranche[1])],
-             "rapport": rapport},
+             "corpus": corpus, "rapport": rapport},
             ensure_ascii=False, default=str) + chr(10))
         flux.flush()
         os.fsync(flux.fileno())
@@ -258,6 +286,7 @@ def conduire(
     estimation: Callable[[tuple[int, int]], int] | None = None,
     jours_minimum: int | None = None,
     journal_reprise: Path | None = None,
+    lignes_par_tranche: Callable[[tuple[int, int]], int] | None = None,
     gouverneur: Callable[..., Mapping[str, Any]] = RAM.decision,
     respirer: Callable[[], Mapping[str, Any]] = RAM.attendre_que_ca_respire,
 ) -> dict[str, Any]:
@@ -271,17 +300,29 @@ def conduire(
     rapports: list[Mapping[str, Any]] = []
     incidents: list[dict[str, Any]] = []
     memoires: list[dict[str, Any]] = []
-    empreinte = empreinte_du_decoupage(
-        list(tranches), corpus=digest_du_corpus(Path(workspace)))
+    # Une identite PAR TRANCHE : une collecte qui ajoute des donnees a la fin ne doit pas faire
+    # jeter les tranches deja calculees. Sans compteur de lignes, on retombe sur le decoupage
+    # entier -- plus prudent, mais sans reprise au-dela d'une nouvelle collecte.
+    corpus = digest_du_corpus(Path(workspace))
+    empreinte_globale = empreinte_du_decoupage(list(tranches), corpus=corpus)
+    identites = {
+        (int(debut), int(fin)): (
+            identite_de_tranche((debut, fin), lignes_par_tranche((debut, fin)))
+            if lignes_par_tranche is not None
+            else empreinte_globale
+        )
+        for debut, fin in tranches
+    }
     reprise = (
-        lire_le_journal(journal_reprise, empreinte)
+        lire_le_journal(journal_reprise, identites)
         if journal_reprise is not None
         else {"rapports": {}, "lignes_illisibles": 0, "autre_decoupage": 0, "journal": False}
     )
     if reprise["rapports"]:
         dire(f"  reprise : {len(reprise['rapports'])} tranche(s) deja faite(s) pour ce decoupage")
     if reprise["autre_decoupage"]:
-        dire(f"  {reprise['autre_decoupage']} ligne(s) d'un AUTRE decoupage ignoree(s)")
+        dire(f"  {reprise['autre_decoupage']} tranche(s) du journal PERIMEE(S) : leurs donnees ont"
+             " change, elles seront refaites")
     if reprise["lignes_illisibles"]:
         dire(f"  {reprise['lignes_illisibles']} ligne(s) illisible(s) sautee(s), jamais devinee(s)")
     reprises = 0
@@ -338,7 +379,8 @@ def conduire(
         rapports.append({**rapport, "tranche": list(tranche)})
         if journal_reprise is not None:
             try:
-                _noter_au_journal(journal_reprise, empreinte, tranche, rapport)
+                _noter_au_journal(
+                    journal_reprise, identites[cle], tranche, rapport, corpus=corpus)
             except OSError as exc:
                 # Ne pas perdre la tranche pour autant : on la garde en memoire et on le DIT.
                 incidents.append({
@@ -356,7 +398,8 @@ def conduire(
         "incidents": incidents,
         "memoire_par_tranche": memoires,
         "tranches_reprises": reprises,
-        "empreinte_du_decoupage": empreinte,
+        "empreinte_du_decoupage": empreinte_globale,
+        "identites_par_tranche": len(identites),
         "digest_du_corpus": digest_du_corpus(Path(workspace)),
         "agregat": agregat,
         "rapports": rapports,
@@ -448,8 +491,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     jours = journees_utc(densite)
     print(f"  journees UTC du corpus : {len(jours)} ({jours[0]} -> {jours[-1]})")
+    def lignes_de(tranche: tuple[int, int]) -> int:
+        return sum(n for seau, n in densite.items() if tranche[0] <= seau <= tranche[1])
+
     resultat = conduire(
         workspace, tranches, estimation=estimer, jours_minimum=JOURS_MINIMUM,
+        lignes_par_tranche=lignes_de,
         journal_reprise=Path(args.journal) if args.journal else None,
         lancer=_lanceur_reel(args.max_trials, workspace.parent / "campagne-tranches", RACINE,
                              jours_du_corpus=len(jours)),

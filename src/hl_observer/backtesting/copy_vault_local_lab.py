@@ -39,6 +39,9 @@ from hl_observer.backtesting.copy_vault_identite_campagne import (
     digest_de_campagne as _digest_de_campagne,
 )
 from hl_observer.backtesting.copy_vault_identite_campagne import (
+    empreinte_de_tranche as _empreinte_de_tranche,
+)
+from hl_observer.backtesting.copy_vault_identite_campagne import (
     nom_de_campagne as _nom_de_campagne,
 )
 from hl_observer.backtesting.copy_vault_protocol import (
@@ -2817,6 +2820,8 @@ def run_local_campaign(
     except Exception as _exc:  # noqa: BLE001 - exploratoire, jamais autoritaire
         overshoot_exploration = {"status": "SKIPPED" if isinstance(_exc, LookupError) else "FAILED", "reason": f"{type(_exc).__name__}: {_exc}"}
 
+    _empreinte_tranche = _empreinte_de_tranche(tranche)
+    _marqueur_de_tranche = f"{_empreinte_tranche}-" if _empreinte_tranche else ""
     base = {
         "paper_read_only": True, "real_execution": False,
         # Un rapport de tranche n'est jamais une conclusion : il est une CONTRIBUTION.
@@ -3193,7 +3198,13 @@ def run_local_campaign(
                     break
                 continue
             trial_count = prior_trial_count + campaign_attempts + 1
-            candidate_id = f"cv-{selection_digest[:12]}-{this_sequence:012d}"
+            # La TRANCHE entre dans l'identifiant : `selection_digest` est le meme pour toutes
+            # (c'est la meme source) et la sequence repart a 1 dans chaque campagne, donc deux
+            # tranches fabriquaient le meme nom -- et la garde d'immuabilite du registre levait.
+            # Sans tranche, `_empreinte_de_tranche` rend "" et le format est exactement l'ancien.
+            candidate_id = (
+                f"cv-{selection_digest[:12]}-{_marqueur_de_tranche}{this_sequence:012d}"
+            )
             # Reserve the sequence before scoring/freezing so a crash cannot
             # reuse a candidate ID whose immutable freeze was already written.
             attempt = _attempt_with_receipt_chain({
@@ -4415,6 +4426,13 @@ def record_frozen_candidate(
         "proposal_method": economic_result.get("proposal_method"),
         "proposal_seed": economic_result.get("proposal_seed"),
         "temporal_windows": economic_result.get("temporal_windows"),
+        # LA FENETRE DU CANDIDAT, sans laquelle il n'est comparable a rien : dix-neuf tranches
+        # gelent sous le MEME `selection_digest` (c'est la meme source) et la meme
+        # `classification`. Sans ces deux champs, seul le nom du dossier de campagne laisserait
+        # devi- ner qu'il s'agit d'une tranche -- et un candidat trouve sur quatre heures ne se
+        # compare pas a un candidat trouve sur six jours.
+        "tranche": economic_result.get("tranche"),
+        "verdict_partiel": economic_result.get("verdict_partiel") is True,
         "attempt_receipt_sha256": economic_result.get("attempt_receipt_sha256"),
         "trial_receipt_sha256": economic_result.get("trial_receipt_sha256"),
         "candidate_history_path": economic_result.get("candidate_history_path"),

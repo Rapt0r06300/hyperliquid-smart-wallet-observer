@@ -127,3 +127,75 @@ def test_le_recu_d_acces_au_futur_porte_toujours_sa_trace():
     assert recu["verdict"] == "PROVEN"
     assert recu["future_snapshot_never_admitted"] is True
     assert recu["paper_read_only"] is True and recu["real_execution"] is False
+# ───────── deux tranches ne fabriquent pas le même identifiant de candidat ─────────
+# `candidate_id` combinait le digest de la source — identique pour toutes les tranches — et un
+# numéro de séquence tiré du `CHECKPOINT.json` de la campagne, qui repart à 1 dans chaque tranche.
+# Deux tranches produisaient donc `cv-{digest12}-000000000001`, et la garde d'immuabilité du
+# registre levait `IMMUTABLE_COPY_VAULT_CANDIDATE_CONFLICT` sur la seconde — elle avait raison :
+# deux objets différents ne peuvent pas porter le même nom.
+
+def test_deux_tranches_ont_des_empreintes_de_tranche_differentes():
+    from hl_observer.backtesting.copy_vault_identite_campagne import empreinte_de_tranche
+
+    a = empreinte_de_tranche((1_000, 1_999))
+    b = empreinte_de_tranche((2_000, 2_999))
+    assert a != b and len(a) == len(b) == 8, "longueur fixe : les identifiants restent alignés"
+
+
+def test_SANS_tranche_l_empreinte_est_VIDE_donc_le_format_reste_l_ancien():
+    from hl_observer.backtesting.copy_vault_identite_campagne import empreinte_de_tranche
+
+    assert empreinte_de_tranche(None) == ""
+
+
+def test_la_meme_tranche_donne_toujours_la_meme_empreinte():
+    """Sinon une reprise ne retrouverait pas ses propres candidats."""
+    from hl_observer.backtesting.copy_vault_identite_campagne import empreinte_de_tranche
+
+    assert empreinte_de_tranche((7, 9)) == empreinte_de_tranche((7, 9))
+
+
+def test_l_identifiant_de_candidat_PORTE_la_tranche():
+    import inspect
+
+    from hl_observer.backtesting import copy_vault_local_lab as LL
+
+    source = inspect.getsource(LL.run_local_campaign)
+    assert 'candidate_id = (' in source
+    assert '_marqueur_de_tranche' in source
+    # le marqueur vaut "" sans tranche : le format d'origine est alors reconstruit à l'identique
+    assert '_marqueur_de_tranche = f"{_empreinte_tranche}-" if _empreinte_tranche else ""' in source
+
+
+def test_le_format_SANS_tranche_est_byte_pour_byte_l_ancien():
+    """La non-régression qui protège les reçus déjà écrits."""
+    from hl_observer.backtesting.copy_vault_identite_campagne import empreinte_de_tranche
+
+    digest, sequence = "a" * 64, 1
+    marqueur = empreinte_de_tranche(None)
+    marqueur = f"{marqueur}-" if marqueur else ""
+    assert f"cv-{digest[:12]}-{marqueur}{sequence:012d}" == "cv-aaaaaaaaaaaa-000000000001"
+
+
+def test_le_format_AVEC_tranche_est_distinct_et_lisible():
+    from hl_observer.backtesting.copy_vault_identite_campagne import empreinte_de_tranche
+
+    digest = "a" * 64
+    empreinte = empreinte_de_tranche((1_000, 1_999))
+    identifiant = f"cv-{digest[:12]}-{empreinte}-{1:012d}"
+    assert identifiant != "cv-aaaaaaaaaaaa-000000000001"
+    assert identifiant.startswith("cv-aaaaaaaaaaaa-") and identifiant.endswith("-000000000001")
+
+
+# ───────── un candidat gelé porte sa fenêtre, sinon il n'est comparable à rien ─────────
+
+def test_le_recu_du_candidat_gele_PORTE_sa_tranche():
+    """Dix-neuf tranches gèlent sous le MÊME `selection_digest` et la même `classification`."""
+    import inspect
+
+    from hl_observer.backtesting import copy_vault_local_lab as LL
+
+    source = inspect.getsource(LL.record_frozen_candidate)
+    assert '"tranche": economic_result.get("tranche")' in source
+    assert '"verdict_partiel": economic_result.get("verdict_partiel") is True' in source
+

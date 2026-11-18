@@ -25,6 +25,8 @@ tranche, et une campagne sans tranche garde exactement l'ancien chemin.
 """
 from __future__ import annotations
 
+import hashlib
+
 #: Ce qui sépare le digest de la tranche dans un nom de dossier. Choisi parce qu'un digest
 #: hexadécimal ne peut pas le contenir : la coupure est donc sans ambiguïté.
 SEPARATEUR = "-t"
@@ -52,6 +54,24 @@ def digest_de_campagne(nom: str) -> str:
     return nom.split(SEPARATEUR, 1)[0]
 
 
+def empreinte_de_tranche(tranche: tuple[int, int] | None) -> str:
+    """Huit caracteres qui identifient une tranche, pour entrer dans un identifiant de candidat.
+
+    POURQUOI C'EST NECESSAIRE. `candidate_id` combinait le digest de la source -- identique pour
+    toutes les tranches -- et un numero de sequence tire du `CHECKPOINT.json` de la campagne, qui
+    repart a 1 dans chaque tranche. Deux tranches fabriquaient donc le meme identifiant, et la
+    garde d'immuabilite du registre levait `IMMUTABLE_COPY_VAULT_CANDIDATE_CONFLICT` sur la
+    seconde : deux objets differents ne peuvent pas porter le meme nom, et elle avait raison.
+
+    Longueur FIXE, pour que les identifiants restent alignes et lisibles. Sans tranche, on rend
+    une chaine vide : l'appelant construit alors exactement l'ancien format.
+    """
+    if tranche is None:
+        return ""
+    graine = f"{int(tranche[0])}-{int(tranche[1])}"
+    return hashlib.sha256(graine.encode("utf-8")).hexdigest()[:8]
+
+
 def est_tranchee(nom: str) -> bool:
     """Un dossier de campagne porte-t-il une tranche ?
 
@@ -61,4 +81,7 @@ def est_tranchee(nom: str) -> bool:
     return SEPARATEUR in nom
 
 
-__all__ = ["SEPARATEUR", "nom_de_campagne", "digest_de_campagne", "est_tranchee"]
+__all__ = [
+    "SEPARATEUR", "nom_de_campagne", "digest_de_campagne", "est_tranchee",
+    "empreinte_de_tranche",
+]

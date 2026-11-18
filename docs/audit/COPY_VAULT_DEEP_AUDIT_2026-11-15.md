@@ -3501,3 +3501,61 @@ Le coût n'est pas nul : onze groupes de tests rejoués pour rien.
 Ce n'est pas un défaut du dépôt. C'est une propriété de toute chaîne de preuve qui épingle des
 empreintes de fichiers, et elle impose une discipline d'enchaînement plutôt qu'un outil de plus.
 
+---
+
+## 18/11/2026 — ITÉRATION 40 : deux tranches fabriquaient le même nom de candidat
+
+Défaut **bloquant**, trouvé en lecture avant qu'il ne se produise, et conséquence directe de la
+séparation des campagnes (itération 26) :
+
+```python
+candidate_id = f"cv-{selection_digest[:12]}-{this_sequence:012d}"
+```
+
+`selection_digest` est **identique pour toutes les tranches** — c'est la même source — et
+`this_sequence` vient du `CHECKPOINT.json` de la campagne, propre à chaque tranche, qui **repart
+donc à 1**. La tranche 1 et la tranche 2 produisaient tous deux `cv-{digest12}-000000000001`.
+
+Ce que cela casse n'est pas discret : `record_frozen_candidate` retrouve le reçu portant ce
+`run_id`, compare son contenu, le trouve différent (autres fenêtres, autres mesures) et lève
+`IMMUTABLE_COPY_VAULT_CANDIDATE_CONFLICT`. **La deuxième tranche qui gèle un candidat ferait
+échouer la campagne** — et la garde d'immuabilité a raison : deux objets différents ne peuvent pas
+porter le même nom.
+
+**Corrigé** par `empreinte_de_tranche`, huit caractères de longueur fixe placés dans l'identifiant.
+Sans tranche, l'empreinte est vide et le format est reconstruit **à l'identique** — un test le
+vérifie caractère par caractère (`cv-aaaaaaaaaaaa-000000000001`), parce que des reçus déjà écrits
+portent ce format. Vérifié avant de changer quoi que ce soit : aucun format n'est imposé ailleurs,
+ni regex, ni longueur, ni préfixe testé.
+
+La fonction vit dans `copy_vault_identite_campagne`, avec les deux autres sens de la même
+convention. C'est sa place : ce module répond à « qui est cette campagne ? ».
+
+### Et un candidat gelé porte maintenant sa fenêtre
+
+`record_frozen_candidate` écrit un reçu durable par candidat : digest de la source, empreintes du
+moteur et de la configuration, fenêtres TRAIN/OOS, chemins de la campagne. Ni `tranche` ni
+`verdict_partiel` n'y figuraient.
+
+Dix-neuf candidats gelés auraient donc été indistinguables : même `selection_digest`, même
+`classification`, et seule la fin du chemin `candidate_history_path` aurait laissé devi­ner qu'il
+s'agit d'une tranche — en parsant un nom de dossier, ce qu'aucun lecteur ne devrait avoir à faire.
+Or le registre est la mémoire longue des candidats : **un candidat trouvé sur quatre heures ne se
+compare pas à un candidat trouvé sur six jours**, et sans la fenêtre la comparaison est fausse sans
+jamais le dire.
+
+Deux champs copiés du résultat économique, et rien de plus.
+
+### Ce que j'ai vérifié avant de conclure à un défaut
+
+Trois pistes examinées et **écartées**, parce que le code était déjà juste :
+
+* le registre est relu par `record_frozen_candidate`, mais pour **chaîner** les reçus
+  (`previous_receipt_sha256`), pas pour comparer les candidats économiquement ;
+* `COPY_V21_PHYSICAL_FREEZE.json` est **lu** comme baseline, pas écrit : aucune tranche ne le
+  remplace ;
+* le registre écrit en mode `"x"` (création exclusive) sous verrou : pas d'écrasement silencieux
+  possible.
+
+**Tests** : 7 nouveaux ; 119 verts sur les six suites touchées, 21 sur les extractions.
+
