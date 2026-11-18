@@ -299,6 +299,32 @@ def test_save_index_keeps_small_inline_and_switches_to_verified_partitions(tmp_p
     assert read_index(path) == logical
 
 
+def test_save_index_does_not_decode_staged_catalogue_twice(tmp_path, monkeypatch):
+    from tools import partitioned_data_index as module
+
+    logical = _index()
+    original_loader = module.load_partitioned_index
+    calls = []
+
+    def counted_loader(*args, **kwargs):
+        calls.append(True)
+        return original_loader(*args, **kwargs)
+
+    monkeypatch.setattr(module, "load_partitioned_index", counted_loader)
+    path = tmp_path / "catalog" / "DATA_INDEX.json"
+    result = module.save_index(
+        path,
+        logical,
+        max_inline_bytes=1024,
+        max_partition_bytes=240,
+    )
+
+    assert result["format"] == "PARTITIONED"
+    # One independent verification remains after atomic publication. The
+    # temporary staging check is byte-for-byte and must not rebuild 1.8M rows.
+    assert len(calls) == 1
+
+
 def test_save_index_refuses_preexisting_tampered_partition(tmp_path):
     from tools.partitioned_data_index import save_index
 
