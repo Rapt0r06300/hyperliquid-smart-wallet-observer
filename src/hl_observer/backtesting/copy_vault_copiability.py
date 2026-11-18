@@ -35,7 +35,6 @@ import pandas as pd
 # Façade : les entrées et les mesures vivent dans deux modules voisins ; tout reste
 # importable d'ici (interface inchangée pour l'outil d'étude et les tests).
 from hl_observer.backtesting.copy_vault_copiability_entrees import (  # noqa: F401
-    CopiabilityConfig,
     DAY_MS,
     DIRECTIONAL_LABELS,
     EVIDENCE_TIER_LOCAL,
@@ -45,8 +44,9 @@ from hl_observer.backtesting.copy_vault_copiability_entrees import (  # noqa: F4
     H_SLOW_REPLICATION,
     IDENTITY_COLUMNS,
     MECHANISM,
-    PricePanel,
     SCHEMA_VERSION,
+    CopiabilityConfig,
+    PricePanel,
     _to_float,
     alias_legacy_symbols,
     build_candle_panel,
@@ -67,7 +67,7 @@ from hl_observer.backtesting.copy_vault_copiability_mesures import (  # noqa: F4
     slow_replication_persistence,
     unit_time_series_tests,
 )
-
+from hl_observer.contrat_paper import PAPER_EQUITY_USD
 
 # --------------------------------------------------------------------------- 4. synthèse
 
@@ -448,7 +448,7 @@ def run_position_replication_study(
     config: CopiabilityConfig | None = None,
     *,
     max_staleness_ms: int = 900_000,
-    capital_usd: float = 350.0,
+    capital_usd: float = PAPER_EQUITY_USD,
     funding_rates: Mapping[str, np.ndarray] | None = None,
 ) -> dict[str, Any]:
     """Réplication lente du PORTEFEUILLE OBSERVÉ des leaders : persiste-t-elle, coûts déduits ?
@@ -529,7 +529,7 @@ def run_retrospective_study(
     config: CopiabilityConfig | None = None,
     *,
     assumed_lag_ms: int,
-    capital_usd: float = 350.0,
+    capital_usd: float = PAPER_EQUITY_USD,
     funding_rates: Mapping[str, np.ndarray] | None = None,
 ) -> dict[str, Any]:
     """Persistance de la réplication lente sur un historique RECONSTRUIT (fills de backfill).

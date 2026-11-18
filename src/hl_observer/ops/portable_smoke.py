@@ -14,6 +14,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+from hl_observer.backtesting.copy_vault_protocol import PAPER_EQUITY_USD
 from hl_observer.models import DataQuality, SourceMeta
 from hl_observer.normalization.fills import normalize_hyperliquid_fill
 from hl_observer.ops import session_catalog as SC
@@ -123,7 +124,7 @@ def executer_smoke_portable(
     opened = normalized[0].fill
     closed = normalized[1].fill
     assert opened is not None and closed is not None
-    ledger = PaperLedger(starting_balance_usdc=350.0, session_id=run_id)
+    ledger = PaperLedger(starting_balance_usdc=PAPER_EQUITY_USD, session_id=run_id)
     ledger.open_position(
         coin=opened.coin,
         side="LONG",

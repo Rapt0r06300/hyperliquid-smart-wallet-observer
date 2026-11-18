@@ -889,7 +889,7 @@ def run_ouvertures(root: Path, *, lag_s: float, workers: int, write: bool = True
         ledger = {"run_id": run_id, **identity, "evidence_tier": EVIDENCE_TIER_EVENEMENTS,
                   "hypotheses_tested": report["hypotheses_tested"], "verdicts": report["verdicts"],
                   "config": report["config"], "inputs": report["inputs"], "primary": report["primary"],
-                  "capital_350": report["capital_350"], "caveats": report["caveats"],
+                  "compte_paper": report["compte_paper"], "caveats": report["caveats"],
                   "selection": report["selection"],
                   "result_path": str((REPORT_DIR / run_id / "resultat.json").as_posix()),
                   "paper_read_only": True, "real_execution": False, "economically_proven": False}
@@ -1032,7 +1032,7 @@ def render_ouvertures_report(report: dict[str, Any], identity: dict[str, Any]) -
     def bornes(intervalle: Any) -> str:
         return "" if not intervalle else f"[{num(intervalle[0])} ; {num(intervalle[1])}]"
 
-    entrees, primaire, capital, config = report["inputs"], report["primary"], report["capital_350"], report["config"]
+    entrees, primaire, capital, config = report["inputs"], report["primary"], report["compte_paper"], report["config"]
     lignes = [
         "# Ouvertures agressives des leaders — étude d'événements", "",
         f"- Statut des preuves : **{EVIDENCE_TIER_EVENEMENTS}** — exploratoire.",
@@ -1075,7 +1075,7 @@ def render_ouvertures_report(report: dict[str, Any], identity: dict[str, Any]) -
                "|---|---|---|---:|---:|---:|---:|---:|"]
     for c in report["selection"]["cellules"]:
         retenus, eligibles, ecartes = c["retenus"], c["eligibles"], c["ecartes"]
-        ecart, capital_choix = c["ecart_retenus_moins_eligibles"], c["capital_350"]
+        ecart, capital_choix = c["ecart_retenus_moins_eligibles"], c["compte_paper"]
         lignes.append(
             f"| {c['prix']}{' *' if c['primaire'] else ''} | "
             f"{'en direct' if c['periode'] == evenements.PERIODES[0] else 'reconstruite (flatteuse)'} | "

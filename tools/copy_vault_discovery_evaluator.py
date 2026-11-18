@@ -302,7 +302,6 @@ def evaluate_feature_rows(
         "distinct_days": int(stats.get("distinct_days") or 0),
         "net_usd": round(sum(net_values), 8),
         "daily_net_usd": round(daily_net, 8) if daily_net is not None else None,
-        "target_headroom_usd_per_day": round(daily_net - 4.0, 8) if daily_net is not None else None,
         "gross_usd": round(gross, 8),
         "costs_usd": round(costs, 8),
         "pf": round(pf, 8),

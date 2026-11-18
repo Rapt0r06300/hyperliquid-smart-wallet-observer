@@ -72,7 +72,7 @@ def _replication(record: Mapping[str, Any]) -> Preuve | None:
 def _ouvertures(record: Mapping[str, Any]) -> Preuve | None:
     primaire = record.get("primary") or {}
     net = primaire.get("net") or {}
-    capital = record.get("capital_350") or {}
+    capital = (record.get("compte_paper") or record.get("capital_350")) or {}
     requis = int((record.get("config") or {}).get("min_days") or 30)
     # l'espérance au débit du compte, pas le parcours réalisé sur quelques trades (surtout du hasard)
     usd = capital.get("esperance_usd_par_jour", capital.get("net_usd_par_jour"))
@@ -86,7 +86,7 @@ def _selection(record: Mapping[str, Any]) -> Preuve | None:
     choix = (record.get("selection") or {}).get("primaire") or {}
     retenus = choix.get("retenus") or {}
     net = retenus.get("net") or {}
-    capital = choix.get("capital_350") or {}
+    capital = (choix.get("compte_paper") or choix.get("capital_350")) or {}
     return {"effet": net.get("moyenne_bps"), "intervalle": net.get("intervalle_bps"),
             "niveau": retenus.get("niveau_intervalle") or 0.95, "unite": "bps_par_decision",
             "usd_par_jour": capital.get("esperance_usd_par_jour"), "jours": int(net.get("jours") or 0),

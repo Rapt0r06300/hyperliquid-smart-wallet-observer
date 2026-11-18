@@ -40,12 +40,26 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from hl_observer.datasets.coffre_certifie import (  # noqa: E402
-    FAMILLE_BBO, FAMILLE_BOOK_L2, FAMILLE_FILLS_BACKFILL, FAMILLE_FILLS_FORWARD,
+    FAMILLE_BBO,
+    FAMILLE_BOOK_L2,
+    FAMILLE_FILLS_BACKFILL,
+    FAMILLE_FILLS_FORWARD,
+    FAMILLE_POSITION,
+    FAMILLE_TRADES,
     FAMILLE_VENUE,
-    FAMILLE_POSITION, FAMILLE_TRADES,
-    PASS, QUARANTAINE, REPARE, StatsCertif, certifier_record, detecter_famille,
-    identite, motif_non_certifie, nouvellement_accepte, sniffer_famille, version_certificateur,
+    PASS,
+    QUARANTAINE,
+    REPARE,
+    StatsCertif,
+    certifier_record,
+    detecter_famille,
+    identite,
+    motif_non_certifie,
+    nouvellement_accepte,
+    sniffer_famille,
+    version_certificateur,
 )
+from hl_observer.datasets.empreintes_compactes import EnsembleDIdentites
 from hl_observer.ops import verrou_pid  # noqa: E402
 
 COFFRE_RELDIR = Path("runtime") / "coffre_certifie"
@@ -637,7 +651,10 @@ def verifier_lot(racine: Path, fichiers: list[dict[str, Any]]) -> list[str]:
     return anomalies
 
 
-def _precharger_identites(coffre: Path, lots: list[str], source: Path, famille: str, deja_vus: set) -> int:
+def _precharger_identites(
+    coffre: Path, lots: list[str], source: Path, famille: str,
+    deja_vus: "EnsembleDIdentites | set",
+) -> int:
     """Identités déjà déposées pour ce ruban dans ``lots`` -> ``deja_vus`` (aucun doublon à la reprise)."""
     nu = source.name.replace(".gz", "").replace(".jsonl", "")
     noms = {nu, _base_shard(source, coffre.parents[1])}
@@ -830,7 +847,11 @@ def main(argv: list[str] | None = None) -> int:
     etat_path = coffre / "SOURCES_TRAITEES.json"
     etat = _lire_json(etat_path) or {}
 
-    deja_vus: set = set()
+    # Un ENSEMBLE COMPACT, pas un `set` de tuples : l'identite d'un fill contient un hash de
+    # 66 caracteres, et 27,5 millions d'entrees coutaient 8,9 Go -- de quoi faire tomber la machine
+    # a 1,8 Go libres et menacer les collecteurs (18/11/2026, scellement arrete a 68,6 %).
+    # Mesure : 323,2 octets/entree contre 16,4, soit x19,6. Meme reponse a `in` et `add`.
+    deja_vus = EnsembleDIdentites()
     entrees_manifeste: list[dict[str, Any]] = []
     total = StatsCertif()
     scelles_pour_reset: list[Path] = []

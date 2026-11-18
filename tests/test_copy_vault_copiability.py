@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 
 from hl_observer.backtesting import copy_vault_copiability as cop
+from hl_observer.contrat_paper import PAPER_EQUITY_USD
 
 T0 = 1_794_000_000_000  # instant de référence (ms)
 
@@ -314,7 +315,11 @@ def test_module_sans_reseau_ni_chemin_d_execution():
         assert imported <= {"__future__", "math", "collections", "dataclasses", "typing", "numpy", "pandas", "scipy",
                             "hl_observer"}, module.name
         # du projet, seuls le barème de frais et les modules voisins du moteur sont importés
+        # `contrat_paper` est un module FEUILLE : il n'importe aucun module interne, donc le
+        # citer ne tire pas le moteur ici -- ce que ce test garde. Le capital doit bien venir
+        # d'une source unique, et `copy_vault_protocol` chargerait tout `backtesting`.
         assert internes <= {"hl_observer.fees.hyperliquid_fees",
+                            "hl_observer.contrat_paper",
                             "hl_observer.backtesting.copy_vault_copiability_entrees",
                             "hl_observer.backtesting.copy_vault_copiability_mesures"}, module.name
         for forbidden in ("/exchange", "private_key", "mnemonic", "wallet.sign", "eth_account"):
@@ -494,7 +499,9 @@ def test_etude_sur_portefeuilles_observes_reste_exploratoire_et_serialisable():
     assert report["economically_proven"] is False and report["real_execution"] is False
     assert report["verdicts"][0]["status"] == "MORE_DATA" and report["verdicts"][0]["evidence"] == "OBSERVED_POSITIONS"
     assert report["universe_attribution"]["inventory_k240_usd"] > 0
-    assert report["economic_scale"]["usd_per_day_per_10_bps"] == pytest.approx(0.35)
+    # DERIVE du capital : 10 bps de capital par jour. Valait 0.35 sur 350 USD.
+    assert report["economic_scale"]["usd_per_day_per_10_bps"] == pytest.approx(
+        PAPER_EQUITY_USD * 0.001)
 
 
 def test_fill_websocket_sens_lu_dans_signe_et_segment_d_observation_rapide():

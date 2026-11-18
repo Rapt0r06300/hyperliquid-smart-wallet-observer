@@ -6,6 +6,8 @@ import math
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from hl_observer.backtesting.copy_vault_protocol import PAPER_EQUITY_USD
+
 
 def _base(status: str, **values: Any) -> dict[str, Any]:
     return {
@@ -48,15 +50,33 @@ def veto_order_receipt(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     return _base("PROVEN" if not invalid else "REJECTED", verdict="SAFETY_VETO_PRECEDES_PAPER_ORDER" if not invalid else "SAFETY_VETO_ORDER_INVALID", invalid_rows=invalid)
 
 
+#: Tolerance sur le capital : un calcul en flottants rend 99,999999 USD pour 100. La comparaison
+#: doit l'accepter, sans pour autant accepter un capital qui n'est pas celui du contrat.
+TOLERANCE_CAPITAL_USD = 0.01
+
+
 def leverage_cost_receipt(state: Mapping[str, Any]) -> dict[str, Any]:
-    """Expose leverage cost on the canonical 350 USD paper capital."""
+    """Expose le cout du levier sur le capital paper DU CONTRAT, quel qu'il soit.
+
+    Le capital etait compare par EGALITE STRICTE a 350. Passe a 100 USD le 18/11/2026, cette
+    comparaison serait fausse pour toujours : le recu rendrait `UNMEASURABLE` sur chaque
+    evaluation, avec un motif disant « je n'ai pas pu mesurer » alors que la donnee etait complete.
+    Un controle qui refuse tout ne protege rien -- il rend son domaine invisible.
+
+    On compare donc au capital du contrat, IMPORTE et non recopie : une seule valeur existe, et
+    elle suit le contrat sans intervention.
+    """
     if not isinstance(state, Mapping):
         return _base("UNMEASURABLE", reason="leverage_state_missing")
     capital = _number(state.get("capital_usd"))
     leverage = _number(state.get("leverage"))
     cost = _number(state.get("leverage_cost_usd"))
-    valid = capital == 350 and leverage is not None and leverage >= 1 and cost is not None and cost >= 0
-    return _base("PROVEN" if valid else "UNMEASURABLE", verdict="LEVERAGE_COST_ON_CANONICAL_350_USD" if valid else "LEVERAGE_COST_INCOMPLETE", capital_usd=capital, leverage=leverage, leverage_cost_usd=cost)
+    capital_du_contrat = (
+        capital is not None
+        and abs(capital - PAPER_EQUITY_USD) <= TOLERANCE_CAPITAL_USD
+    )
+    valid = capital_du_contrat and leverage is not None and leverage >= 1 and cost is not None and cost >= 0
+    return _base("PROVEN" if valid else "UNMEASURABLE", verdict="LEVERAGE_COST_ON_CONTRACT_CAPITAL" if valid else "LEVERAGE_COST_INCOMPLETE", capital_usd=capital, leverage=leverage, leverage_cost_usd=cost)
 
 
 def vault_concentration_receipt(rows: Sequence[Mapping[str, Any]], *, max_fraction: Any = 0.25) -> dict[str, Any]:

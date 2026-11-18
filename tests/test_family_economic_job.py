@@ -11,6 +11,7 @@ from hl_observer.ops import autonomous_research_job as canonical_job
 from hl_observer.ops.family_economic_job import FAMILY_ECONOMIC_SUITES, validate_family_request
 from hl_observer.simulation.economic_objective import evaluate_objective
 from hl_observer.simulation.vnext_promotion_protocol import build_freeze_manifest
+from hl_observer.simulation.economic_objective import STARTING_CAPITAL_USD
 
 
 def _request(suite: str = "copy-vault-full") -> dict[str, object]:
@@ -134,7 +135,7 @@ def _valid_copy_campaign() -> dict:
     assert economic_contract["certification"]["ready"] is True
     campaign = {
         "family": "copy_vault",
-        "starting_capital_usd": 350.0,
+        "starting_capital_usd": STARTING_CAPITAL_USD,
         "paper_read_only": True,
         "real_execution": False,
         "economic_contract": economic_contract,

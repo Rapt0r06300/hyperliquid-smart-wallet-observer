@@ -6,7 +6,10 @@ import json
 import pytest
 
 from hl_observer.backtesting import copy_vault_v21_frozen as V21
-from hl_observer.backtesting.copy_vault_protocol import MAX_GROSS_EXPOSURE_USD
+from hl_observer.backtesting.copy_vault_protocol import (
+    MAX_GROSS_EXPOSURE_USD,
+    PAPER_EQUITY_USD,
+)
 from hl_observer.simulation.economic_freeze_registry import parameter_hash
 
 
@@ -18,8 +21,8 @@ def _freeze() -> dict:
         "real_execution": False,
         "minimum_leader_fill_notional_usd": 100.0,
         "signed_depth_imbalance_minimum": 0.0,
-        "core_notional_usd": 150.0,
-        "probe_notional_usd": 75.0,
+        "core_notional_usd": MAX_GROSS_EXPOSURE_USD * 0.6,
+        "probe_notional_usd": MAX_GROSS_EXPOSURE_USD * 0.3,
         "daily_profit_lock_usd": 4.0,
         "stop_loss_bps": 50.0,
         "take_profit_bps": 100.0,
@@ -683,7 +686,7 @@ def test_settle_rejects_overlapping_positions_above_paper_gross_limit(
         "coin_daily_limit": 10,
         "max_open_positions": 10,
         "daily_profit_lock_usd": 4.0,
-        "core_notional_usd": 200.0,
+        "core_notional_usd": MAX_GROSS_EXPOSURE_USD * 0.8,
         "probe_notional_usd": 75.0,
         "stop_loss_bps": 50.0,
         "take_profit_bps": 100.0,
@@ -706,7 +709,9 @@ def test_settle_rejects_overlapping_positions_above_paper_gross_limit(
     )
 
     assert len(trades) == 1
-    assert calls == [200.0, 200.0]
+    # LE notionnel du gel, lu dans `params` : le recopier (200.0) le figeait au capital de 350.
+    attendu = params["core_notional_usd"]
+    assert calls == [attendu, attendu]
     assert audit["PAPER_GROSS_EXPOSURE_REJECTED"] == 1
 
 
@@ -738,8 +743,8 @@ def test_capacity_scenario_scales_frozen_sizing_but_remains_diagnostic_only(
         "coin_daily_limit": 10,
         "max_open_positions": 10,
         "daily_profit_lock_usd": 4.0,
-        "core_notional_usd": 150.0,
-        "probe_notional_usd": 75.0,
+        "core_notional_usd": MAX_GROSS_EXPOSURE_USD * 0.6,
+        "probe_notional_usd": MAX_GROSS_EXPOSURE_USD * 0.3,
         "stop_loss_bps": 50.0,
         "take_profit_bps": 100.0,
     }
@@ -761,8 +766,12 @@ def test_capacity_scenario_scales_frozen_sizing_but_remains_diagnostic_only(
         capital_scenario_usd=700.0,
     )
 
-    assert calls == [300.0, 300.0]
-    assert trades[0]["notional_usd"] == 300.0
+    # LA RELATION : le diagnostic de capacite met le notionnel gele a l'echelle
+    # `capital_scenario_usd / PAPER_EQUITY_USD`. Figer 300.0 supposait un capital de 350
+    # (150 x 700/350) ; sur 100 l'echelle vaut 7 et non 2.
+    attendu = params["core_notional_usd"] * (700.0 / PAPER_EQUITY_USD)
+    assert calls == [attendu, attendu]
+    assert trades[0]["notional_usd"] == attendu
     assert trades[0]["economic_scope"] == "DIAGNOSTIC_ONLY"
     assert trades[0]["economically_proven"] is False
     assert audit.get("PAPER_GROSS_EXPOSURE_REJECTED", 0) == 0

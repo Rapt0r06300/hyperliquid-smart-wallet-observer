@@ -6,10 +6,10 @@ import time
 from pathlib import Path
 from urllib.parse import unquote
 
+from hl_observer.backtesting.copy_vault_protocol import PAPER_EQUITY_USD
 from hl_observer.config.settings import Settings
 from hl_observer.simulation.accounting_truth import first_not_none
 from hl_observer.simulation.ledger_integrity import (
-    GENESIS_HASH,
     LEDGER_CORRUPTED,
     LEDGER_OK,
     RECOVERY_REQUIRED,
@@ -19,7 +19,6 @@ from hl_observer.simulation.ledger_integrity import (
 )
 from hl_observer.ui.state import UiState
 from hl_observer.utils.time import now_ms
-
 
 STATE_VERSION = 1
 STATE_FILENAME = "ui_simulation_state.json"
@@ -149,7 +148,7 @@ def load_or_create_ui_state(settings: Settings) -> UiState:
     return state
 
 
-def reset_simulation_state(settings: Settings, *, starting_equity_usdt: float = 350.0) -> UiState:
+def reset_simulation_state(settings: Settings, *, starting_equity_usdt: float = PAPER_EQUITY_USD) -> UiState:
     """Start a fresh launcher session while keeping the reset local and explicit."""
 
     state = UiState()

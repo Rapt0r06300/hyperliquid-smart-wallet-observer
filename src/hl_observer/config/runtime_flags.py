@@ -6,8 +6,9 @@ Les défauts sont alignés sur LANCER_HYPERSMART.cmd (capital 350 USDT).
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
+
+from hl_observer.backtesting.copy_vault_protocol import PAPER_EQUITY_USD
 
 
 def _bool(name: str, default: bool = False) -> bool:
@@ -62,7 +63,7 @@ class SecurityInvariants:
 
 @dataclass(frozen=True, slots=True)
 class SizingFlags:
-    capital_usd: float = 350.0
+    capital_usd: float = PAPER_EQUITY_USD
     leverage: int = 5
     max_total_exposure_usd: float = 100.0
     max_open_positions: int = 2

@@ -19,6 +19,7 @@ from hl_observer.ops.final_economic_certification import (
 )
 from hl_observer.simulation.economic_objective import evaluate_objective
 from hl_observer.simulation.vnext_promotion_protocol import build_freeze_manifest
+from hl_observer.simulation.economic_objective import STARTING_CAPITAL_USD
 
 FAMILIES = ("copy_vault",)
 
@@ -61,7 +62,7 @@ def _certified_campaign(family: str) -> dict:
         ).receipt()
     row = {
         "family": family,
-        "starting_capital_usd": 350.0,
+        "starting_capital_usd": STARTING_CAPITAL_USD,
         "paper_read_only": True,
         "real_execution": False,
         "economic_contract": economic_contract,

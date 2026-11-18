@@ -9,6 +9,7 @@ from tools.build_global_implementation_closure import (
     validate_current_scoreboard_receipt,
     validate_frozen_coverage_receipt,
 )
+from hl_observer.simulation.economic_objective import STARTING_CAPITAL_USD
 
 
 def _phase():
@@ -40,7 +41,7 @@ def _scoreboard():
         "schema_version": "hypersmart.economic_family_scoreboards.v2",
         "families": {"copy_vault": {"verdict": "MORE_DATA"}},
         "active_families": ["copy_vault"],
-        "starting_capital_usd": 350.0,
+        "starting_capital_usd": STARTING_CAPITAL_USD,
         "paper_read_only": True,
         "real_execution": False,
     }

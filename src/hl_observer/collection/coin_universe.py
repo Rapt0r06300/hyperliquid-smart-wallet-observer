@@ -32,12 +32,14 @@ PUR (sauf l'horloge, injectable). Aucun ordre reel.
 """
 from __future__ import annotations
 
+import math
 import threading
 import time
-import math
 from collections.abc import Mapping
-from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_FLOOR
+from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal, InvalidOperation
 from typing import Any
+
+from hl_observer.backtesting.copy_vault_protocol import PAPER_EQUITY_USD
 
 # Bornes : un registre non borne finirait par faire sonder 300 marches toutes les 30 s.
 MAX_COINS = 200
@@ -161,7 +163,7 @@ def validate_okx_paper_notional(
     item: Mapping[str, object],
     *,
     reference_price: object,
-    paper_notional_usd: object = 350.0,
+    paper_notional_usd: object = PAPER_EQUITY_USD,
 ) -> tuple[bool, str]:
     """Reject a contract whose minimum size cannot fit the paper notional."""
     try:

@@ -16,6 +16,7 @@ from hl_observer.simulation.economic_family_gate import (
     separate_technical_and_economic_certification,
 )
 from hl_observer.simulation.economic_objective import TARGET_NET_USD
+from hl_observer.simulation.economic_objective import STARTING_CAPITAL_USD
 
 
 def _segment(net: float, count: int, char: str, *, no_lookahead=False, post_freeze=False):
@@ -39,7 +40,7 @@ def _proof(family: str, *, oos_net: float = 2.6, forward_net: float = 2.6):
         "family": family,
         "paper_read_only": True,
         "real_execution": False,
-        "starting_capital_usd": 350.0,
+        "starting_capital_usd": STARTING_CAPITAL_USD,
         "parameters_frozen": True,
         "opened_positions": 4,
         "closed_positions": 4,

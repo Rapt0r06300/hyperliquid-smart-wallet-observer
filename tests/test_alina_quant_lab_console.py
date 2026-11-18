@@ -26,8 +26,8 @@ def _sample_physical_freeze() -> dict:
         "real_execution": False,
         "minimum_leader_fill_notional_usd": 100.0,
         "signed_depth_imbalance_minimum": 0.0,
-        "core_notional_usd": 150.0,
-        "probe_notional_usd": 75.0,
+        "core_notional_usd": MAX_GROSS_EXPOSURE_USD * 0.6,
+        "probe_notional_usd": MAX_GROSS_EXPOSURE_USD * 0.3,
         "daily_profit_lock_usd": 4.0,
         "stop_loss_bps": 50.0,
         "take_profit_bps": 100.0,
@@ -78,16 +78,17 @@ def test_lab_recognizes_a_valid_physical_freeze_without_promoting_it(
 ) -> None:
     payload = _sample_physical_freeze()
     params = payload["freeze"]["parameters"]
-    params["core_notional_usd"] = 200.0
+    params["core_notional_usd"] = MAX_GROSS_EXPOSURE_USD * 0.8
     payload["freeze"]["parameters_sha256"] = parameter_hash(params)
     target = tmp_path / "freeze.json"
     target.write_text(json.dumps(payload), encoding="utf-8")
 
     result = assess_physical_freeze(target)
 
-    assert _verified_freeze(payload)["parameters"]["core_notional_usd"] == 200.0
+    assert _verified_freeze(payload)["parameters"]["core_notional_usd"] == (
+        MAX_GROSS_EXPOSURE_USD * 0.8)
     assert result["status"] == "VALID_PHYSICAL_FREEZE"
-    assert result["core_notional_usd"] == 200.0
+    assert result["core_notional_usd"] == MAX_GROSS_EXPOSURE_USD * 0.8
 
 
 def test_lab_extracts_independent_pytest_summary_counts() -> None:

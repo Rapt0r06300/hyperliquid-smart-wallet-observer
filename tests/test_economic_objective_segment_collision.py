@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from hl_observer.simulation.economic_objective import evaluate_objective
+from hl_observer.simulation.economic_objective import STARTING_CAPITAL_USD
 
 
 def _segment(*, trade_hash: str, no_lookahead: bool = False, post_freeze: bool = False):
@@ -27,7 +28,7 @@ def test_objective_rejects_oos_forward_trade_identity_collision():
         "family": "copy_vault",
         "paper_read_only": True,
         "real_execution": False,
-        "starting_capital_usd": 350.0,
+        "starting_capital_usd": STARTING_CAPITAL_USD,
         "parameters_frozen": True,
         "opened_positions": 4,
         "closed_positions": 4,

@@ -19,6 +19,9 @@ import math
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+
+from hl_observer.backtesting.copy_vault_protocol import PAPER_EQUITY_USD
+
 try:
     from enum import StrEnum
 except ImportError:
@@ -63,7 +66,7 @@ class AdvancedRiskConfig:
     vol_extreme_sizing_mult: float = 0.30
     alpha_decay_max_hours: float = 4.0
     max_correlation: float = 0.85
-    starting_equity_usdt: float = 350.0
+    starting_equity_usdt: float = PAPER_EQUITY_USD
 
 
 @dataclass

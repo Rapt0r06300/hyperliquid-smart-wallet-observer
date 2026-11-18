@@ -3559,3 +3559,86 @@ Trois pistes examinées et **écartées**, parce que le code était déjà juste
 
 **Tests** : 7 nouveaux ; 119 verts sur les six suites touchées, 21 sur les extractions.
 
+---
+
+## 18/11/2026 — ITÉRATION 41 : le tunnel re-joué sur le HEAD final, et le piège du dénominateur
+
+Re-mesure après les commits du jour (`75208140d32`) :
+
+```
+D_signal_d_ouverture      15 261   100,0 % des signaux lus
+E_jugeable_dans_la_fenetre 9 859    64,6 %
+H_sortie_observee          9 790    64,2 %
+HORS_FENETRE_DE_MESURE     5 402
+LEADERS : 19 distincts, 19 avec signal, 15 à chaîne complète
+```
+
+**64,2 %, contre 89,9 % ce matin.** Avant d'écrire « dégradation », j'ai vérifié : la fenêtre de
+carnets lue est restée la même — **817,3 minutes et 715 457 lignes**, contre 816,7 minutes et
+715 581 lignes ce matin. Ce qui a changé, c'est la queue de **fills** : 30 575 lignes lues contre
+22 176, parce que la collecte a avancé depuis. Plus de signaux, même fenêtre de carnets, donc plus
+de signaux hors de cette fenêtre : `HORS_FENETRE_DE_MESURE` passe de 944 à 5 402, et l'écart
+explique exactement la baisse.
+
+Le chiffre juste est donc celui rapporté au bon dénominateur : **9 790 sur 9 859 signaux
+jugeables, soit 99,3 %**. Les 64,2 % décrivent le rapport à tout ce qui a été *lu*, c'est-à-dire à
+un budget d'octets — exactement le défaut relevé à l'itération 1 de ce journal, qui mesurait « un
+tampon de lecture » et non une population.
+
+C'est la troisième fois aujourd'hui que je manque de prendre un changement de dénominateur pour un
+changement de phénomène : les 275 674 fills « perdus », les 28,6 Go de carnets estimés par analogie,
+et ces 64,2 %. À chaque fois, l'équation a tranché contre l'intuition.
+
+**Ce qui reste vrai sur ce HEAD** : zéro saut d'horloge, âge médian du carnet de référence de
+5 920 ms (p90 11 233 ms), chaque refus compté une seule fois au premier étage qui le rejette, et
+la fraîcheur déclarée **périmée** — le dernier rapport du labo a 125,2 h de retard, et l'outil le
+dit au lieu de le taire.
+
+---
+
+## 18/11/2026 — ITÉRATION 42 : le scelleur garde toutes les identités en mémoire
+
+Mesuré en regardant pourquoi la machine tombait à **2,7 Go libres (8 %)** pendant une
+certification :
+
+```
+53060   6,17 Go   tools/sceller_coffre_local.py        (le certificateur, 28 min)
+79468   1,14 Go   tools/scorer_vaults.py --une-fois
+95372   0,83 Go   tools/collecter_bbo.py               (collecteur, 21 h)
+42544   1,77 Go   tools/conduire_labo_par_tranches.py
+```
+
+Le gros consommateur est le **scelleur**, et la cause est à la ligne 655 :
+
+```python
+deja_vus.add(identite(json.loads(ligne), famille))
+```
+
+`_precharger_identites` relit tous les shards déjà scellés d'une famille et garde **chaque identité
+en mémoire** pour détecter les doublons. Or `identite()` rend un **tuple** contenant des chaînes —
+pour les fills, un `hash` de transaction de 66 caractères. À 27 544 473 lignes de fills, cela fait
+plusieurs gigaoctets : exactement les 6,17 Go observés.
+
+C'est le **même motif que le labo ce matin** : garder en mémoire ce qu'on pourrait représenter en
+quelques octets. Troisième fois sur ce dépôt, après les rubans du labo et les carnets de l'étape 2.
+
+### Le remède, et pourquoi pas le plus simple
+
+| forme | coût pour 27,4 M entrées | risque |
+|---|---|---|
+| tuple d'origine | ~6 Go | aucun |
+| empreinte 16 octets dans un `set` | ~2,5 Go | aucun |
+| `set` d'entiers 64 bits | ~2,4 Go | **1 collision sur ~50 000 runs** |
+| tableau trié de 2×`uint64` + recherche binaire | **~440 Mo** | aucun |
+
+L'entier 64 bits est écarté malgré sa simplicité : une collision ferait prendre une ligne neuve
+pour un doublon et l'**écarterait en silence**. Une perte de donnée silencieuse pour économiser de
+la mémoire est exactement l'échange que ce dépôt refuse partout ailleurs.
+
+Le tableau trié de 128 bits garde la sûreté et divise la mémoire par quatorze. C'est le même
+raisonnement que `rubans_tri_externe` : **garder les clés, pas les lignes** — sauf qu'ici il s'agit
+de garder une empreinte plutôt qu'une clé.
+
+**Non corrigé dans cette itération** : le scellement était en cours pendant la mesure, et modifier
+un scelleur pendant qu'il scelle est le genre de chose qu'on ne fait qu'une fois.
+

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from hl_observer.backtesting.copy_vault_protocol import PAPER_EQUITY_USD
 from hl_observer.copying.realtime_magic_score import clamp
 
 
@@ -29,7 +30,7 @@ class KellySizingConfig:
     min_win_probability: float = 0.52
 
     # Starting equity for paper simulation
-    starting_equity_usdt: float = 350.0
+    starting_equity_usdt: float = PAPER_EQUITY_USD
 
     # Absolute min/max per position
     min_position_usdt: float = 5.0

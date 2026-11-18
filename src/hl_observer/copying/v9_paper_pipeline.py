@@ -13,23 +13,27 @@ read-only / paper-only / execution="forbidden". Ce n'est pas un ordre, pas une p
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+import math
+from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
-import math
 
+from hl_observer.backtesting.copy_vault_protocol import PAPER_EQUITY_USD
 from hl_observer.instrument_identity import preserve_native_instrument_symbol
+from hl_observer.signals.entry_supply_diagnostics import (
+    CycleEvent,
+    EntrySupplyReport,
+    build_entry_supply_report,
+)
 from hl_observer.signals.fill_admission import (
+    KIND_ENTRY,
+    KIND_EXIT,
+    KIND_SKIP,
     FillAdmission,
     FillAdmissionConfig,
     admit_live_fill,
     fill_identity,
-    KIND_ENTRY,
-    KIND_EXIT,
-    KIND_SKIP,
 )
-from hl_observer.signals.entry_supply_diagnostics import CycleEvent, build_entry_supply_report, EntrySupplyReport
-
 
 ENTRY_ACTIONS = {"OPEN_LONG", "OPEN_SHORT", "ADD", "INCREASE"}
 
@@ -62,7 +66,7 @@ def _exact_positive_int(value: object) -> int | None:
 
 @dataclass(frozen=True, slots=True)
 class V9PipelineConfig:
-    starting_equity_usdt: float = 350.0
+    starting_equity_usdt: float = PAPER_EQUITY_USD
     max_position_notional_usdt: float = 50.0
     max_total_exposure_usdt: float = 100.0
     min_edge_bps: float = 10.0

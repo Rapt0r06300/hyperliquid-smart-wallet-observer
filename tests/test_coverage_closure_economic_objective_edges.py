@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 
 import hl_observer.simulation.economic_objective as objective
+from hl_observer.simulation.economic_objective import STARTING_CAPITAL_USD
 
 
 def _segment(*, net: float = 2.6, count: int = 2, hash_char: str = "b", **overrides):
@@ -34,7 +35,7 @@ def _proof(**overrides):
         "family": "copy_vault",
         "paper_read_only": True,
         "real_execution": False,
-        "starting_capital_usd": 350.0,
+        "starting_capital_usd": STARTING_CAPITAL_USD,
         "parameters_frozen": True,
         "opened_positions": 4,
         "closed_positions": 4,

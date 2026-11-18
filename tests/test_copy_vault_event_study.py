@@ -10,6 +10,8 @@ import pytest
 from hl_observer.backtesting import copy_vault_event_study as E
 from hl_observer.backtesting.copy_vault_copiability_entrees import PricePanel
 from hl_observer.fees.hyperliquid_fees import TAKER_PERP_BPS
+from hl_observer.contrat_paper import PAPER_EQUITY_USD
+from hl_observer.fees.hyperliquid_fees import MIN_ORDER_VALUE_USD
 
 BAR = 300_000
 HEURE = 3_600_000
@@ -73,11 +75,15 @@ def test_une_derive_apres_les_ouvertures_agressives_est_detectee_et_pas_ailleurs
     assert etude["verdicts"][0]["status"] == "PROMISING" and etude["economically_proven"] is False
     passif = _cellule(etude, "MAKER_OPEN")
     assert abs(passif["brut"]["moyenne_bps"]) < 8.0 and passif["net"]["moyenne_bps"] < 0   # rien à copier là
-    capital = etude["capital_350"]
-    assert capital["status"] == "OK" and capital["taille_ligne_usd"] == 70.0 and capital["net_usd_par_jour"] > 0
+    capital = etude["compte_paper"]
+    # La taille d'une ligne DERIVE du capital : capital / lignes. Valait 70 USD sur 350.
+    ligne_attendue = PAPER_EQUITY_USD / CONFIG.slots
+    assert capital["status"] == "OK" and capital["taille_ligne_usd"] == ligne_attendue
+    assert capital["net_usd_par_jour"] > 0
     # l'espérance applique au débit du compte le net moyen de TOUTES les décisions, pas des seules retenues
     assert capital["esperance_usd_par_jour"] == pytest.approx(
-        capital["trades_par_jour"] * 70.0 * capital["net_moyen_toutes_decisions_bps"] / 1e4)
+        capital["trades_par_jour"] * ligne_attendue
+        * capital["net_moyen_toutes_decisions_bps"] / 1e4)
     assert capital["net_moyen_toutes_decisions_bps"] == pytest.approx(40.0 - COUT, abs=4.0)
     assert capital["refus_sans_place"] > 0                     # 12 décisions par jour, 5 places : le capital borne
 
@@ -205,7 +211,7 @@ def test_ecart_inconnu_net_inconnu_et_le_compte_de_350_usd_ne_trade_pas():
     fills, panel = _monde(jours=40, leaders=4, seed=5)
     etude = _etude(fills, panel, ecarts={})
     assert etude["primary"]["net"]["moyenne_bps"] is None and etude["primary"]["brut"]["moyenne_bps"] > 0
-    assert etude["capital_350"]["status"] == "UNMEASURABLE"
+    assert etude["compte_paper"]["status"] == "UNMEASURABLE"
     assert etude["verdicts"][0]["status"] == "MORE_DATA"
     # coin sans prix : compté, jamais valorisé
     inconnu = pd.concat([fills, pd.DataFrame([_fill("0xzzz", "ABSENT", T0 + 20 * JOUR)])])
@@ -219,9 +225,13 @@ def test_le_compte_borne_par_ses_places_et_l_ordre_des_lignes_ne_change_rien():
     a = E.simulate_capital(table, horizon_h=4, config=CONFIG)
     b = E.simulate_capital(table.sample(frac=1.0, random_state=7), horizon_h=4, config=CONFIG)
     assert a == b and a["trades"] + a["refus_sans_place"] == len(table)
-    large = E.simulate_capital(table, horizon_h=4, config=replace(CONFIG, slots=35))      # 10 USD : encore permis
+    # LES BORNES SONT CALCULEES, pas ecrites : 35 et 36 lignes encodaient un capital de 350
+    # (lignes de 10,00 et 9,72 USD, de part et d'autre du minimum). On verifie la REGLE --
+    # une ligne ne descend jamais sous le minimum -- quel que soit le capital.
+    lignes_max = int(PAPER_EQUITY_USD // MIN_ORDER_VALUE_USD)
+    large = E.simulate_capital(table, horizon_h=4, config=replace(CONFIG, slots=lignes_max))
     assert large["status"] == "OK" and large["trades"] > a["trades"]
-    trop = E.simulate_capital(table, horizon_h=4, config=replace(CONFIG, slots=36))       # 9,72 USD : refusé
+    trop = E.simulate_capital(table, horizon_h=4, config=replace(CONFIG, slots=lignes_max + 1))
     assert trop["status"] == "UNMEASURABLE"
     assert E.run_event_study(fills.iloc[:0], {}, {"p": (panel, BAR)}, ECARTS, CONFIG)["primary"]["evenements"] == 0
 
@@ -258,7 +268,7 @@ def test_la_selection_en_marche_avant_retient_les_leaders_au_passe_gagnant():
     assert abs(eligibles["net"]["moyenne_bps"] + COUT) < 8                # tout copier : on ne paie que les frais
     ecart = choix["ecart_retenus_moins_eligibles"]
     assert ecart["moyenne_bps"] > 30 and ecart["intervalle_bps"][0] > 0
-    assert choix["capital_350"]["esperance_usd_par_jour"] > 0
+    assert choix["compte_paper"]["esperance_usd_par_jour"] > 0
     verdicts = {v["hypothesis"]: v["status"] for v in etude["verdicts"]}
     assert verdicts[E.H_SELECTED_LEADERS] == "PROMISING" and verdicts[E.H_AGGRESSIVE_OPEN] != "PROMISING"
     assert etude["hypotheses_tested"] == (3 * 3 + 1) * 1 * 2             # la règle de sélection est comptée
@@ -296,4 +306,4 @@ def test_sans_competence_la_selection_ne_trouve_rien_et_n_est_pas_declaree_prome
     assert ecart["intervalle_bps"] is None or ecart["intervalle_bps"][0] <= 0     # pas mieux que tout copier
     vide = E.walk_forward_selection(E.build_events(fills.iloc[:0], {}, CONFIG).assign(entree=[], net_bps=[]),
                                     horizon_h=4, niveau=0.95, config=CONFIG)
-    assert vide["retenus"]["evenements"] == 0 and vide["capital_350"]["status"] == "UNMEASURABLE"
+    assert vide["retenus"]["evenements"] == 0 and vide["compte_paper"]["status"] == "UNMEASURABLE"

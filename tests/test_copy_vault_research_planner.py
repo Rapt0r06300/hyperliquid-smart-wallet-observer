@@ -23,7 +23,7 @@ def _ouvertures(statut, net_bps, intervalle, jours, usd):
     return {"run_id": "o1", "evidence_tier": "T", "config": {"min_days": 30},
             "primary": {"net": {"moyenne_bps": net_bps, "intervalle_bps": intervalle, "jours": jours},
                         "niveau_intervalle": 0.95},
-            "capital_350": {"net_usd_par_jour": usd},
+            "compte_paper": {"net_usd_par_jour": usd},
             "verdicts": [{"hypothesis": "copy_vault_aggressive_open_drift", "status": statut, "reason": "x"}]}
 
 
@@ -155,7 +155,7 @@ def test_la_selection_de_leaders_est_lue_par_le_planificateur():
     record = {"run_id": "o2", "config": {"min_days": 30},
               "selection": {"primaire": {"retenus": {"net": {"moyenne_bps": 15.0, "intervalle_bps": [4.0, 26.0], "jours": 35},
                                                      "niveau_intervalle": 0.95},
-                                         "capital_350": {"esperance_usd_par_jour": 0.9}}},
+                                         "compte_paper": {"esperance_usd_par_jour": 0.9}}},
               "verdicts": [{"hypothesis": "copy_vault_aggressive_open_selected_leaders", "status": "PROMISING", "reason": "x"}]}
     ligne = P.build_plan([record])["hypotheses"][0]
     assert ligne["effet"] == 15.0 and ligne["usd_par_jour"] == 0.9 and ligne["lecture"] == "SIGNAL_PROMETTEUR"

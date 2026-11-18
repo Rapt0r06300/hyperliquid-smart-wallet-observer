@@ -34,6 +34,12 @@ from typing import Any
 RACINE = Path(__file__).resolve().parents[1]
 if str(RACINE / "src") not in sys.path:
     sys.path.insert(0, str(RACINE / "src"))
+# La RACINE aussi : `copy_vault_local_lab` importe `tools.copy_vault_continuity`, donc sans elle
+# l'import du labo leve `ModuleNotFoundError: No module named 'tools'`. Defaut trouve en lancant
+# la conduite reelle le 18/11/2026 : `--plan-seulement` ne l'avait jamais vu, puisqu'il ne charge
+# pas le labo. Un outil dont seul le mode « plan » a tourne n'est pas un outil verifie.
+if str(RACINE) not in sys.path:
+    sys.path.insert(0, str(RACINE))
 
 from hl_observer.backtesting import agregation_tranches as AG  # noqa: E402
 from hl_observer.ops import budget_ram as RAM  # noqa: E402
@@ -100,6 +106,101 @@ def densite_par_pas(ruban: Path, *, pas_ms: int = PAS_MS) -> dict[int, int]:
             seau = int(trouve.group(1)) // pas_ms * pas_ms
             compte[seau] = compte.get(seau, 0) + 1
     return compte
+
+
+#: Les familles du coffre qui portent des fills de leaders. Ce sont elles qui dimensionnent les
+#: tranches : les carnets suivent le meme decoupage temporel, et les autres familles sont legeres.
+FAMILLES_FILLS = ("fills_forward", "fills_backfill")
+
+
+def densite_depuis_le_coffre(
+    index: Path, *, familles: Sequence[str] = FAMILLES_FILLS, pas_ms: int = PAS_MS,
+    depuis_ms: int | None = None, jusqu_a_ms: int | None = None,
+) -> dict[str, Any]:
+    """La densite par pas de temps, lue dans l'INDEX du coffre -- sans ouvrir un seul shard.
+
+    Chaque shard porte `famille`, `ts_min_ms`, `ts_max_ms` et `deposes`. Un shard qui tient dans un
+    seul pas y verse toutes ses lignes (exact) ; un shard a cheval les repartit au prorata de la
+    duree, ce qui est une HYPOTHESE -- la vraie repartition peut etre concentree sur quelques
+    minutes. Acceptable pour dimensionner des tranches, pas pour mesurer quoi que ce soit, et le
+    nombre de shards concernes est publie : sans lui, on ne saurait pas si le plan vaut 99 % ou 60 %.
+    """
+    try:
+        charge = json.loads(Path(index).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return {"densite": {}, "raison": f"INDEX_ILLISIBLE:{type(exc).__name__}",
+                "shards_lus": 0, "shards_repartis": 0, "lignes": 0}
+    shards = charge.get("shards")
+    if not isinstance(shards, list):
+        return {"densite": {}, "raison": "INDEX_SANS_SHARDS",
+                "shards_lus": 0, "shards_repartis": 0, "lignes": 0}
+    voulues = {str(f) for f in familles}
+    densite: dict[int, int] = {}
+    lus = repartis = lignes = 0
+    sans_bornes = hors_fenetre = hors_lignes = 0
+
+    def _dans_la_fenetre(seau: int) -> bool:
+        """Un seau est retenu s'il recoupe la fenetre du labo. Le pas entier compte : un seau qui
+        commence avant `depuis_ms` mais se termine apres porte des lignes que le labo lira."""
+        if depuis_ms is not None and seau + pas_ms - 1 < depuis_ms:
+            return False
+        return not (jusqu_a_ms is not None and seau > jusqu_a_ms)
+    for shard in shards:
+        if not isinstance(shard, dict) or str(shard.get("famille")) not in voulues:
+            continue
+        try:
+            debut = int(shard["ts_min_ms"])
+            fin = int(shard["ts_max_ms"])
+            deposes = int(shard["deposes"])
+        except (KeyError, TypeError, ValueError):
+            sans_bornes += 1
+            continue
+        if deposes <= 0 or debut <= 0 or fin < debut:
+            sans_bornes += 1
+            continue
+        # Hors de la FENETRE DU LABO, un shard ne sera jamais lu : le compter ferait annoncer un
+        # travail que personne ne fera. Le coffre porte 14 031 heures ; le labo en lit 129.
+        if depuis_ms is not None and fin < depuis_ms:
+            hors_fenetre += 1
+            continue
+        if jusqu_a_ms is not None and debut > jusqu_a_ms:
+            hors_fenetre += 1
+            continue
+        lus += 1
+        premier, dernier = debut // pas_ms, fin // pas_ms
+        if premier == dernier:
+            seau = premier * pas_ms
+            if _dans_la_fenetre(seau):
+                densite[seau] = densite.get(seau, 0) + deposes
+                lignes += deposes
+            else:
+                hors_lignes += deposes
+            continue
+        repartis += 1
+        seaux = list(range(premier, dernier + 1))
+        part, reste = divmod(deposes, len(seaux))
+        for rang, index_seau in enumerate(seaux):
+            seau = index_seau * pas_ms
+            # le reste va aux premiers seaux : la somme reste EXACTE, aucune ligne perdue
+            portion = part + (1 if rang < reste else 0)
+            # ON NE VERSE QUE DANS LES SEAUX DE LA FENETRE. Un shard de 2023 finissant apres le
+            # 13/11/2026 passait le filtre des shards et versait des lignes dans des milliers de
+            # seaux anterieurs : le plan annoncait 14 031 heures de travail imaginaire.
+            if _dans_la_fenetre(seau):
+                densite[seau] = densite.get(seau, 0) + portion
+                lignes += portion
+            else:
+                hors_lignes += portion
+    return {
+        "densite": densite, "raison": None, "shards_lus": lus,
+        "shards_repartis": repartis, "shards_sans_bornes": sans_bornes,
+        "shards_hors_fenetre": hors_fenetre, "lignes": lignes,
+        "lignes_hors_fenetre": hors_lignes,
+        "fenetre": [depuis_ms, jusqu_a_ms],
+        # Ce que le plan vaut : la part des shards dont les lignes ont ete REPARTIES au prorata
+        # plutot que placees exactement. Sans ce chiffre, on ne saurait pas s'il vaut 99 % ou 60 %.
+        "part_repartie": round(repartis / lus, 4) if lus else None,
+    }
 
 
 def decouper(
@@ -447,6 +548,72 @@ def _lanceur_reel(max_trials: int, campaign_root: Path | None, repository_root: 
     return lancer
 
 
+def _plan_depuis_le_coffre(args: Any, pas: int) -> int:
+    """Le plan annonce par le CERTIFICATEUR : ce que le prochain rejeu du labo decoupera.
+
+    Borne a la fenetre du labo (`choisir_la_fenetre`), parce que le coffre porte tout l'historique
+    et que le labo ne lit que depuis le premier jour liable. Sans cette borne, on annoncerait
+    soixante-trois tranches la ou il en fera dix-neuf.
+    """
+    index = RACINE / "runtime" / "coffre_certifie" / "LOCAL_INDEX.json"
+    try:
+        from hl_observer.backtesting.copy_vault_fenetre_locale import choisir_la_fenetre
+
+        fenetre = choisir_la_fenetre(RACINE)
+        depuis = int(fenetre.get("depuis_ms") or 0) or None
+        motif = str(fenetre.get("motif") or "")
+    except Exception as exc:                  # noqa: BLE001 - on le DIT au lieu de deviner
+        depuis, motif = None, f"FENETRE_INDISPONIBLE:{type(exc).__name__}"
+    mesure = densite_depuis_le_coffre(index, pas_ms=pas, depuis_ms=depuis)
+    if mesure["raison"] is not None:
+        print(f"  PLAN INDISPONIBLE : {mesure['raison']} ({index})")
+        return 2
+    if not mesure["densite"]:
+        print("  AUCUN FILL dans la fenetre du labo — rien a decouper, et ce n'est pas un zero.")
+        print(f"     fenetre : depuis {depuis} ({motif})"
+              f" · {mesure['shards_hors_fenetre']:,} shard(s) hors fenetre")
+        return 2
+    tranches = decouper(mesure["densite"], budget=args.budget, pas_ms=pas)
+    couv = AG.couverture(tranches)
+    print(f"  PLAN DE TRANCHES DU PROCHAIN REJEU (lu dans l'index du coffre, {index.name})")
+    print(f"     fenetre du labo     : depuis {_jour(depuis) if depuis else 'origine'} ({motif})")
+    print(f"     fills concernes     : {mesure['lignes']:,} sur {mesure['shards_lus']:,} shard(s)"
+          f" · {mesure['shards_hors_fenetre']:,} shard(s) et"
+          f" {mesure['lignes_hors_fenetre']:,} ligne(s) hors fenetre")
+    print(f"     tranches a prevoir  : {len(tranches)} AU PLUS (budget {args.budget:,} fills)")
+    print("     note                : BORNE HAUTE. Le coffre porte les fills BRUTS ; le labo"
+          " ecarte les doublons")
+    print("                           (3 543 350 au dernier rejeu) et les non-causaux. Mesure du"
+          " 18/11 : 32 annoncees, 19 faites.")
+    print(f"     couverture          : continue={couv['continue']}"
+          f" · {couv['etendue_ms'] / 3_600_000:.0f} h")
+    if mesure["part_repartie"]:
+        print(f"     part APPROXIMEE     : {mesure['part_repartie'] * 100:.0f} % des shards"
+              " chevauchent plusieurs pas, leurs lignes sont reparties au prorata")
+    if args.sortie:
+        destination = Path(args.sortie)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with open(destination, "w", encoding="utf-8", newline="") as flux:
+            json.dump({
+                "schema": "hypersmart.plan_tranches_coffre.v1",
+                "source": "LOCAL_INDEX", "fenetre_depuis_ms": depuis, "motif_fenetre": motif,
+                "pas_ms": pas, "budget_lignes": args.budget,
+                # Le plan decrit le travail MAXIMAL : les fills bruts du coffre incluent les
+                # doublons et les non-causaux que le labo ecartera. Mesure du 18/11/2026 :
+                # 13 503 314 bruts -> 8 464 251 retenus, soit 32 tranches annoncees pour 19 faites.
+                "borne": "HAUTE",
+                "pourquoi_borne_haute": (
+                    "fills bruts du coffre : doublons inter-sources et fills non causaux"
+                    " seront ecartes par le labo"
+                ),
+                "tranches": [list(t) for t in tranches], "couverture": couv,
+                "mesure": {k: v for k, v in mesure.items() if k != "densite"},
+                "paper_read_only": True, "real_execution": False,
+            }, flux, ensure_ascii=False, indent=2, default=str)
+        print(f"     plan ecrit          : {destination}")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("workspace", help="le workspace matérialisé par le labo")
@@ -454,8 +621,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                    help=f"lignes de fills par tranche (défaut {BUDGET_LIGNES:,})")
     p.add_argument("--pas-heures", type=int, default=1, help="granularité du découpage")
     p.add_argument("--max-trials", type=int, default=1)
+    p.add_argument("--max-tranches", type=int, default=0,
+                   help="ne conduire que les N premieres tranches (0 = toutes) : un essai en petit "
+                        "avant une conduite de plusieurs heures. L'agregat reste NON exploitable, "
+                        "puisqu'il manque des tranches.")
     p.add_argument("--plan-seulement", action="store_true",
                    help="mesurer et afficher le découpage, sans lancer le labo")
+    p.add_argument("--depuis-le-coffre", action="store_true",
+                   help="calcule le plan depuis l'INDEX du coffre (0,4 s, sans ouvrir un shard) "
+                        "au lieu du ruban du workspace, et s'arrete")
     p.add_argument("--journal", default="",
                    help="journal de reprise (JSONL) : les tranches deja faites sont reprises")
     p.add_argument("--sortie", default="")
@@ -463,6 +637,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     workspace = Path(args.workspace).resolve()
     pas = max(1, args.pas_heures) * 3_600_000
+
+    if args.depuis_le_coffre:
+        return _plan_depuis_le_coffre(args, pas)
     ruban = workspace / RUBAN_FILLS
     print(f"  mesure de la densité de {ruban.name}…", flush=True)
     depart = time.time()
@@ -491,6 +668,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     jours = journees_utc(densite)
     print(f"  journees UTC du corpus : {len(jours)} ({jours[0]} -> {jours[-1]})")
+    toutes = list(tranches)
+    if args.max_tranches and args.max_tranches < len(toutes):
+        tranches = toutes[: args.max_tranches]
+        print(f"  CONDUITE PARTIELLE : {len(tranches)} tranche(s) sur {len(toutes)}."
+              " L'agregat restera NON exploitable, et c'est voulu.")
     def lignes_de(tranche: tuple[int, int]) -> int:
         return sum(n for seau, n in densite.items() if tranche[0] <= seau <= tranche[1])
 
@@ -504,9 +686,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         ratios=(("temporally_aligned_add_signals", "entries"),),
         journal=lambda message: print(message, flush=True),
     )
+    resultat["conduite_partielle"] = len(tranches) < len(toutes)
+    resultat["tranches_du_decoupage_complet"] = len(toutes)
     agregat = resultat["agregat"]
     print(f"\n  VERDICT GLOBAL : {agregat['verdict']['status']} "
           f"(exploitable={agregat['exploitable']})")
+    if resultat["conduite_partielle"]:
+        print(f"  conduite PARTIELLE : {len(tranches)} sur {len(toutes)} tranches —"
+              " non exploitable par construction, pas par defaut")
     if not agregat["exploitable"]:
         print(f"  non exploitable : {agregat.get('raison_non_exploitable')}")
     print(f"  jours UTC distincts (union) : {agregat['jours']['distincts']}"
