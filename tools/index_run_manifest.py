@@ -14,8 +14,10 @@ except ModuleNotFoundError:
     from manifest_policy import classify_manifest
 
 try:
+    from tools.measured_catalog_patches import load_patch
     from tools.partitioned_data_index import read_index, save_index, SCHEMA as PARTITION_SCHEMA
 except ModuleNotFoundError:
+    from measured_catalog_patches import load_patch
     from partitioned_data_index import read_index, save_index, SCHEMA as PARTITION_SCHEMA
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -199,8 +201,8 @@ def _load_size_proofs(root: Path) -> dict[str, Mapping[str, Any]]:
     if not path.is_file():
         return {}
     try:
-        doc = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        doc = load_patch(path, "sizes")
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
         return {}
     entries = doc.get("sizes") if isinstance(doc, Mapping) else None
     return dict(entries) if isinstance(entries, Mapping) else {}

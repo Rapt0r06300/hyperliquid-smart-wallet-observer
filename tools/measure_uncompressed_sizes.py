@@ -23,8 +23,10 @@ except ModuleNotFoundError:
     from index_run_manifest import hydrate_default_release_repository
 
 try:
+    from tools.measured_catalog_patches import load_patch
     from tools.partitioned_data_index import read_index
 except ModuleNotFoundError:
+    from measured_catalog_patches import load_patch
     from partitioned_data_index import read_index
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -115,16 +117,8 @@ def main() -> None:
 
     index = read_index(INDEX)
     rows = hydrate_default_release_repository(index)
-    size_doc = (
-        json.loads(SIZE_PATCH.read_text(encoding="utf-8"))
-        if SIZE_PATCH.exists()
-        else {"sizes": {}}
-    )
-    record_doc = (
-        json.loads(RECORD_PATCH.read_text(encoding="utf-8"))
-        if RECORD_PATCH.exists()
-        else {"records": {}}
-    )
+    size_doc = load_patch(SIZE_PATCH, "sizes") if SIZE_PATCH.exists() else {"sizes": {}}
+    record_doc = load_patch(RECORD_PATCH, "records") if RECORD_PATCH.exists() else {"records": {}}
     sizes = size_doc.get("sizes") if isinstance(size_doc.get("sizes"), dict) else {}
     records = (
         record_doc.get("records") if isinstance(record_doc.get("records"), dict) else {}

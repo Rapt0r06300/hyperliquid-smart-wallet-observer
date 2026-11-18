@@ -111,38 +111,39 @@ def test_negative_record_component_is_never_certified_exact():
     assert not merged["coverage_complete"]
 
 
-def test_oversize_second_patch_preserves_first_patch_bytes(tmp_path, monkeypatch):
-    from tools import merge_measured_catalog_patches as merger
+def test_oversize_measurement_tables_are_partitioned_without_loss(tmp_path, monkeypatch):
+    from tools import measured_catalog_patches as storage
+    from tools.measured_catalog_patches import load_patch
+
     root, measured = tmp_path / "repo", tmp_path / "measured"
     (root / "catalog").mkdir(parents=True)
     measured.mkdir()
     (root / "catalog" / "DATA_INDEX.json").write_text(
-        json.dumps({"shards": [row()]}), encoding="utf-8")
-    originals = {}
-    values = [
-        ("UNCOMPRESSED_SIZE_PATCH.json", "sizes", {
-            "asset_sha256": "a" * 64, "uncompressed_bytes": 200}),
-        ("RECORD_COUNT_PATCH.json", "records", record()),
-    ]
-    for filename, kind, evidence in values:
-        original = root / "catalog" / filename
-        original.write_text(json.dumps({kind: {"example": evidence}}),
-                            encoding="utf-8")
-        originals[filename] = original.read_bytes()
+        json.dumps({"shards": [row()]}), encoding="utf-8"
+    )
+    size_value = {"asset_sha256": "a" * 64, "uncompressed_bytes": 200}
+    record_value = record()
+    for filename, kind, evidence in (
+        ("UNCOMPRESSED_SIZE_PATCH.json", "sizes", size_value),
+        ("RECORD_COUNT_PATCH.json", "records", record_value),
+    ):
+        (root / "catalog" / filename).write_text(
+            json.dumps({kind: {"example": evidence}}), encoding="utf-8"
+        )
         (measured / filename).write_text(
             json.dumps({kind: {"example": {"retryable": True}}}),
-            encoding="utf-8")
-    sizes = merger.merge_patch(
-        {"sizes": {"example": values[0][2]}},
-        {"sizes": {"example": {"retryable": True}}},
-        index_rows=[row()], kind="sizes",
-        schema="alina.uncompressed_size_patch.v2",
-    )
-    size_length = len(json.dumps(
-        sizes, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-    ).encode("utf-8")) + 1
-    monkeypatch.setattr(merger, "MAX_PATCH_BYTES", size_length + 1)
-    with pytest.raises(ValueError, match="CATALOG_PATCH_NEEDS_PARTITION: RECORD_COUNT_PATCH"):
-        merger.merge_directory(measured, root)
-    assert all((root / "catalog" / name).read_bytes() == value
-               for name, value in originals.items())
+            encoding="utf-8",
+        )
+
+    monkeypatch.setattr(storage, "MAX_INLINE_BYTES", 1)
+    from tools.merge_measured_catalog_patches import merge_directory
+
+    result = merge_directory(measured, root)
+    assert result["sizes"]["exact"] == 1
+    assert result["records"]["exact"] == 1
+    assert load_patch(root / "catalog" / "UNCOMPRESSED_SIZE_PATCH.json", "sizes")["sizes"]["example"] == size_value
+    assert load_patch(root / "catalog" / "RECORD_COUNT_PATCH.json", "records")["records"]["example"] == record_value
+    assert json.loads(
+        (root / "catalog" / "RECORD_COUNT_PATCH.json").read_text()
+    )["schema"] == "alina.measured_patch_partitioned.v1"
+
