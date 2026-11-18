@@ -18,7 +18,10 @@ from __future__ import annotations
 
 import pytest
 
-from tools.alina_git_code_sync import RUNTIME_CHURN_FILES
+from tools.alina_git_code_sync import (
+    RUNTIME_CHURN_FILES,
+    _can_defer_staged_protected,
+)
 
 
 def _classe(sortie_porcelain: str) -> tuple[list[str], list[str]]:
@@ -35,7 +38,10 @@ def _classe(sortie_porcelain: str) -> tuple[list[str], list[str]]:
         chemin = entree[3:].strip().replace("\\", "/")
         if not chemin:
             continue
-        (churn if chemin.casefold() in RUNTIME_CHURN_FILES else bloquants).append(chemin)
+        if chemin.casefold() in RUNTIME_CHURN_FILES or _can_defer_staged_protected(chemin):
+            churn.append(chemin)
+        else:
+            bloquants.append(chemin)
     return bloquants, churn
 
 
