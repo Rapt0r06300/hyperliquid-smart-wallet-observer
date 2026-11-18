@@ -2028,3 +2028,428 @@ actifs. **Trou de collecte : 19:58:32 → 20:06:41, environ 8 minutes.**
 plusieurs minutes sur 1,9 million de fichiers, parfois deux à la fois). Ils sont lancés par
 l'application ChatGPT de bureau. Alina n'y touche pas ; c'est à l'opérateur d'en décider.
 
+### Qui remplit la mémoire du labo (mesure du 17/11 au soir, journée du 14/11, en flux)
+
+| | lignes | part |
+|---|---|---|
+| fills au coffre ce jour-là (201 leaders) | 1 734 349 | 100 % |
+| … vus par le poll (`LIVE_POLL`) | 1 706 585 | 98,4 % |
+| … vus en direct (`LIVE_WS`) | 27 192 | 1,6 % |
+| classés `ARCHIVE` par le plan du 12/11 (non rejoués) | 167 010 | 10 % |
+| **gardés par le labo** | **1 567 339** | 90 % |
+| … dont les 15 leaders les plus bavards | 1 227 563 | **78 % de ce que le labo garde** |
+
+Ces quinze leaders font de 27 000 à 209 000 fills par jour — un à deux par seconde, toute la
+journée — et ne sont vus que par le poll. Le plan du labo, daté du **12/11**, les classe encore
+`STANDARD` (« swing ») ou `DECOUVERTE` (« pas encore classé ») : il a été établi sur un ou deux
+jours de poll. Le labo charge donc en mémoire, comme signaux à rejouer, les fills de robots qu'il
+ne peut pas copier un par un.
+
+**C'est la cause concrète de « le labo ne tient qu'un jour dense ».** Sans eux, une journée pèse
+environ 340 000 lignes et cinq jours tiennent dans la mémoire que le labo a utilisée ce soir.
+
+**[RECTIFIÉ — hypothèse RÉFUTÉE par la mesure, voir la section suivante]** **Prochain travail, précis** : rafraîchir le plan par l'étude de copiabilité existante
+(`tools/etude_copiabilite.py`, critère inchangé : rotation ≥ 20 × l'exposition, ou épisodes clos
+avant observation). Elle charge aujourd'hui TOUS les fills dans un tableau en mémoire
+(19,6 millions de lignes) : il lui faut une fenêtre récente bornée avant de la relancer sans
+risque. Ne PAS ajouter une seconde règle de tri dans le labo : la classe d'un leader doit garder
+une seule source.
+
+### Hypothèse réfutée : ce ne sont pas des robots, et rafraîchir le plan ne libère pas la mémoire du labo
+
+J'avais écrit que les quinze leaders les plus bavards étaient des robots que le plan du 12/11
+classait à tort « swing ». Je l'ai vérifié AVANT de toucher au plan : l'étude de copiabilité
+existante (`etude_copiabilite.run`, critère inchangé), appelée sur la fenêtre 15 → 17/11 sans rien
+écrire (4 345 386 fills, 179 unités, 321 s, pic mémoire 2,99 Go).
+
+| unité | fills (3 j) | rotation / exposition / jour | exposition moyenne | archétype mesuré |
+|---|---|---|---|---|
+| `31ca83` | 337 391 | 1,8 | 2,9 M USD | `DIRECTIONAL_SLOW` |
+| `010461` | 325 581 | 1,7 | 2,9 M USD | `DIRECTIONAL_SLOW` |
+| `ecb63c` | 225 732 | 3,2 | 98,6 M USD | `SWING` |
+| `7717a7` | 145 453 | 1,9 | 12,0 M USD | `DIRECTIONAL_SLOW` |
+| `c179e0` | 123 416 | 8,9 | 15,4 M USD | `SWING` |
+| `0eecd6` | 98 320 | 2,6 | 5,8 M USD | `DIRECTIONAL_SLOW` |
+
+**Ce sont de gros opérateurs LENTS qui découpent leurs ordres en centaines de milliers de fills**,
+pas de la haute fréquence : leur inventaire ne tourne qu'une à trois fois par jour. Par le critère
+du labo (la rotation rapportée à l'exposition), ils sont précisément la cible d'une réplication.
+
+Conséquence mesurée : avec le plan recalculé, le labo garderait **86 %** des lignes de la fenêtre
+(1 974 389 sur 2 295 725), contre 87 % avec le plan du 12/11. **Rafraîchir le plan ne résout pas
+la mémoire du labo.**
+
+Ce que la mesure apprend à la place :
+
+* le plan du 12/11 est périmé pour une autre raison : 36 unités deviendraient `PRIORITAIRE`, 5 ne
+  le seraient plus (dont `c179e0`, le leader épinglé, qui passerait `STANDARD`). Le rafraîchir
+  changerait qui occupe les emplacements en direct ; à faire délibérément, par la voie normale
+  (l'étude avec une fenêtre bornée, inscrite au registre), pas ce soir en passant ;
+* **[piste rectifiée le 18/11 — voir l'itération 16 bis]** la vraie cause de la saturation :
+  le labo traite chaque fill enfant comme un signal (64 326 `ADD` évaluables le 13/11 pour
+  241 `OPEN`). J'en avais déduit qu'il fallait agréger les fills en méta-ordres au chargement.
+  La lecture du code montre que ce serait faux.
+
+---
+
+## 18/11/2026 — ITÉRATION 16 : l'outil de revalidation allait déclarer fausses 103 preuves qu'il n'avait pas rejouées
+
+### Le contexte : la suite complète par lots, et douze lots qui n'ont jamais tourné
+
+La suite a tourné par lots pendant la nuit. Résultat : **6 053 verts, 6 ignorés, 1 rouge**
+(`rig_020`) sur les sept premiers lots ; le lot 5 a été arrêté par la garde mémoire ; et **les
+douze derniers lots n'ont jamais démarré** — code `3221225794` (`0xC0000142`), journal de 0 octet,
+5 secondes chacun. Windows ne pouvait pas créer le processus, faute de mémoire.
+
+Mon pilote a enregistré ces lots `SANS_RESUME` — honnête, il n'a rien prétendu — mais il a enchaîné
+douze lots condamnés au lieu de réessayer le même après une attente. Défaut de mon outil, corrigé
+(voir plus bas).
+
+### Le défaut grave, trouvé AVANT de lancer l'outil
+
+Le seul rouge du dépôt est `rig_020` : **103 reçus de la roadmap sont périmés** (les fichiers qui
+les prouvent ont changé). Le dépôt a l'outil honnête pour ça, `tools/revalider_receipts.py` : il
+rejoue les tests cités par chaque reçu et n'ajoute un reçu rafraîchi que s'ils passent.
+
+En lisant son code avant de le lancer, j'ai trouvé ceci :
+
+```python
+code = rejouer(tests, root, timeout_s)          # 3221225794 quand le processus NE DÉMARRE PAS
+...
+raison = ("tests re-run failed" if code not in (0, None) else
+          "tests could not be run" if code is None else ...)
+_ajouter(path, recu_echec(row, exit_code=code, ...))     # append-only : définitif
+```
+
+Tout code non nul devenait `REVALIDATION_FAILED`, et même le cas `None` (exception de lancement)
+écrivait un verdict négatif. **Lancé ce matin sur la machine telle qu'elle était cette nuit,
+l'outil aurait déclaré fausses les 103 preuves sans en rejouer une seule**, et autant de tâches
+auraient cessé d'être comptées comme faites — dans un registre qu'on n'écrit qu'en ajout.
+
+C'est exactement l'interdit de l'objectif, dans sa forme la plus coûteuse : une **absence de
+mesure** transformée en **verdict**.
+
+### La correction
+
+* `CODES_NON_LANCE` = `{0xC0000142, 0xC0000017, -9}` : les codes qui disent « le processus n'a pas
+  démarré », jamais « les tests ont échoué ».
+* `_rejouer` rend `None` sur ces codes, sur exception, **et sur une sortie entièrement vide** —
+  pytest écrit toujours quelque chose, même pour refuser.
+* La garde vit **au point où l'on écrit la preuve**, pas seulement dans le lanceur : ma première
+  version ne protégeait que `_rejouer`, et mes propres tests l'ont refusée en injectant le code
+  directement. Un rejeu qui n'a pas eu lieu n'écrit **rien** : le reçu reste périmé et visible,
+  `rig_020` reste rouge, et l'opérateur relance quand la machine respire.
+* `_souffler()` laisse la mémoire respirer avant chaque groupe (`budget_ram`, API existante).
+* Un vrai échec de tests reste un verdict négatif : la correction ne rend pas l'outil complaisant.
+
+**Tests** : 11 nouveaux dans `tests/test_revalider_receipts.py` (chaque code de non-lancement,
+sortie vide, exception, respiration mémoire, gouverneur en panne, et **un segfault `-11` qui doit
+rester un échec**) ; 39 verts avec les suites voisines.
+
+### Troisième apparition du même code
+
+`0xC0000142` s'est manifesté trois fois en deux jours, et chaque fois il a produit un **faux
+négatif** : hier un test de lanceur portable rougi à 99 % de la suite ; cette nuit douze lots
+« sans résumé » ; ce matin, 103 preuves qui auraient été invalidées. Sur cette machine, « le
+processus n'a pas pu démarrer » doit être traité partout comme une absence de mesure.
+
+### 18/11 — ITÉRATION 16 bis : pourquoi « agréger les signaux » n'est PAS la bonne piste
+
+Lecture de `materialize_safe_workspace` et de `run_local_campaign` (aucune exécution) :
+
+1. le labo charge **deux corpus en mémoire** — le tier SAFE (871 130 fills, 750 263 carnets) et le
+   tier LOCAL (945 504 fills, 716 706 carnets) — sous forme de dictionnaires Python, pour les
+   dédupliquer par identité et les trier ;
+2. il **écrit** ensuite huit rubans sur disque (`vault_fills_live.jsonl`, `copy_vault_l2_tape.jsonl`,
+   …) avec leur SHA-256 ;
+3. la campagne qui suit **relit ces rubans depuis le disque** (`charger_entrees_alpha_…(workspace)`,
+   `load_observed_books(workspace, …)`), et vérifie leurs empreintes.
+
+Donc le pic de mémoire ne vient pas de ce que le labo « garde pour analyser » : il vient de ce
+qu'il **garde pour trier et écrire**, alors que l'étape suivante lit le disque. Et agréger les
+fills enfants détruirait l'information dont la reconstruction OPEN/ADD/REDUCE/CLOSE a besoin (prix
+d'exécution moyen pondéré, tailles, transitions) — on perdrait la justesse pour gagner de la place.
+
+**La piste juste** est donc : produire les rubans **sans tenir le corpus entier en mémoire** — tri
+externe par fusion (le coffre est déjà rangé par shard, chacun quasi trié), ou matérialisation
+fenêtre par fenêtre avec déduplication sur les seules clés d'identité. Les deux gardent les fills
+individuels : rien n'est perdu, seul l'ordre de passage change. Chantier à mener avec un contrôle
+d'identité byte-à-byte des rubans produits (les SHA sont déjà publiés dans le manifeste, ce qui
+rend la comparaison avant/après exacte).
+
+Je ne l'ai pas entrepris ce matin : la revalidation des 103 reçus occupait la machine, et ce
+chantier touche le chemin qui produit les preuves. Il est décrit ici pour être pris de suite, avec
+son critère de vérification.
+
+### Résultat de la revalidation, et le défaut qu'elle a révélé : un reçu qui ne peut pas se prouver
+
+Premier passage sur les 103 reçus périmés, avec l'outil corrigé :
+
+```
+perimes 103 · rafraichis 102 · echecs 1 · non_mesurables 0 · non_rejouables 0 · encore_perimes 0
+```
+
+`rig_020` passe désormais (20 tests verts). **L'unique échec est instructif** : `ASF-RIG-002`, le
+reçu de la tâche qui prouve… `rig_020` lui-même. Son test LIT le registre : tant que son propre
+reçu est périmé, le test échoue ; donc le reçu ne peut pas être rafraîchi ; donc le test continue
+d'échouer. Deux autres reçus étaient enfermés dans la même impasse depuis des sessions
+antérieures : `ASF-RIG-010` (14/11) et `ASF-RIG-019` (12/11). L'outil mettait bien ces groupes en
+dernier, mais l'ordre ne résout pas l'auto-référence.
+
+**Correction, sans complaisance** : après avoir écrit le verdict négatif — qui retire au reçu son
+statut de preuve et lève donc sa propre péremption — le groupe est rejoué **une seconde fois**,
+registre dans son état final. Le reçu n'est rafraîchi que si ce second rejeu passe réellement. Un
+échec dû à une autre cause échoue deux fois et reste négatif ; un groupe ordinaire n'a jamais de
+seconde chance ; un non-lancement n'en déclenche pas (rien n'a été écrit, donc rien n'a changé).
+
+**Et une reprise explicite** : `--reprendre` remet dans la file les reçus déjà
+`REVALIDATION_FAILED`. Un verdict négatif peut venir d'un état transitoire (machine saturée,
+catalogue de données en retard) ; il n'est jamais levé sans rejeu, et un reçu ne redevient une
+preuve que par le même chemin que les autres — tests passés, empreintes recalculées.
+
+**Tests** : 10 nouveaux (seconde chance acceptée puis refusée, pas de seconde chance pour un
+groupe ordinaire ni pour un non-lancement, reprise qui restaure, reprise qui échoue encore,
+reprise qui ne fabrique pas de preuve sans fichier) ; 24 verts dans ce fichier.
+
+Restaient 16 reçus en échec de sessions antérieures (`LCH-018`, `LCH-031` à `LCH-040`,
+`ASF-041` à `ASF-048`), dont les groupes citent `test_sync_complete_clone.py` — le test du
+catalogue en retard, blocage externe connu. La reprise dira lesquels échouent encore vraiment.
+
+### Le « blocage externe » du catalogue n'en était pas un — et toute la roadmap est prouvée
+
+Les 8 reçus qui résistaient citaient tous `test_sync_complete_clone.py`, dont le test de parité
+byte-à-byte du catalogue de campagnes. Depuis des jours, ce rouge était classé « externe : 13 420
+fichiers `catalog/` en retard, à resynchroniser par AlinaSync ». **La mesure dit autre chose.**
+
+Sur les 4 947 manifestes suivis de `catalog/campaigns` :
+
+| état du disque vs le blob Git | nombre |
+|---|---|
+| identique | 4 729 |
+| **absent du disque** | **157** |
+| **contenu réellement différent** (pas des fins de ligne) | **61** |
+
+Les 61 fichiers différents sont tous plus PETITS que leur blob (−4 878 octets le plus souvent).
+Comparaison du contenu, manifeste par manifeste : l'historique de campagne du disque est un
+**sous-ensemble strict** de celui de Git — 128 entrées contre 137, et **zéro entrée locale absente
+de Git**, sur les 61 fichiers sans exception. Aucun n'avait été écrit depuis 110,9 heures : rien
+ne les produisait.
+
+Donc restaurer l'état commité ne perdait rien, et je l'ai vérifié avant d'agir plutôt que de le
+supposer. Les 61 fichiers ont été sauvegardés hors du dépôt, puis `catalog/campaigns` a été
+restauré depuis le commit : **4 947 fichiers, 0 absent, 0 différent**. Le test passe (78 verts),
+et les 8 reçus se sont rafraîchis au rejeu suivant.
+
+### État des preuves de la roadmap
+
+```
+3 120 tâches · 3 120 reçus · 3 120 VERIFIED_DONE
+preuves valides sur le HEAD actuel : 3 120 / 3 120 = 100,0 %
+familles incomplètes : aucune
+```
+
+C'est la première fois de cette mission que chaque tâche de la roadmap porte une preuve **rejouée
+et valide sur l'état actuel du code**. Parcours complet : 103 périmés → 102 rafraîchis ; 19 en
+échec (dont 3 enfermés dans la circularité) → 11 rafraîchis ; 8 bloqués par le catalogue →
+catalogue mesuré, restauré, 8 rafraîchis. Aucun verdict n'a été levé sans rejeu réel.
+
+**Chantier 8 (preuve / certificateur / scoreboard) : clos sur le HEAD actuel.**
+
+---
+
+## 18/11/2026 — ITÉRATION 17 : produire les rubans du labo sans tenir le corpus en mémoire
+
+Module neuf `src/hl_observer/backtesting/rubans_tri_externe.py` (251 lignes), **pas encore
+branché** : son contrat devait d'abord être prouvé, et le gain mesuré sur le vrai corpus avant de
+toucher au chemin qui produit les preuves.
+
+**Le contrat : les octets produits sont identiques à ceux de l'approche en mémoire.** Deux passes
+sur la source (les gagnants d'abord, l'écriture ensuite), des morceaux triés fusionnés en flux
+(`heapq.merge`), et la même sérialisation exacte (`sort_keys`, `ensure_ascii=False`) — car cette
+sérialisation fixe les empreintes publiées au manifeste, ce n'est pas un détail de forme.
+
+### Deux pièges que les tests ont attrapés AVANT tout branchement
+
+**1. Un dictionnaire Python qui remplace une valeur ne change pas la position de sa clé.** Le labo
+remplace un fill vu en snapshot par le même fill vu en direct. Le tri stable d'origine ordonne donc
+selon la **première** occurrence tout en écrivant le contenu **préféré**. Ma première version
+triait sur l'index de la ligne écrite : l'ordre du ruban changeait dès qu'une préférence
+s'appliquait. Le module retient maintenant les deux index. Trouvé par un tirage aléatoire, pas par
+relecture.
+
+**2. En Python, `1 == 1.0 == True` donnent la même entrée de dictionnaire.** Une empreinte qui les
+distinguerait ferait diverger les deux chemins : deux lignes que le labo comptait pour une seule
+deviendraient deux signaux. L'empreinte normalise donc les nombres comme le fait une clé de
+dictionnaire — sans jamais faire passer un grand entier (`tid`, une cinquantaine de bits) par un
+flottant.
+
+### Ce que le module refuse de faire
+
+Lire deux fois une source qui ne rend pas les mêmes lignes. Si le nombre de lignes change entre
+les passes, ou si un gagnant désigné est introuvable, **aucun ruban n'est écrit** et les morceaux
+temporaires sont nettoyés — plutôt qu'un ruban incomplet qui serait pris pour le corpus entier.
+
+**Tests** : 21 verts, dont **300 tirages aléatoires** comparant les SHA-256 des deux chemins sur
+des corpus mêlant doublons, clés de tri à égalité et snapshots ; la taille des morceaux (1, 2, 3,
+7, 100 lignes) ne change pas un octet ; la passe 1 tient moins du tiers du corpus ; une source
+instable fait refuser l'écriture ; un lien symbolique est refusé.
+
+### Prochaine étape, et pourquoi elle est conditionnée
+
+Le branchement exige de restructurer la boucle de chargement de `materialize_safe_workspace` en
+deux passes par famille. C'est le chemin qui produit les preuves : il ne devait être fait que si
+la mesure du gain sur le vrai corpus le justifiait. **Elle le justifie, et plus que prévu.**
+
+### La mesure qui décide : 32,2 Go contre 1,65 Go
+
+Famille `fills_forward` du coffre LOCAL, fenêtre depuis le 13/11, lue en flux (709 s) :
+
+| | |
+|---|---|
+| lignes lues | 11 698 999 |
+| identités distinctes | 9 315 971 (**2 383 028 doublons**) |
+| taille d'une ligne en mémoire Python | **3 458 octets** |
+| (a) dictionnaire identité → ligne, l'approche actuelle | **~32,2 Go** (extrapolation) |
+| (b) passe 1 du tri externe | **1,65 Go** (mesure exacte) |
+| gain | **19,5 ×** |
+
+Une ligne de fill pèse 3,5 ko en mémoire — dix fois sa taille sur disque, parce qu'un dictionnaire
+Python avec ses chaînes coûte cher. **Le labo essayait donc de tenir 32 Go sur une machine qui en a
+32.** Ce n'était pas « un jour dense de trop » : c'était structurellement impossible, et le
+`MEMOIRE_CRITIQUE` à 452 shards sur 5 570 en était la conséquence exacte.
+
+Deux conséquences pour la suite :
+
+* le branchement du tri externe est justifié : il fait passer les fills de 32,2 Go à 1,65 Go, et
+  les carnets devraient suivre le même rapport. C'est ce qui rend les onze jours atteignables ;
+* 2,38 millions de doublons sur la fenêtre : les shards du coffre se recouvrent largement
+  (plusieurs voies écrivent les mêmes fills). La déduplication n'est pas un détail d'hygiène, elle
+  représente un cinquième du volume.
+
+### Le plan de branchement, et pourquoi il n'est pas fait ce matin
+
+La lecture du code donne la forme exacte du travail, et ses pièges. Il est écrit ici pour être
+repris sans refaire l'analyse.
+
+**Ce qu'il faut changer.** `materialize_safe_workspace` charge les deux tiers dans sept
+dictionnaires en UNE passe sur les shards, puis trie, puis écrit huit rubans. Le tri externe exige
+l'inverse : une **fabrique rejouable par famille**, appelée deux fois.
+
+1. extraire de la boucle SAFE un générateur `lignes_safe(assets, famille)` qui rend les lignes
+   transformées (les transformations existent déjà : `_fill_rows`, `_book_row`,
+   `_market_context_row`, `_accounting_context_row`) ;
+2. ajouter au pont LOCAL le générateur équivalent. Attention : le pont **rejette un shard entier**
+   quand son gzip est tronqué (`del _fills[debut_fills:]`). En flux, il faut donc bufferiser par
+   shard et ne céder ses lignes qu'une fois le shard lu en entier — un shard tient en mémoire, le
+   corpus non ;
+3. remplacer l'accumulation par `ecrire_ruban_trie` pour les trois familles lourdes (fills,
+   `book_l2`, `bbo`) et garder l'accumulation pour les cinq familles légères.
+
+**Les quatre pièges repérés.**
+
+* **Les compteurs d'audit sont alimentés pendant la transformation** (`payload_audit`,
+  `historical_fill_observations`). Deux passes les compteraient deux fois : la seconde passe doit
+  recevoir un compteur jetable.
+* **Deux rubans sortent du même corpus dédoublonné** : `vault_fills.jsonl` (les snapshots) et
+  `vault_fills_live.jsonl` (le direct causal). Il faut donc un prédicat de filtre à l'écriture, et
+  non deux déduplications séparées — sinon un fill présent dans les deux formes serait compté deux
+  fois.
+* **La déduplication des cotations BBO est à état** (une par coin et par seconde) : cet état doit
+  vivre dans la fabrique, pas dans la boucle.
+* **Les bornes publiées au manifeste** (`fill_start_ms`, `fill_end_ms`, `unique_fills`) se lisent
+  aujourd'hui sur les listes triées. En flux, elles se calculent au fil de l'eau — à vérifier
+  contre les valeurs actuelles sur un petit corpus.
+
+**Le critère de réussite est déjà écrit** : `ecrire_ruban_en_memoire` reste dans le module comme
+référence. Un test d'intégration doit produire le ruban par les deux chemins sur un coffre
+synthétique (comme `test_lab_coffre_injection`) et comparer les SHA-256. Tant que ce test n'existe
+pas et ne passe pas, le branchement n'est pas acquis.
+
+**Pourquoi pas ce matin** : la machine fait tourner la collecte et la fin de la suite de tests, et
+la mesure ci-dessus a demandé à elle seule 12 minutes et 3,8 Go de pic. Restructurer le chemin qui
+produit les preuves demande la machine libre et une passe de tests complète derrière. Ce n'est pas
+un blocage externe : c'est une fenêtre de calme à prendre.
+
+### Un chiffre absurde dénonce l'instrument, pas la donnée
+
+La même sonde, lancée sur la famille `book_l2`, a rendu : **7 509 693 lignes pour 598 identités
+distinctes**. Impossible — cela voudrait dire que le coffre contient 7,5 millions de copies de
+598 carnets.
+
+La cause est ma sonde : elle appliquait aux carnets la clé d'identité des **fills**
+(`vault, coin, ts_ms, tid, hash, oid, px, sz, signe`). Un carnet ne porte aucun de ces champs sauf
+`coin` : toutes les lignes d'un même coin devenaient donc la même identité, et 598 ≈ le nombre de
+coins observés. Le labo, lui, utilise la bonne clé
+(`coin, received_at_ms, exchange_ts_ms, bid, ask, bids5, asks5`).
+
+Publié tel quel, ce chiffre aurait fait croire à une déduplication massive des carnets et fondé le
+dimensionnement du branchement sur une illusion. Corrigé : la sonde choisit désormais la clé de la
+famille demandée et refuse de mesurer une famille dont elle ne connaît pas la clé — plutôt que
+d'en appliquer une par défaut. La mesure des carnets est relancée.
+
+### Le total, et le feu vert
+
+| famille | lignes | identités | approche actuelle | passe 1 du tri externe | gain |
+|---|---|---|---|---|---|
+| `fills_forward` | 11 698 999 | 9 315 971 | ~32,2 Go | 1,65 Go | 19,5 × |
+| `book_l2` | 7 509 693 | 7 448 613 | ~28,3 Go | 1,39 Go | 20,4 × |
+| **total** | **19,2 M** | **16,8 M** | **~60,5 Go** | **3,04 Go** | **20 ×** |
+
+Soixante gigaoctets demandés à une machine qui en a trente-deux. Le labo ne pouvait pas lire la
+fenêtre, et aucun réglage de ses seuils n'y aurait rien changé. Avec 3 Go, les onze jours sont à
+sa portée. Les carnets ne portent presque aucun doublon (61 080 sur 7,5 M), contrairement aux
+fills (2,4 M) : les voies d'écriture des fills se recouvrent, celles des carnets non.
+
+### Les trois briques du chantier, et les cinq pièges qu'elles ont révélés
+
+Le branchement demandait des briques dont le comportement soit identique, au détail près, à celui
+du labo. Elles sont livrées et testées (59 tests) :
+
+| brique | rôle |
+|---|---|
+| `rubans_tri_externe.py` | un ruban trié et dédoublonné en deux passes, morceaux fusionnés en flux, **octets identiques** à l'ancien chemin ; écrit plusieurs rubans en une seule seconde passe |
+| `copy_vault_rubans_lourds.py` | expose les deux tiers du coffre comme des générateurs rejouables, et écrit les trois rubans lourds |
+| pont LOCAL, `garder_replay=False` | **compte sans matérialiser** ; décomptes prouvés identiques à ceux de la matérialisation |
+
+**Cinq pièges, chacun aurait changé le contenu des rubans, et aucun n'a été trouvé par relecture :**
+
+1. **Un dictionnaire Python qui remplace une valeur ne déplace pas sa clé.** Le tri stable
+   ordonnait donc selon la PREMIÈRE occurrence tout en écrivant la ligne préférée. Trouvé par
+   tirage aléatoire.
+2. **`1 == 1.0 == True` donnent la même entrée de dictionnaire.** Une empreinte qui les
+   distinguerait transformerait une ligne en deux signaux. L'empreinte normalise donc les nombres
+   comme une clé de dictionnaire, en descendant dans les listes imbriquées (les carnets portent
+   leurs niveaux de prix dans leur identité) et sans jamais faire passer un grand entier par un
+   flottant.
+3. **Une ligne du tier LOCAL ne déloge jamais une ligne SAFE**, pas même un snapshot : le labo
+   insérait les lignes SAFE avec remplacement, puis les lignes LOCAL par `setdefault`. Il faut
+   donc **trois** rangs de préférence (SAFE direct, SAFE snapshot, LOCAL), pas deux.
+4. **Un fill non-snapshot d'une source non causale n'entre dans AUCUN ruban**, tout en comptant
+   dans `unique_fills`. Mon premier filtre l'aurait versé au ruban du direct.
+5. **Un `isSnapshot` absent, nul ou entier est un refus, pas un « faux »** : `is True` / `is False`
+   et non un booléen tronqué.
+
+Un sixième point, de performance : les deux rubans de fills sortent du même corpus dédoublonné et
+s'écrivent en **une seule** seconde passe. Les écrire l'un après l'autre relirait onze millions de
+lignes une fois de plus — 709 secondes par passe à la mesure du jour.
+
+### La suite complète est VERTE
+
+Passage par lots terminé : **19 lots sur 19**, et le lot qui portait le seul rouge rejoué après la
+remise en état des reçus.
+
+```
+19 lots  ·  19 086 réussis  ·  68 ignorés  ·  1 attendu en échec  ·  0 ROUGE
+```
+
+Le rouge unique du premier passage était `rig_020`, enregistré **avant** la revalidation des
+reçus de ce matin ; son lot rejoué donne 1 008 verts. Je l'ai rejoué plutôt que d'affirmer qu'il
+était corrigé : un bilan qui garde un rouge périmé n'est pas un bilan.
+
+Rappel de ce que ce passage a coûté en méthode : les douze derniers lots du premier essai n'avaient
+jamais démarré (`0xC0000142`, machine saturée) et mon pilote les avait enchaînés au lieu de
+réessayer. Corrigé, puis repris : les douze ont tourné.
+
+C'est la première fois de cette mission que la suite complète passe **sans aucun rouge**, et elle
+le fait sur un HEAD où les 3 120 preuves de la roadmap sont valides.
+

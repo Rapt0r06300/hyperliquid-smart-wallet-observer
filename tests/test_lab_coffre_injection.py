@@ -485,3 +485,78 @@ def test_une_FENETRE_FERMEE_permet_de_conduire_le_pont_galerie_par_galerie(tmp_p
                                    jusqu_ms=base + lot * 10_000 + 9_999)
         total += len(bout["_fills"])
     assert total == len(_charger_tier_local(tmp_path)["_fills"]) == 6
+
+
+# ───────── 18/11/2026 : le pont COMPTE sans materialiser quand le labo lit en flux ─────────
+#
+# Mesure sur la fenetre du 13/11 : 11 698 999 fills et 7 509 693 carnets, soit ~60,5 Go de
+# dictionnaires Python pour 32 Go de machine. Le labo les lit desormais en flux
+# (`copy_vault_rubans_lourds`) : les garder ici ferait payer deux fois la meme memoire.
+
+
+def _coffre_de_replay(root):
+    """Un coffre avec des fills (dont un snapshot et un non causal) et des carnets."""
+    base = 1_799_000_000_000
+    fills = [
+        {"vault": "0xaaa", "coin": "ETH", "px": 1.0, "sz": 1.0, "signe": 1, "ts_ms": base,
+         "source": "LIVE_WS", "isSnapshot": False, "observed_at_ms": base + 1},
+        {"vault": "0xaaa", "coin": "ETH", "px": 2.0, "sz": 1.0, "signe": 1, "ts_ms": base + 1,
+         "source": "LIVE_POLL", "isSnapshot": False, "observed_at_ms": base + 2},
+        {"vault": "0xaaa", "coin": "ETH", "px": 3.0, "sz": 1.0, "signe": 1, "ts_ms": base + 2,
+         "source": "SNAPSHOT", "isSnapshot": True, "observed_at_ms": base + 3},
+    ]
+    carnets = [
+        {"coin": "ETH", "received_at_ms": base + 10, "exchange_ts_ms": base + 9, "bid": 1.0,
+         "ask": 2.0, "bids5": [[1.0, 1.0]], "asks5": [[2.0, 1.0]]},
+        {"coin": "ETH", "received_at_ms": base + 11, "exchange_ts_ms": base + 10, "bid": 1.0,
+         "ask": 2.0, "bids5": [[1.0, 1.0]], "asks5": [[2.0, 1.0]]},
+    ]
+    rel_f = _ecrire_shard(root, "fills_forward", fills, nom="rf")
+    rel_b = _ecrire_shard(root, "book_l2", carnets, nom="rb")
+    _index(root, [
+        {"famille": "fills_forward", "shard": rel_f, "sha256": _sha(root, rel_f), "deposes": 3},
+        {"famille": "book_l2", "shard": rel_b, "sha256": _sha(root, rel_b), "deposes": 2},
+    ])
+
+
+def test_les_DECOMPTES_sont_identiques_que_les_lignes_soient_gardees_ou_non(tmp_path):
+    _coffre_de_replay(tmp_path)
+    garde = _charger_tier_local(tmp_path)
+    compte = _charger_tier_local(tmp_path, garder_replay=False)
+    for champ in ("fills_causaux", "fills_backfill", "carnets", "bbo", "shards_injectes",
+                  "shards_rejetes", "statut", "chargement_arrete"):
+        assert garde[champ] == compte[champ], champ
+    assert garde["fills_causaux"] == 2, "LIVE_WS et LIVE_POLL sont causaux, le snapshot non"
+    assert garde["fills_backfill"] == 1 and garde["carnets"] == 2
+
+
+def test_SANS_materialisation_aucune_ligne_n_est_tenue_en_memoire(tmp_path):
+    _coffre_de_replay(tmp_path)
+    compte = _charger_tier_local(tmp_path, garder_replay=False)
+    assert compte["_fills"] == [] and compte["_books"] == [] and compte["_bbo"] == []
+    assert compte["replay_garde_en_memoire"] is False
+    garde = _charger_tier_local(tmp_path)
+    assert len(garde["_fills"]) == 3 and len(garde["_books"]) == 2
+    assert garde["replay_garde_en_memoire"] is True
+
+
+def test_le_PLAFOND_de_lignes_compte_ce_qui_est_LU_et_non_ce_qui_est_garde(tmp_path):
+    """Sinon, sans materialisation, le plafond ne se declencherait jamais."""
+    _coffre_de_replay(tmp_path)
+    compte = _charger_tier_local(tmp_path, garder_replay=False, max_lignes=2)
+    assert compte["chargement_arrete"] == "PLAFOND_LIGNES"
+    assert compte["shards_non_lus"] > 0
+
+
+def test_un_shard_REJETE_ne_laisse_aucun_compte_derriere_lui(tmp_path):
+    """Le rejet defaisait les listes ; il doit aussi defaire les comptes."""
+    _coffre_de_replay(tmp_path)
+    index = json.loads((tmp_path / "runtime/coffre_certifie/LOCAL_INDEX.json").read_text(encoding="utf-8"))
+    rel = index["shards"][0]["shard"]
+    chemin = tmp_path / rel
+    chemin.write_bytes(chemin.read_bytes()[:-5])              # gzip tronque
+    compte = _charger_tier_local(tmp_path, garder_replay=False)
+    assert compte["shards_rejetes"] == 1
+    assert compte["fills_causaux"] == 0 and compte["fills_backfill"] == 0, \
+        "aucune ligne du shard tronque ne doit etre comptee"
+    assert compte["carnets"] == 2, "le shard sain reste compte"
