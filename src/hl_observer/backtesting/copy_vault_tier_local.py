@@ -169,7 +169,7 @@ SHARDS_ENTRE_CONTROLES_RAM = 20
 def _charger_tier_local(
     repository_root: Path, *, progress: Callable[[str], None] | None = None, garder_signaux: bool = True,
     depuis_ms: int | None = None, jusqu_ms: int | None = None,
-    max_lignes: int = MAX_LIGNES_MATERIALISEES,
+    max_lignes: int = MAX_LIGNES_MATERIALISEES, garder_replay: bool = True,
 ) -> dict[str, Any]:
     """Charge le tier LOCAL du coffre-fort (certifie) EN MEMOIRE pour la recherche.
 
@@ -182,6 +182,13 @@ def _charger_tier_local(
     ``garder_signaux=False`` : les signaux de contexte (prix, OI, cross-venue...) sont COMPTES par
     famille sans etre gardes en memoire. Le labo principal ne lit que leur decompte ; les garder
     occupait plusieurs gigaoctets pour rien.
+
+    ``garder_replay=False`` : MEME TRAITEMENT POUR LES FAMILLES DE REPLAY (fills, carnets, BBO).
+    18/11/2026 — mesure sur la fenetre du 13/11 : 11 698 999 fills et 7 509 693 carnets, soit
+    ~60,5 Go de dictionnaires Python pour 32 Go de machine. Le labo les lit desormais en flux
+    (``copy_vault_rubans_lourds``) et n'a plus besoin que des DECOMPTES : les garder ici ferait
+    payer deux fois la meme memoire, et c'est elle qui arretait le chargement a 452 shards sur
+    5 570 en annoncant ``MEMOIRE_CRITIQUE``.
     """
     import gzip as _gzip
 
@@ -236,6 +243,8 @@ def _charger_tier_local(
     # cotations du collecteur BBO : flux tres dense -> une par coin et par seconde (la premiere
     # observee), largement assez pour dater un prix d'execution, sans saturer la memoire.
     _bbo_secondes: set[tuple[str, int]] = set()
+    # Comptes tenus au fil de l'eau : ils restent exacts meme quand les lignes ne sont pas gardees.
+    comptes_replay = {"fills": 0, "fills_causaux": 0, "carnets": 0, "bbo": 0}
     bbo_adaptees = 0
     bbo_denses_non_retenues = 0
     archivees = adresses_archivees(repository_root)
@@ -277,7 +286,7 @@ def _charger_tier_local(
                 continue
         # GARDE 2 — PLAFOND DE LIGNES. Une troncature silencieuse ferait mesurer sur un
         # echantillon inconnu : on s'arrete et on le DIT.
-        if len(_fills) + len(_books) + len(_bbo) >= int(max_lignes):
+        if comptes_replay["fills"] + comptes_replay["carnets"] + comptes_replay["bbo"] >= int(max_lignes):
             arret_chargement = "PLAFOND_LIGNES"
             shards_non_lus += 1
             continue
@@ -325,6 +334,7 @@ def _charger_tier_local(
         debut_compte = signaux_comptes.get(famille, 0)
         debut_non_horodate = signaux_non_horodates.get(famille, 0)
         debut_archive, debut_adaptees, debut_denses = fills_archive, bbo_adaptees, bbo_denses_non_retenues
+        debut_comptes = dict(comptes_replay)
         try:
             with _gzip.open(shard_path, "rt", encoding="utf-8") as src:
                 for ligne in src:
@@ -354,19 +364,28 @@ def _charger_tier_local(
                             if archivees and str(row["vault"]).lower() in archivees:
                                 fills_archive += 1      # (écriture inhabituelle de l'adresse dans la ligne)
                             else:
-                                _partager_les_chaines(row)
-                                _fills.append(row)
+                                comptes_replay["fills"] += 1
+                                if (row.get("isSnapshot") is False
+                                        and is_causal_live_source(row.get("source"))):
+                                    comptes_replay["fills_causaux"] += 1
+                                if garder_replay:
+                                    _partager_les_chaines(row)
+                                    _fills.append(row)
                     elif famille == "book_l2":
                         if (isinstance(row.get("received_at_ms"), int)
                                 and isinstance(row.get("exchange_ts_ms"), int)
                                 and row.get("coin") and row.get("bids5") and row.get("asks5")):
-                            _books.append(row)
+                            comptes_replay["carnets"] += 1
+                            if garder_replay:
+                                _books.append(row)
                     elif famille == "bbo":
                         if (isinstance(row.get("received_at_ms"), int)
                                 and isinstance(row.get("exchange_ts_ms"), int)
                                 and row.get("coin") and row.get("bid_px") is not None
                                 and row.get("ask_px") is not None):
-                            _bbo.append(row)
+                            comptes_replay["bbo"] += 1
+                            if garder_replay:
+                                _bbo.append(row)
                         else:
                             adaptee = _cotation_collecteur_vers_labo(row)
                             if adaptee is not None:
@@ -375,7 +394,9 @@ def _charger_tier_local(
                                     bbo_denses_non_retenues += 1
                                 else:
                                     _bbo_secondes.add(seconde)
-                                    _bbo.append(adaptee)
+                                    comptes_replay["bbo"] += 1
+                                    if garder_replay:
+                                        _bbo.append(adaptee)
                                     bbo_adaptees += 1
                     elif est_signal:
                         # Signal de contexte LOCAL : tout enregistrement certifié avec
@@ -405,24 +426,25 @@ def _charger_tier_local(
             fills_archive, bbo_adaptees, bbo_denses_non_retenues = (
                 debut_archive, debut_adaptees, debut_denses
             )
+            comptes_replay.update(debut_comptes)   # un shard rejete ne laisse AUCUNE trace
             shards_rejetes += 1
             continue
         shards_ok += 1
         if progress is not None and shards_ok % 5 == 0:
-            progress(f"Coffre LOCAL · {shards_ok} shards · {len(_fills):,} fills")
+            progress(f"Coffre LOCAL · {shards_ok} shards · {comptes_replay['fills']:,} fills")
 
-    fills_causaux = sum(
-        1 for r in _fills
-        if r.get("isSnapshot") is False and is_causal_live_source(r.get("source"))
-    )
+    fills_causaux = comptes_replay["fills_causaux"]
     return {
         "statut": ("REJECTED" if shards_ok == 0 else "PARTIAL" if shards_rejetes else "OK"),
         "shards_injectes": shards_ok, "shards_rejetes": shards_rejetes,
         "_fills": _fills, "_books": _books, "_bbo": _bbo,
         # familles présentes même quand les lignes ne sont pas gardées (le labo en publie la liste)
         "_signaux": {famille: _signaux.get(famille, []) for famille in signaux_comptes},
-        "fills_causaux": fills_causaux, "fills_backfill": len(_fills) - fills_causaux,
-        "carnets": len(_books), "bbo": len(_bbo),
+        "fills_causaux": fills_causaux,
+        "fills_backfill": comptes_replay["fills"] - fills_causaux,
+        "carnets": comptes_replay["carnets"], "bbo": comptes_replay["bbo"],
+        # Les lignes sont-elles REELLEMENT en memoire, ou seulement comptees ?
+        "replay_garde_en_memoire": garder_replay,
         "bbo_adaptees": bbo_adaptees, "bbo_denses_non_retenues": bbo_denses_non_retenues,
         "signaux_par_famille": dict(sorted(signaux_comptes.items())),
         "signaux_total": sum(signaux_comptes.values()),
