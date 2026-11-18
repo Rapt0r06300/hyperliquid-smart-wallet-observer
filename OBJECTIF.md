@@ -20,7 +20,7 @@ preuve comptable canonique.
 - AlinaSync, via `ALINA_SYNC_COMPLETE.cmd` : restauration/import des shards SAFE depuis les publications GitHub. Les shards ne font pas partie du push Git de code.
 - `LANCER_LAB_QUANT_COPY_VAULT.cmd` : cerveau de recherche local sur les données SAFE ; replays/backtests, comparaison contrôlée et archivage durable de chaque amélioration/candidat, y compris les essais non gagnants.
 - `LANCER_HYPERSMART.cmd` : moteur avec affichage de simulation paper. Le runtime doit respecter le scope Copy-Vault, même si des surfaces historiques restent dans le dépôt.
-- `POUSSER-GITHUB-FORCE.cmd` : sauvegarde/réconciliation prudente du code local vers GitHub ; aucun push force, reset destructif ou transfert de shards.
+- `POUSSER-GITHUB.cmd` : sauvegarde/réconciliation prudente du code local vers GitHub ; aucun push force, reset destructif ou transfert de shards.
 
 Seuls ces quatre lanceurs principaux et AlinaSync restent à la racine ; `ALINA_SYNC_COMPLETE.sh` y reste aussi pour les clones Unix. Les autres commandes sont rangées dans `tools/launchers/`. La portabilité recherchée est le bon fonctionnement d'un clone dans tout chemin local.
 
