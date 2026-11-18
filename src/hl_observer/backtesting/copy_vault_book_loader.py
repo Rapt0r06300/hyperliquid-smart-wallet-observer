@@ -16,21 +16,27 @@ from pathlib import Path
 from typing import Any
 
 from hl_observer.backtesting.copy_vault_book_index import oublier_les_index
-from hl_observer.collection import copy_vault_gap_windows as GAPS
-from hl_observer.collection import copy_vault_reference_binding as LIAISON
-from hl_observer.backtesting.copy_vault_protocol import (
-    CHECKPOINT_COLLECTOR_PROTOCOL,
-    CHECKPOINT_WRITER_STATE_SCHEMA,
-    INSTRUMENT_IDENTITY_SCHEMA,
-    canonical_copy_vault_coin,
+from hl_observer.backtesting.copy_vault_carnet_validation import (
+    future_book_access_receipt,
+    validate_complete_causal_l2,
 )
-from hl_observer.normalization.l2_book import validate_l2_book_sides
+from hl_observer.backtesting.copy_vault_carnet_validation import (
+    validated_recorded_levels as _validated_recorded_levels,
+)
 from hl_observer.backtesting.copy_vault_epoch_parsing import (
     _epoch_seconds_to_ms,
     _exact_non_negative_int,
     _optional_epoch_ms,
     _required_epoch_ms,
 )
+from hl_observer.backtesting.copy_vault_protocol import (
+    CHECKPOINT_COLLECTOR_PROTOCOL,
+    CHECKPOINT_WRITER_STATE_SCHEMA,
+    INSTRUMENT_IDENTITY_SCHEMA,
+    canonical_copy_vault_coin,
+)
+from hl_observer.collection import copy_vault_gap_windows as GAPS
+from hl_observer.collection import copy_vault_reference_binding as LIAISON
 
 # Keep this import-free from copy_vault_executable: that module re-exports this
 # loader, so importing it here creates a circular import in a cold interpreter.
@@ -39,19 +45,6 @@ MAX_TARGET_LAG_MS = 30_000
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 CHECKPOINT_INTEGRITY_SCHEMA = "hypersmart.copy_vault_checkpoint_integrity.v1"
 CHECKPOINT_STATE_RELPATH = "runtime/data/copy_vault_checkpoint_tail_state.json"
-
-
-def _validated_recorded_levels(
-    raw: dict[str, Any], *, bid: float, ask: float
-) -> tuple[tuple[list[list[float]] | None, list[list[float]] | None] | None, str | None]:
-    has_bids, has_asks = "bids5" in raw, "asks5" in raw
-    if not has_bids and not has_asks:
-        return (None, None), None
-    if has_bids != has_asks:
-        return None, "L2_SIDE_MISSING"
-    return validate_l2_book_sides(
-        raw.get("bids5"), raw.get("asks5"), bid=bid, ask=ask
-    )
 
 
 def load_observed_books(
@@ -769,45 +762,6 @@ def load_observed_books(
         "capacity_semantics": (
             "legacy_minimum_side_capacity;certification_uses_side_specific_observed_l2_vwap"
         ),
-    }
-
-
-def validate_complete_causal_l2(row: Mapping[str, Any], *, as_of_ms: object) -> dict[str, object]:
-    """Validate a complete point-in-time L2 row before replay admission."""
-
-    if type(as_of_ms) is not int or as_of_ms <= 0:
-        return {"status": "UNMEASURABLE", "reason": "CUTOFF_INVALID"}
-    try:
-        ts = _required_epoch_ms(row.get("ts_ms"), "ts_ms")
-        bid, ask = float(row["bid"]), float(row["ask"])
-        bids, asks = row["bids5"], row["asks5"]
-    except (KeyError, TypeError, ValueError, OverflowError):
-        return {"status": "UNMEASURABLE", "reason": "L2_INCOMPLETE"}
-    if ts > as_of_ms or not all(math.isfinite(value) for value in (bid, ask)) or bid <= 0.0 or ask <= bid:
-        return {"status": "REJECTED", "reason": "L2_NOT_CAUSAL"}
-    validated, reason = validate_l2_book_sides(bids, asks, bid=bid, ask=ask)
-    if validated is None:
-        return {"status": "REJECTED", "reason": reason or "L2_INVALID"}
-    return {"status": "PROVEN", "reason": "OK", "ts_ms": ts, "levels": len(validated[0]) + len(validated[1])}
-
-
-def future_book_access_receipt(
-    row: Mapping[str, Any], *, as_of_ms: object,
-) -> dict[str, object]:
-    """Reject a book snapshot that was received after the replay cutoff."""
-    result = validate_complete_causal_l2(row, as_of_ms=as_of_ms)
-    if result.get("status") == "REJECTED" and result.get("reason") == "L2_NOT_CAUSAL":
-        verdict = "REJECTED"
-    elif result.get("status") == "PROVEN":
-        verdict = "PROVEN"
-    else:
-        verdict = "UNMEASURABLE"
-    return {
-        **result,
-        "verdict": verdict,
-        "future_snapshot_never_admitted": verdict != "PROVEN" or result.get("ts_ms", 0) <= int(as_of_ms) if type(as_of_ms) is int else True,
-        "paper_read_only": True,
-        "real_execution": False,
     }
 
 

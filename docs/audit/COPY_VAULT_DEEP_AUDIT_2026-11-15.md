@@ -3052,3 +3052,452 @@ doivent jamais se confondre.
 autres tranches comptés, la campagne courante exclue, la rétrocompatibilité de l'ancien paramètre,
 et un reçu incohérent qui lève toujours) ; 340 verts sur les treize suites concernées.
 
+---
+
+## 18/11/2026 — ITÉRATION 28 : ma garde mémoire se trompait du mauvais côté
+
+Le besoin d'une tranche est estimé comme `lignes × 3 754 octets × FACTEUR_CARNETS`. J'avais posé
+ce facteur à **1,8**, déduit de la seule journée du 18/11 (1,54 Go de fills, 1,27 Go de carnets).
+Vérification sur les 129 heures du corpus, rapport des octets carnets/fills :
+
+```
+médiane 0,70   p10 0,43   p90 1,03   max 1,39
+facteur 1 + rapport :  médiane 1,70   p90 2,03   max 2,39
+```
+
+Mon 1,8 tient à la médiane et **sous-estime une heure sur dix**, jusqu'à 33 % au pire. Pour une
+garde mémoire, c'est le mauvais sens de l'erreur : elle laisserait partir une tranche qu'elle croit
+légère, et c'est précisément le genre d'optimisme qui fait tuer un processus. Le facteur passe donc
+au **maximum observé, 2,4**, et un test exige qu'il couvre ce maximum — pas la médiane.
+
+La leçon vaut au-delà du chiffre : **un paramètre de garde se calibre sur le pire cas mesuré, un
+paramètre de performance sur le cas courant.** J'avais appliqué la seconde règle à la première
+sorte de paramètre, en me fondant sur un seul jour — le plus léger des six, en plus.
+
+**Tests** : 2 nouveaux, 33 verts sur la suite de la conduite.
+
+---
+
+## 18/11/2026 — ITÉRATION 29 : la chaîne de preuve, revérifiée après les modifications
+
+Modifier `copy_vault_local_lab.py` et `pipeline_copie_reel.py` **périme** les reçus de la roadmap
+qui épinglent leur SHA-256. Ce n'est pas un dommage, c'est le mécanisme qui fonctionne : un reçu
+dit « ce test passait sur CE fichier », et le fichier a changé. Contrôle après les six itérations
+du jour :
+
+```
+avant : perimes 20 · en_echec 0 · groupes_de_tests 11
+après : rafraichis 20 · echecs 0 · non_rejouables 0 · non_mesurables 0
+        encore_perimes 0 · encore_en_echec 0
+contre-vérification : {"perimes": 0, "en_echec": 0}
+```
+
+Les onze groupes de tests ont été **rejoués** sur le nouveau code, tous verts, puis les reçus
+rafraîchis — et une sauvegarde horodatée du registre a été écrite avant d'y toucher. Aucun reçu n'a
+été rafraîchi « au second essai », donc aucun n'avait besoin de la seconde chance prévue pour les
+reçus auto-référents.
+
+L'ordre compte et il est le bon : **rejouer d'abord, rafraîchir ensuite**. Rafraîchir un reçu sans
+rejouer son test reviendrait à re-signer une preuve qu'on n'a pas refaite — exactement ce que
+l'outil a été corrigé pour ne plus permettre hier.
+
+Registre : 7 294 lignes, 3 120 reçus `VERIFIED_DONE` valides.
+
+---
+
+## 18/11/2026 — ITÉRATION 30 : j'ai cru à un trou de 275 674 fills, le compte est exact
+
+En relisant les chiffres du run, un écart m'a alerté : le labo annonce **8 739 925** fills
+non-snapshot uniques, et le ruban direct n'en porte que **8 464 251**. Soit 275 674 lignes
+apparemment évaporées — exactement le genre de silence que l'objectif interdit.
+
+Vérification dans les bilans publiés au manifeste :
+
+```
+vault_fills_live.jsonl   lignes_retenues 8 754 210
+                         ecartees_par_le_filtre 289 959
+                         lignes_ecrites 8 464 251     →  8 754 210 − 289 959 = 8 464 251  ✅
+
+vault_fills.jsonl        lignes_retenues 8 754 210
+                         ecartees_par_le_filtre 8 739 925
+                         lignes_ecrites 14 285        →  8 754 210 − 8 739 925 = 14 285   ✅
+
+les deux rubans          lignes_lues 12 297 560 · doublons_ecartes 3 543 350
+                         →  12 297 560 − 3 543 350 = 8 754 210 identités  ✅
+```
+
+**Chaque ligne est donc soit écrite, soit écartée par un filtre compté**, et les trois égalités
+bouclent à l'unité près. Les 289 959 fills absents du ruban direct sont les non-snapshot **non
+causaux** — écartés par `est_un_fill_direct_causal`, et comptés comme tels.
+
+Mon erreur de lecture est instructive : j'avais soustrait deux grandeurs qui ne se soustraient pas
+(« non-snapshot uniques » et « écrites dans le ruban direct »), et obtenu un nombre qui ressemblait
+à une fuite. Le bon réflexe n'était pas de chercher le bug mais **l'équation de conservation**, qui
+existait déjà dans le bilan.
+
+C'est aussi la confirmation que les bilans conçus la veille servent à quelque chose : sans
+`ecartees_par_le_filtre`, il aurait été impossible de distinguer « 289 959 non causaux, c'est
+normal » de « 289 959 perdus par un bug ». Un ruban qui ne publie pas ce qu'il refuse est un ruban
+dont on ne peut rien conclure.
+
+### Et l'équation est maintenant exigée par un test
+
+Le compte était juste, mais **rien ne l'exigeait**. Un changement futur qui perdrait des lignes
+aurait pu passer sans rougir, puisque les tests existants vérifiaient des nombres attendus
+(`lignes_ecrites == 3`) et non la cohérence interne du bilan.
+
+`tests/test_conservation_des_lignes.py` exige désormais, pour **chaque** cible d'une passe :
+
+```
+lignes_lues     − doublons_ecartes       == lignes_retenues
+lignes_retenues − ecartees_par_le_filtre == lignes_ecrites
+```
+
+sans filtre, avec doublons, avec un filtre partiel, avec un filtre qui refuse tout (le cas du ruban
+BBO vidé), sur trois cibles d'une même passe dont deux filtres complémentaires, à quatre échelles,
+et sur les vraies clés du Copy-Vault via `copy_vault_rubans_lourds` — où un fill de source inconnue
+n'entre dans aucun ruban mais est **compté par les deux filtres**.
+
+Un test vérifie en plus que le **fichier** contient bien le nombre de lignes annoncé : un compteur
+juste sur un fichier faux ne vaudrait rien.
+
+Et comme un contrôle qui ne peut pas échouer n'en est pas un, le dernier test lui donne des bilans
+faux dans les trois sens — lignes perdues à la déduplication, perdues à l'écriture, **inventées** à
+l'écriture — et exige qu'il les refuse chaque fois.
+
+---
+
+## 18/11/2026 — ITÉRATION 32 : la conduite par tranches, telle quelle, ne cherche rien
+
+Le constat le plus important de la journée, et il annule une partie de ce qui précède si on ne le
+dit pas. `_MINIMUM_SIGNAL_UTC_DAYS = 6` est une **porte appliquée à chaque appel** de
+`run_local_campaign`, et il y en a même deux :
+
+```python
+if signal_coverage["distinct_utc_days"] < _MINIMUM_SIGNAL_UTC_DAYS:
+    return {..., "status": "MORE_DATA", "reason": "INSUFFICIENT_DISTINCT_SIGNAL_DAYS", ...}
+if alignment["summary"]["evaluable_utc_days"] < _MINIMUM_SIGNAL_UTC_DAYS:
+    return {..., "status": "MORE_DATA", "reason": "INSUFFICIENT_EVALUABLE_SIGNAL_DAYS", ...}
+```
+
+Une tranche dure de 4 à 11 heures. Elle ne couvre **jamais** six journées UTC. Les dix-neuf
+tranches rendraient donc toutes `MORE_DATA` **sans explorer un seul candidat** — et l'agrégat, lui,
+serait parfaitement cohérent : dix-neuf `MORE_DATA` font un `MORE_DATA`. Techniquement vert,
+économiquement vide.
+
+Un test fixe désormais ce constat : une tranche d'une journée rend `INSUFFICIENT_DISTINCT_SIGNAL_DAYS`
+avec `candidates_tested == 0`. Il ne corrige rien, il empêche de croire la conduite capable de
+chercher alors qu'elle s'arrête avant.
+
+### Pourquoi la porte a raison, et où elle est mal placée
+
+Le seuil est juste : on ne conclut pas sur moins de six jours. Mais il juge **le morceau** là où il
+devrait juger **l'ensemble**. La conception correcte sépare deux rôles :
+
+* une tranche **produit** — des signaux évaluables, des trades simulés, leurs prix d'exécution ;
+* l'agrégat **juge** — il unit les jours UTC de toutes les tranches et applique le seuil là.
+
+La brique du second rôle existe déjà et elle est testée : `agregation_tranches.unir_les_jours` fait
+l'**union** des journées, précisément pour que six tranches d'un jour comptent six journées et non
+une. Ce qui manque est du côté du labo : un mode où une tranche produit sans prononcer de verdict
+économique.
+
+### Ce qu'il ne faut surtout pas faire
+
+Ouvrir la porte en passant « il y a six jours dans le corpus » ne suffit pas : chaque tranche
+prononcerait alors un verdict économique sur une journée, et un `PROVEN` obtenu sur quatre heures
+serait un faux. Si ce mode est ajouté, il devra marquer le rapport comme **partiel** et interdire
+`economically_proven` à l'échelle d'une tranche — le seuil ne doit pas être déplacé, il doit être
+appliqué une fois, au bon niveau.
+
+---
+
+## 18/11/2026 — ITÉRATION 33 : la porte des six journées, déplacée au bon niveau
+
+Le constat de l'itération 32 est corrigé, et la correction tient en une phrase : **une tranche
+produit, l'ensemble juge.**
+
+### Côté labo
+
+`run_local_campaign` accepte `jours_du_corpus` — le nombre de journées UTC distinctes **mesuré** sur
+le corpus entier, que seul l'appelant connaît. Quand une tranche est demandée *et* que ce nombre est
+fourni, les **trois** portes comparent le seuil à l'ensemble et non au morceau. Trois, car la
+troisième gardait l'exploration overshoot en **levant** plutôt qu'en rendant : ne corriger que les
+deux qui rendent aurait laissé cette exploration sautée sur chaque tranche. Ma première passe ne
+l'avait pas vue ; l'assertion de comptage du script l'a signalée avant d'écrire.
+
+En échange, tout rapport de tranche porte `verdict_partiel: True` et sa tranche. Sans cette marque,
+une mesure de quatre heures se lirait comme une conclusion.
+
+### Côté ensemble
+
+`agregation_tranches.combiner` prend `jours_minimum` et refuse `exploitable` quand l'union des
+journées ne l'atteint pas, avec la raison `JOURNEES_INSUFFISANTES`. **Le seuil n'est pas supprimé,
+il est appliqué une fois, au bon niveau.** Sans cela, le déplacement aurait été un desserrage sans
+contrepartie — les tranches auraient exploré et personne n'aurait vérifié la couverture.
+
+Le conducteur compte les journées depuis la densité qu'il vient de lire (`journees_utc`), les passe
+au labo, et passe le seuil à l'agrégat. Il **importe** `_MINIMUM_SIGNAL_UTC_DAYS` du labo au lieu
+de le recopier : une constante dupliquée finit par diverger, et un test l'exige.
+
+### Les quatre refus vérifiés
+
+* trois journées contre un seuil de six → non exploitable, `JOURNEES_INSUFFISANTES` ;
+* **six tranches de la MÊME journée → une seule journée distincte, refusée** : découper un jour en
+  six ne fabrique pas six jours, et c'est exactement ce que l'union empêche ;
+* `jours_du_corpus` sans tranche → la porte reste fermée : on ne desserre pas le seuil d'une
+  campagne entière en l'annonçant ;
+* `jours_du_corpus` invalide (`0`, `-1`, `6.0`, `"6"`, `True`, `None`) → porte fermée. `True`
+  vaudrait 1 en arithmétique ; il ne doit pas passer pour un nombre de jours.
+
+### Un test qui a dû évoluer
+
+`test_le_seuil_est_bien_une_porte_PAR_APPEL_et_non_globale` exigeait de voir dans le code la porte
+qui jugeait la tranche. La correction l'a rendu faux — non par régression, mais parce que le défaut
+qu'il constatait a été levé. Il a été **réécrit** pour exiger le nouveau contrat, en gardant dans sa
+docstring l'état d'avant. Un test de constat n'est pas une vérité éternelle : c'est une photographie
+datée, et on doit la remplacer en disant qu'on la remplace.
+
+**Tests** : 18 nouveaux (mode produire-sans-juger, journées mesurées, seuil réappliqué) ; 73 verts
+sur l'agrégat et la conduite, 86 sur le labo, le verrou et les tranches.
+
+---
+
+## 18/11/2026 — ITÉRATION 34 : la preuve par juxtaposition, refusée
+
+### Ce qui était déjà juste, vérifié avant de toucher à quoi que ce soit
+
+* le labo corrige la multiplicité **par tranche** :
+  `bonferroni_trial_count = prior_trial_count + len(history_rows) + 1`, et depuis l'itération 27 ce
+  `prior_trial_count` compte les essais des **autres** tranches. La dernière tranche est donc jugée
+  plus sévèrement que la première — l'asymétrie penche du bon côté ;
+* `verdict_global` prend le **minimum** des états : un verdict d'ensemble ne peut pas être plus fort
+  que la plus faible de ses tranches.
+
+### Ce qui manquait
+
+`combiner` ne regardait pas `verdict_partiel`. Un agrégat pouvait donc annoncer `exploitable: True`
+avec un verdict fort **sans dire nulle part** que chacun de ses rapports s'était déclaré non
+concluant. Des morceaux qui disent tous « je ne conclus pas » ne concluent pas en s'additionnant, et
+c'est pourtant exactement ce qu'un lecteur pressé — moi dans trois semaines — en aurait tiré.
+
+Trois champs sont ajoutés, et rien de plus : `rapports_partiels`, `preuve_possible` (faux dès **un
+seul** rapport partiel, avec sa raison) et `essais_totaux`. L'agrégat continue de publier son
+verdict et ses totaux : ce sont des mesures, et elles valent. Il refuse seulement de laisser croire
+qu'elles prouvent.
+
+Le cas dangereux est le mélange, et il est testé : **cinq rapports complets ne rachètent pas le
+sixième** — un seul partiel suffit à refuser la preuve.
+
+### Et l'affichage, parce qu'une donnée publiée n'est pas une donnée lue
+
+Le conducteur imprime désormais `PREUVE IMPOSSIBLE`, le nombre de rapports partiels, le total des
+candidats essayés et les journées obtenues sur celles requises. Sans ces quatre lignes,
+l'information dormait dans un JSON que personne n'ouvre — le même défaut qu'une promo rangée dans
+un tableau sans gabarit pour la rendre.
+
+**Tests** : 6 nouveaux, 78 verts sur l'agrégat et la conduite.
+
+---
+
+## 18/11/2026 — ITÉRATION 35 : la conduite sait reprendre, parce qu'elle sera interrompue
+
+Ce n'est pas une précaution théorique. Aujourd'hui même, **deux tâches de fond ont été arrêtées par
+le harnais pour mémoire système critique** — dont une suite de tests à 98 % de son parcours, et un
+commit. Une conduite de dix-neuf tranches dure des heures : sans reprise, chaque interruption
+effacerait tout le travail accompli, et elle ne finirait jamais.
+
+### Ce qui est écrit, et quand
+
+Une ligne JSONL après **chaque** tranche réussie : l'empreinte du découpage, les bornes, le rapport.
+L'écriture est suivie d'un `flush` et d'un `fsync` — une coupure peut tronquer la dernière ligne,
+jamais les précédentes.
+
+Une tranche en **échec** n'est pas notée : sinon un échec serait repris comme un résultat, et la
+tranche ne serait jamais refaite. Un test l'exige.
+
+### Ce que la reprise refuse de reprendre
+
+* **un journal écrit pour un autre découpage.** Les bornes viennent de la densité du ruban : si le
+  ruban a changé, le découpage change, et mélanger deux découpages produirait un agrégat dont les
+  tranches ne se correspondent pas. Le journal est alors ignoré — et les lignes écartées sont
+  **comptées**, pas tues ;
+* **une ligne tronquée** par une interruption, ou dont le rapport n'est pas lisible : comptée et
+  sautée, jamais devinée.
+
+L'empreinte tient compte de l'**ordre** des tranches : un découpage est une séquence, deux ordres
+sont deux conduites différentes.
+
+### Ce qui n'est pas fait, volontairement
+
+On ne reprend pas une tranche **à moitié**. Une tranche est refaite en entier ou pas du tout, parce
+qu'un rapport partiellement écrit ne veut rien dire — et qu'un demi-rapport serait précisément le
+genre de donnée qui se lit comme un zéro.
+
+### Le test qui compte
+
+Une conduite dont la troisième tranche lève `MemoryError`, relancée : **seule la tranche manquante
+repart**, les deux premières sont reprises du journal, et l'agrégat passe de non exploitable à
+exploitable. C'est le scénario exact des deux arrêts du jour.
+
+**Tests** : 14 nouveaux (`tests/test_reprise_conduite.py`), 54 verts avec la suite de la conduite.
+
+---
+
+## 18/11/2026 — ITÉRATION 36 : l'empreinte de reprise ne regardait pas le corpus
+
+Le journal de reprise s'identifiait par les seules **bornes** des tranches. Elles viennent de la
+densité du ruban, donc un ruban différent donne *presque toujours* un découpage différent — mais
+« presque toujours » n'est pas « toujours ». Deux corpus de même densité horaire et de contenu
+différent produiraient les mêmes bornes, donc la même empreinte, et la reprise rendrait des rapports
+qui ne décrivent pas les données présentes.
+
+L'empreinte intègre désormais le `selection_digest` du manifeste SAFE du workspace, qui scelle le
+catalogue des shards consommés. Le scénario fermé est testé : **mêmes bornes, workspace
+re-matérialisé → la tranche est refaite**, et la non-régression l'est aussi — le même corpus est
+toujours repris.
+
+Un manifeste absent ou illisible ne fait pas échouer la conduite : l'empreinte vaut
+`corpus-inconnu`, une valeur **distincte de tout digest réel**. Un journal écrit avec un digest
+connu ne sera donc pas repris par erreur, ni l'inverse.
+
+### Un faux négatif que j'ai failli prendre pour un succès
+
+Pour finir la suite de tests sans tâche de fond lourde, j'ai lancé les 1 532 fichiers restants en
+une seule commande. Elle a rendu **le code 0 et aucune sortie**. Rien n'avait tourné : la ligne de
+commande faisait **57 850 caractères** contre 32 767 autorisés sous Windows, et le `grep` du
+pipeline avait transformé l'échec en code 0.
+
+C'est la troisième variante du même piège cette semaine — une sortie vide qui ressemble à un
+succès. Le réflexe qui a sauvé la mesure : un bilan de pytest *doit* contenir une ligne
+« N passed ». Pas de ligne, pas de résultat, quel que soit le code de sortie. Les lots suivants
+sont donc lancés un par un (environ 11 500 caractères chacun) et leur sortie n'est plus filtrée.
+
+**Tests** : 7 nouveaux, 21 verts sur la suite de la reprise.
+
+---
+
+## 18/11/2026 — ITÉRATION 37 : deux fichiers au-dessus de leur plafond, découpés et non exemptés
+
+La suite par lots a trouvé **un seul échec sur 9 357 tests** — et il était à moi :
+
+```
+FAILED tests/test_invariants_architecture.py::test_pas_de_nouveau_fichier_geant
+   backtesting/copy_vault_local_lab.py     5 027 lignes  (plafond historique 5 009)
+   backtesting/copy_vault_book_loader.py     820 lignes  (plafond général      800)
+```
+
+Le message du test dit exactement quoi faire : « corriger le câblage **au lieu de relever le
+plafond** ». Le plafond existe pour une raison écrite dans sa docstring — au-delà, un fichier
+devient intouchable parce que l'outil d'édition le tronque. Relever le chiffre aurait transformé une
+dette en norme.
+
+**Deux modules extraits**, chacun cohérent et autonome :
+
+* `copy_vault_identite_campagne` — `nom_de_campagne` et `digest_de_campagne`, les deux sens d'une
+  même convention : fabriquer le nom du dossier depuis le digest et la tranche, et retrouver le
+  digest depuis le nom (parce que les lignes des reçus portent toujours le digest nu). Les deux
+  vivent ensemble parce qu'une seule des deux suffirait à casser l'autre ;
+* `copy_vault_carnet_validation` — la validation d'un carnet avant admission au replay et le reçu
+  d'accès à un carnet futur. Le chargeur les **réexporte** sous leurs noms d'origine, car un test
+  externe les importe de là.
+
+Résultat : 5 003 et 774 lignes, sous les deux plafonds, sans exemption ajoutée.
+
+### Ce qu'un test d'extraction doit vérifier
+
+Le risque n'est pas le code déplacé, c'est **un import qui ne suit pas**. Les tests exigent donc que
+chaque nom reste accessible où ses appelants le cherchent, et que les deux chemins désignent **le
+même objet** (`is`) — pas une copie qui divergera. Un troisième importe chaque module neuf dans un
+interpréteur vierge : un module extrait qui dépendrait circulairement de son origine casserait à
+l'import seul, et aucun test de comportement ne le verrait.
+
+Les huit autres vérifient le comportement, pas les noms : un carnet du futur **rejeté** et non
+corrigé, un carnet incomplet **UNMEASURABLE** et non rejeté (« ne dit rien » et « dit non » ne se
+confondent pas), un carnet à un seul côté refusé parce que son spread serait inventé, un carnet sans
+niveaux resté utilisable, cinq coupures invalides, et le reçu qui porte toujours sa trace.
+
+**Tests** : 14 nouveaux ; 24 verts avec l'invariant d'architecture et les suites du chargeur.
+
+---
+
+## 18/11/2026 — ITÉRATION 38 : une tranche écrivait le champion déployable
+
+Le défaut le plus grave de la journée, trouvé en relisant ce que la conduite par tranches
+toucherait. `_ecrire_champion_deploye` écrit dans `runtime/champion_deploye.json` — **un chemin
+unique** — dès que la recherche trouve un candidat. C'est le cliquet labo → moteur : le moteur peut
+l'appliquer, sur opt-in explicite.
+
+Avec dix-neuf tranches, chaque tranche qui trouve un candidat **écraserait** le précédent. Le
+fichier final porterait le champion de la dernière tranche à en avoir trouvé un : un candidat
+choisi sur **quatre à onze heures** de données, présenté comme déployable. L'écriture étant
+atomique, l'écrasement serait proprement irréversible — et rien dans le fichier ne dirait sur
+quelle fenêtre ce champion a été choisi.
+
+**Corrigé** : une campagne qui ne couvre qu'une tranche ne l'écrit pas, et le rapport dit pourquoi
+(`champion_deploye_refuse: "VERDICT_PARTIEL_TRANCHE"`). Le champion reste ce qu'il était ; aucune
+tranche ne peut le remplacer. Choisir un champion sur l'ensemble demanderait de comparer les
+candidats des dix-neuf tranches : cela appartient au conducteur, ce n'est pas fait, et ce n'est donc
+pas simulé.
+
+C'est le même motif que le seuil des six journées et que le verdict : **une décision d'ensemble
+prise par un morceau.** Trois fois aujourd'hui, au même endroit du raisonnement.
+
+### Deux erreurs de ma part en appliquant la correction
+
+La protection a reporté le labo à 5 013 lignes, au-dessus du plafond de 5 009. J'ai donc extrait le
+cliquet — et je m'y suis trompé deux fois :
+
+* j'ancrais l'import sur une ligne qui apparaît **deux fois**, non par doublon fautif mais parce que
+  ruff sépare les alias en deux blocs `from X import (a as b)`. L'assertion de comptage l'a vu avant
+  toute écriture, deux fois de suite ; l'ancre est maintenant une ligne d'import **sans alias** ;
+* j'avais extrait `_atomic_json` dans un module à part « parce que le cliquet en a besoin ». Ruff a
+  montré que non : `_ecrire_champion_deploye` fait sa propre écriture atomique (`fsync` puis
+  `os.replace`). Le module était inutile — et un module que personne n'importe est un **orphelin**,
+  que `test_pas_de_nouvel_orphelin` refuse. Supprimé.
+
+Résultat : **4 915 lignes**, et le cliquet dans ses 137 lignes, avec ses trois garanties écrites en
+tête (chemin unique, écriture fail-soft, opt-in du moteur).
+
+**Tests** : 4 nouveaux sur la protection (dont la non-régression : une campagne complète garde son
+cliquet, et le refus est publié — un refus silencieux se lirait comme « aucun candidat trouvé ») ;
+32 verts sur la suite des tranches, 23 avec l'invariant d'architecture et les tests du champion.
+
+---
+
+## 18/11/2026 — ITÉRATION 39 : l'ordre des opérations, appris en bouclant
+
+Le lot 6 de la suite a échoué sur un seul test :
+`test_rig_020_all_current_receipts_are_exactly_revalidated`. Dix-huit reçus de la roadmap étaient
+périmés — **à nouveau** : la revalidation de l'itération 29 avait été faite *avant* les corrections
+des itérations 30 à 38, qui ont encore changé `copy_vault_local_lab.py` et
+`copy_vault_book_loader.py`.
+
+Le test ne distingue pas « périmé » de « faux », et c'est **voulu** :
+
+```python
+for row in latest.values():
+    if str(row.get("verdict") or "").upper() == "VERIFIED_DONE":
+        assert receipt_is_verified(row, None, ROOT)
+```
+
+Un reçu qui affirme « vérifié » alors que le fichier de preuve a changé n'est plus une preuve. Pas
+« une preuve légèrement datée » : **plus une preuve**. La porte reste fermée jusqu'à ce qu'on
+rejoue.
+
+### La leçon de procédure, que j'ai apprise en bouclant deux fois
+
+L'ordre n'est pas interchangeable :
+
+1. corriger le code, autant de fois qu'il faut ;
+2. **quand les modifications sont stables**, rejouer les groupes de tests concernés et rafraîchir
+   les reçus ;
+3. puis seulement, considérer une suite verte comme un état du HEAD.
+
+Revalider plus tôt ne sert à rien — la correction suivante périmera les reçus de nouveau — et c'est
+exactement ce que j'ai fait à l'itération 29, en toute bonne foi, parce que je croyais avoir fini.
+Le coût n'est pas nul : onze groupes de tests rejoués pour rien.
+
+Ce n'est pas un défaut du dépôt. C'est une propriété de toute chaîne de preuve qui épingle des
+empreintes de fichiers, et elle impose une discipline d'enchaînement plutôt qu'un outil de plus.
+

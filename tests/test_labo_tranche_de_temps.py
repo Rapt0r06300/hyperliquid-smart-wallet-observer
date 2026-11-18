@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import inspect
 import pathlib
+import pytest
+import pathlib
 
 from hl_observer.backtesting import copy_vault_local_lab as local_lab
 
@@ -249,4 +251,192 @@ def test_AUCUN_double_de_test_n_est_fige_sur_l_ancienne_signature():
         'double(s) de test fige(s) sur une signature : ajoutez **_kw.'
         + separateur + separateur.join(figes)
     )
+# ───────── LA LIMITE DE LA CONDUITE PAR TRANCHES, prouvée et non cachée ─────────
+# `_MINIMUM_SIGNAL_UTC_DAYS = 6` est une porte appliquée À CHAQUE APPEL. Une tranche dure de 4 à
+# 11 heures : elle ne couvre jamais six journées UTC. Les dix-neuf tranches rendent donc toutes
+# `MORE_DATA / INSUFFICIENT_DISTINCT_SIGNAL_DAYS` SANS RIEN EXPLORER.
+#
+# Ce test ne corrige rien : il FIXE le constat, pour qu'on ne croie pas la conduite capable de
+# chercher alors qu'elle s'arrête avant. La conception juste est écrite au journal du 18/11 : une
+# tranche doit PRODUIRE des trades, et c'est l'agrégat qui compte les jours et décide —
+# `agregation_tranches.unir_les_jours` existe déjà pour cela.
+
+def test_une_tranche_COURTE_s_arrete_avant_la_recherche(tmp_path, monkeypatch):
+    """La preuve du constat : un seul jour de signaux, et le labo refuse de chercher."""
+    jour = 10 * 86_400_000
+    instants = [jour + 10_000, jour + 20_000]          # deux signaux, UNE journée UTC
+    metaordres = [{"signal_ts_ms": t, "action": "ADD", "coin": "BTC"} for t in instants]
+    carnets = {"BTC": [{"ts_ms": t - 1_000} for t in instants]}
+
+    class Pipeline:
+        @staticmethod
+        def charger_entrees_alpha_notional_fixe_avec_audit(_workspace, **_kw):
+            return [], {}
+
+        @staticmethod
+        def charger_evenements_lifecycle_avec_audit(_workspace):
+            return [], {}
+
+    monkeypatch.setattr(local_lab, "_load_pipeline", lambda: Pipeline())
+    monkeypatch.setattr(local_lab.cv, "cluster_metaorders", lambda _e: (metaordres, {}))
+    monkeypatch.setattr(local_lab.cv, "load_observed_books", lambda *_a, **_k: (carnets, {}))
+
+    resultat = local_lab.run_local_campaign(
+        _workspace_minimal(tmp_path), repository_root=tmp_path,
+        campaign_root=tmp_path / "campagne", max_trials=1,
+        tranche=(jour, jour + 86_399_999),
+    )
+    assert resultat["status"] == "MORE_DATA"
+    assert resultat["reason"] == "INSUFFICIENT_DISTINCT_SIGNAL_DAYS"
+    assert resultat["candidates_tested"] == 0, "aucune exploration n'a eu lieu"
+    assert resultat["signal_coverage"]["distinct_utc_days"] == 1
+    assert resultat["signal_coverage"]["minimum_utc_days_required"] == 6
+
+
+def test_le_seuil_JUGE_L_ENSEMBLE_quand_on_lui_donne_les_journees_du_corpus():
+    """Ce test constatait d'abord le defaut ; il exige maintenant sa correction.
+
+    Avant : les trois portes comparaient `_MINIMUM_SIGNAL_UTC_DAYS` aux journees de la TRANCHE,
+    donc une tranche de 4 a 11 heures etait toujours recalee sans explorer un candidat.
+    Apres : elles comparent `jours_juges` / `jours_evaluables_juges`, qui valent les journees du
+    CORPUS quand une tranche est en cours et que ce nombre est fourni -- le niveau juste, puisque
+    le seuil dit « on ne conclut pas sur moins de six jours » et qu'une tranche ne conclut pas.
+    """
+    source = inspect.getsource(local_lab.run_local_campaign)
+    assert local_lab._MINIMUM_SIGNAL_UTC_DAYS == 6
+    # les trois portes passent par les grandeurs jugees
+    assert source.count("jours_evaluables_juges < _MINIMUM_SIGNAL_UTC_DAYS") == 2
+    assert source.count("jours_juges < _MINIMUM_SIGNAL_UTC_DAYS") == 1
+    # et aucune ne compare plus directement les journees de la tranche
+    assert "distinct_utc_days\"] < _MINIMUM_SIGNAL_UTC_DAYS" not in source
+    assert "evaluable_utc_days\"] < _MINIMUM_SIGNAL_UTC_DAYS" not in source
+    # l'ouverture exige une tranche ET un nombre entier strictement positif
+    assert "tranche is not None and type(jours_du_corpus) is int and jours_du_corpus > 0" in source
+
+def test_l_agregat_sait_DEJA_unir_les_jours_des_tranches():
+    """La brique qui rendra le seuil applicable à l'ensemble est en place, et testée ailleurs."""
+    from hl_observer.backtesting import agregation_tranches as AG
+
+    rapports = [
+        {"signal_coverage": {"utc_days": [f"2026-11-{13 + index:02d}"]}} for index in range(6)
+    ]
+    assert AG.unir_les_jours(rapports)["distincts"] == 6
+# ───────── LE MODE « PRODUIRE SANS JUGER » : la porte au bon niveau ─────────
+
+def _lancer_une_tranche(tmp_path, monkeypatch, **kw):
+    """Une tranche d'UNE journée UTC, avec des doubles minimaux."""
+    jour = 10 * 86_400_000
+    instants = [jour + 10_000, jour + 20_000]
+    metaordres = [{"signal_ts_ms": t, "action": "ADD", "coin": "BTC"} for t in instants]
+    carnets = {"BTC": [{"ts_ms": t - 1_000} for t in instants]}
+
+    class Pipeline:
+        @staticmethod
+        def charger_entrees_alpha_notional_fixe_avec_audit(_workspace, **_kw):
+            return [], {}
+
+        @staticmethod
+        def charger_evenements_lifecycle_avec_audit(_workspace):
+            return [], {}
+
+    monkeypatch.setattr(local_lab, "_load_pipeline", lambda: Pipeline())
+    monkeypatch.setattr(local_lab.cv, "cluster_metaorders", lambda _e: (metaordres, {}))
+    monkeypatch.setattr(local_lab.cv, "load_observed_books", lambda *_a, **_k: (carnets, {}))
+    return local_lab.run_local_campaign(
+        _workspace_minimal(tmp_path), repository_root=tmp_path,
+        campaign_root=tmp_path / "campagne", max_trials=1, **kw)
+
+
+def test_avec_les_journees_du_CORPUS_la_porte_des_six_jours_s_ouvre(tmp_path, monkeypatch):
+    """Le point de la correction : la tranche n'est plus recalée pour un seuil qui vise l'ensemble."""
+    jour = 10 * 86_400_000
+    resultat = _lancer_une_tranche(
+        tmp_path, monkeypatch, tranche=(jour, jour + 86_399_999), jours_du_corpus=6)
+    assert resultat["reason"] != "INSUFFICIENT_DISTINCT_SIGNAL_DAYS"
+    assert resultat["reason"] != "INSUFFICIENT_EVALUABLE_SIGNAL_DAYS"
+    assert resultat["signal_coverage"]["distinct_utc_days"] == 1, "la tranche reste honnête sur CE qu'elle couvre"
+    assert resultat["jours_du_corpus"] == 6
+
+
+def test_un_rapport_de_tranche_se_declare_PARTIEL(tmp_path, monkeypatch):
+    """Sans cette marque, une mesure de quatre heures se lirait comme une conclusion."""
+    jour = 10 * 86_400_000
+    resultat = _lancer_une_tranche(
+        tmp_path, monkeypatch, tranche=(jour, jour + 86_399_999), jours_du_corpus=6)
+    assert resultat["verdict_partiel"] is True
+    assert resultat["tranche"] == [jour, jour + 86_399_999]
+    assert resultat["economically_proven"] is False
+
+
+def test_SANS_tranche_le_rapport_n_est_PAS_partiel(tmp_path, monkeypatch):
+    resultat = _lancer_une_tranche(tmp_path, monkeypatch)
+    assert resultat["verdict_partiel"] is False and resultat["tranche"] is None
+
+
+def test_les_journees_du_corpus_SANS_tranche_n_ouvrent_PAS_la_porte(tmp_path, monkeypatch):
+    """Garde-fou : on ne peut pas desserrer le seuil d'une campagne entière en l'annonçant."""
+    resultat = _lancer_une_tranche(tmp_path, monkeypatch, jours_du_corpus=6)
+    assert resultat["reason"] == "INSUFFICIENT_DISTINCT_SIGNAL_DAYS"
+    assert resultat["candidates_tested"] == 0
+
+
+def test_des_journees_du_corpus_INSUFFISANTES_laissent_la_porte_fermee(tmp_path, monkeypatch):
+    """Le seuil n'est pas contourné : il est appliqué au corpus, et le corpus doit le franchir."""
+    jour = 10 * 86_400_000
+    resultat = _lancer_une_tranche(
+        tmp_path, monkeypatch, tranche=(jour, jour + 86_399_999), jours_du_corpus=5)
+    assert resultat["reason"] == "INSUFFICIENT_DISTINCT_SIGNAL_DAYS"
+
+
+@pytest.mark.parametrize("mauvais", (0, -1, 6.0, "6", True, None))
+def test_une_valeur_de_journees_INVALIDE_laisse_la_porte_fermee(tmp_path, monkeypatch, mauvais):
+    """Un `True` vaudrait 1 en arithmétique : il ne doit pas passer pour un nombre de jours."""
+    jour = 10 * 86_400_000
+    resultat = _lancer_une_tranche(
+        tmp_path, monkeypatch, tranche=(jour, jour + 86_399_999), jours_du_corpus=mauvais)
+    assert resultat["reason"] == "INSUFFICIENT_DISTINCT_SIGNAL_DAYS"
+
+
+def test_les_TROIS_portes_utilisent_les_journees_jugees():
+    """Dont celle qui garde l'exploration overshoot, qui LÈVE au lieu de rendre."""
+    source = inspect.getsource(local_lab.run_local_campaign)
+    assert source.count("jours_evaluables_juges < _MINIMUM_SIGNAL_UTC_DAYS") == 2
+    assert source.count("jours_juges < _MINIMUM_SIGNAL_UTC_DAYS") == 1
+    assert "alignment[\"summary\"][\"evaluable_utc_days\"] < _MINIMUM" not in source
+# ───────── une tranche n'écrit pas le champion déployé ─────────
+# `runtime/champion_deploye.json` est un chemin UNIQUE et le cliquet labo → moteur. Dix-neuf
+# tranches s'y écraseraient l'une l'autre, et le fichier final porterait un candidat choisi sur
+# quatre à onze heures, présenté comme déployable. L'écriture étant atomique, l'écrasement serait
+# proprement irréversible — et rien dans le fichier ne dirait sur quelle fenêtre il a été choisi.
+
+def test_une_tranche_REFUSE_d_ecrire_le_champion_deploye():
+    source = inspect.getsource(local_lab.run_local_campaign)
+    assert "if best is not None and tranche is not None:" in source
+    debut = source.index("if best is not None and tranche is not None:")
+    bloc = source[debut:debut + 900]
+    assert 'champion_deploye_refuse = "VERDICT_PARTIEL_TRANCHE"' in bloc
+    assert "_ecrire_champion_deploye" not in bloc.split("elif best is not None:")[0], (
+        "aucune écriture ne doit avoir lieu dans la branche de la tranche")
+
+
+def test_SANS_tranche_le_champion_est_toujours_ecrit():
+    """La non-régression : une campagne complète garde son cliquet."""
+    source = inspect.getsource(local_lab.run_local_campaign)
+    apres = source[source.index("elif best is not None:"):]
+    assert "_ecrire_champion_deploye(" in apres[:400]
+
+
+def test_le_refus_est_PUBLIE_dans_le_rapport():
+    """Un refus silencieux se lirait comme « aucun candidat trouvé »."""
+    source = inspect.getsource(local_lab.run_local_campaign)
+    assert '"champion_deploye_refuse": champion_deploye_refuse' in source
+
+
+def test_le_cliquet_vit_dans_son_module_et_reste_importable_du_labo():
+    from hl_observer.backtesting import copy_vault_champion_deploye as CH
+
+    assert local_lab._ecrire_champion_deploye is CH._ecrire_champion_deploye
+    assert local_lab.charger_champion_deploye is CH.charger_champion_deploye
+    assert local_lab.CHEMIN_CHAMPION_DEPLOYE == CH.CHEMIN_CHAMPION_DEPLOYE
+    assert "CHEMIN_CHAMPION_DEPLOYE" in local_lab.__all__
 

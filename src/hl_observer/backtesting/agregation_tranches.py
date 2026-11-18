@@ -21,7 +21,14 @@ LES QUATRE FAÇONS DE MENTIR EN AGRÉGEANT, et ce que ce module fait à la place
    `MORE_DATA` : elles font un ensemble dont une partie n'est pas mesurable. `verdict_global` prend
    toujours l'état le PLUS FAIBLE présent, et nomme la tranche responsable.
 
-4. **Le total qui oublie son périmètre.** Un PnL sommé sur six tranches dont deux ont été
+4. **La preuve par juxtaposition.** Des rapports qui se déclarent tous NON CONCLUANTS ne font
+   pas une conclusion en s'additionnant. `combiner` compte les rapports partiels et publie
+   `preuve_possible: False` dès qu'il en voit un — il continue de rendre son verdict et ses
+   totaux, qui sont des mesures et qui valent, mais il refuse de laisser croire qu'ils prouvent.
+   Il publie aussi `essais_totaux`, pour qu'on juge la multiplicité à l'échelle de l'ensemble au
+   lieu de la deviner (le labo la corrige déjà par tranche, essais des autres tranches compris).
+
+5. **Le total qui oublie son périmètre.** Un PnL sommé sur six tranches dont deux ont été
    écourtées n'est pas comparable à un PnL sur six journées pleines. Chaque sortie porte donc le
    nombre de tranches, leur étendue réelle en millisecondes et la liste des jours UTC couverts.
 
@@ -236,12 +243,19 @@ def combiner(
     tranches: Sequence[object],
     additifs: Sequence[str] = (),
     ratios: Sequence[tuple[str, str]] = (),
+    jours_minimum: int | None = None,
 ) -> dict[str, Any]:
     """L'agrégat complet : verdict, couverture, totaux et taux, chacun avec son périmètre.
 
-    `exploitable` ne devient vrai que si la couverture est continue ET que chaque tranche a rendu un
-    rapport. Un agrégat non exploitable est rendu quand même — avec sa raison — parce que le cacher
-    reviendrait à laisser l'appelant inventer le total lui-même.
+    `exploitable` ne devient vrai que si la couverture est continue, que chaque tranche a rendu
+    un rapport, ET que l'union des journées UTC atteint `jours_minimum`. Un agrégat non
+    exploitable est rendu quand même — avec sa raison — parce que le cacher reviendrait à laisser
+    l'appelant inventer le total lui-même.
+
+    `jours_minimum` EST LE SEUIL DU LABO, APPLIQUÉ ICI. Une tranche de quelques heures ne couvre
+    jamais six journées : la porte du labo a donc été déplacée au niveau de l'ensemble, et c'est ce
+    paramètre qui la referme. Sans lui, les tranches exploreraient et personne ne vérifierait que
+    l'ensemble couvre assez de jours — un desserrage sans contrepartie.
     """
     couv = couverture(tranches)
     manquants = len(tranches) - len(rapports)
@@ -265,14 +279,30 @@ def combiner(
         "paper_read_only": True,
         "real_execution": False,
     }
+    partiels = sum(
+        1 for rapport in rapports if rapport.get("verdict_partiel") is True
+    )
+    essais = sommer(rapports, "candidates_tested")
+    sortie["rapports_partiels"] = partiels
+    sortie["essais_totaux"] = essais["total"]
+    sortie["preuve_possible"] = partiels == 0
+    if partiels:
+        sortie["raison_preuve_impossible"] = "RAPPORTS_PARTIELS"
+    assez_de_jours = (
+        jours_minimum is None
+        or sortie["jours"]["distincts"] >= int(jours_minimum)
+    )
+    sortie["jours_minimum"] = jours_minimum
+    sortie["assez_de_jours"] = bool(assez_de_jours)
     sortie["exploitable"] = bool(
-        rapports and manquants <= 0 and couv["continue"]
+        rapports and manquants <= 0 and couv["continue"] and assez_de_jours
     )
     if not sortie["exploitable"]:
         sortie["raison_non_exploitable"] = (
             "AUCUNE_TRANCHE" if not rapports
             else "TRANCHE_SANS_RAPPORT" if manquants > 0
-            else couv["raison"]
+            else couv["raison"] if not couv["continue"]
+            else "JOURNEES_INSUFFISANTES"
         )
     return sortie
 

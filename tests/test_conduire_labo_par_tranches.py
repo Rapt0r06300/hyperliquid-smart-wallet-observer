@@ -339,4 +339,81 @@ def test_l_estimation_de_la_CLI_suit_la_densite_mesuree(tmp_path, capsys, monkey
     assert estimer is not None
     attendu = int(1_000 * CD.OCTETS_PAR_FILL * CD.FACTEUR_CARNETS)
     assert estimer((HEURE, 2 * HEURE - 1)) == attendu
+def test_le_facteur_des_carnets_COUVRE_le_maximum_mesure():
+    """Une garde mémoire doit se tromper vers le HAUT, jamais vers le bas.
+
+    Mesure du 18/11/2026 sur les 129 heures du corpus (rapport des octets carnets/fills) :
+    médiane 0,70, p90 1,03, max 1,39 — soit un facteur `1 + rapport` allant jusqu'à 2,39. Mon
+    premier choix, 1,8, était déduit de la seule journée du 18/11 et sous-estimait le besoin une
+    heure sur dix : la garde aurait laissé partir une tranche qu'elle croyait légère.
+    """
+    assert CD.FACTEUR_CARNETS >= 2.39, (
+        "le facteur doit couvrir le pire rapport mesuré, pas le rapport médian")
+
+
+def test_l_estimation_depasse_le_poids_des_seuls_fills():
+    """Le contrôle minimal : estimer le besoin d'une tranche sans ses carnets serait absurde."""
+    lignes = 100_000
+    estime = lignes * CD.OCTETS_PAR_FILL * CD.FACTEUR_CARNETS
+    assert estime > lignes * CD.OCTETS_PAR_FILL
+    assert CD.OCTETS_PAR_FILL == 3_754, "octets par fill mesurés le 18/11 (400 000 lignes = 1,50 Go)"
+# ───────── les journées du corpus, mesurées et transmises ─────────
+
+def test_les_journees_UTC_sont_comptees_depuis_la_densite_mesuree(tmp_path):
+    _ruban(tmp_path, [10, 10, 10])
+    densite = CD.densite_par_pas(tmp_path / "runtime" / "data" / "vault_fills_live.jsonl")
+    jours = CD.journees_utc(densite)
+    assert len(jours) == 1 and jours[0].count("-") == 2, "trois heures de la même journée"
+
+
+def test_un_pas_VIDE_ne_cree_pas_une_journee():
+    """Un seau à zéro ne doit pas gonfler le compte des journées : il n'y a rien à évaluer."""
+    assert CD.journees_utc({0: 0, 86_400_000: 5}) == ["1970-01-02"]
+
+
+def test_des_journees_DISTINCTES_sont_toutes_comptees():
+    densite = {jour * 86_400_000 + 3_600_000: 7 for jour in range(6)}
+    assert len(CD.journees_utc(densite)) == 6
+
+
+def test_le_lanceur_transmet_les_journees_du_corpus_au_labo(tmp_path, monkeypatch):
+    import hl_observer.backtesting.copy_vault_local_lab as module
+
+    vues = []
+    monkeypatch.setattr(
+        module, "run_local_campaign",
+        lambda _w, **kw: vues.append(kw.get("jours_du_corpus")) or {"status": "MORE_DATA"})
+    CD._lanceur_reel(1, tmp_path / "c", tmp_path, jours_du_corpus=6)(tmp_path, (1, 2))
+    assert vues == [6]
+
+
+def test_le_seuil_du_conducteur_est_CELUI_du_labo_pas_une_copie():
+    """Une constante recopiée finit par diverger : on importe la valeur du labo."""
+    from hl_observer.backtesting.copy_vault_local_lab import _MINIMUM_SIGNAL_UTC_DAYS
+
+    assert CD.JOURS_MINIMUM == _MINIMUM_SIGNAL_UTC_DAYS == 6
+
+
+def test_la_conduite_transmet_le_seuil_a_l_agregat(tmp_path):
+    """Sinon le déplacement de la porte serait un desserrage sans contrepartie."""
+    resultat = CD.conduire(
+        tmp_path, [(1, HEURE)], jours_minimum=6,
+        lancer=lambda _w, _t: {"status": "MORE_DATA",
+                               "signal_coverage": {"utc_days": ["2026-11-13"]}},
+    )
+    agregat = resultat["agregat"]
+    assert agregat["jours_minimum"] == 6 and agregat["exploitable"] is False
+    assert agregat["raison_non_exploitable"] == "JOURNEES_INSUFFISANTES"
+def test_le_rapport_AFFICHE_que_la_preuve_est_impossible(tmp_path, capsys, monkeypatch):
+    """Une donnée publiée mais jamais affichée est une donnée invisible."""
+    _ruban(tmp_path, [50])
+    monkeypatch.setattr(CD, "_lanceur_reel", lambda *_a, **_k: (
+        lambda _w, t: {"status": "PROMISING", "verdict_partiel": True, "candidates_tested": 9,
+                       "signal_coverage": {"utc_days": ["2026-11-13"]}}))
+    CD.main([str(tmp_path), "--budget", "1000"])
+    sortie = capsys.readouterr().out
+    assert "PREUVE IMPOSSIBLE" in sortie and "RAPPORTS_PARTIELS" in sortie
+    assert "1 rapport(s) partiel(s) sur 1" in sortie
+    assert "candidats essayés, toutes tranches : 9" in sortie
+    assert "/ 6 requis" in sortie
 
