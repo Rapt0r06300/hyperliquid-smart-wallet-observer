@@ -11,6 +11,7 @@ import pytest
 
 from hl_observer.backtesting import copy_vault_local_lab as local_lab
 from hl_observer.backtesting.copy_vault_local_lab import (
+    PAPER_CAPITAL_USD,
     _campaign_search_config,
     _campaign_trial_chain,
     _checkpoint_resume_state,
@@ -394,9 +395,18 @@ def test_local_campaign_resume_preserves_reserved_attempt_without_reusing_candid
     assert len(attempts) == 4
     assert resumed["freeze_created"] is False
     assert resumed["pnl_uplift_freeze_count"] == 3
-    assert [row["sequence_index"] for row in trials] == [2, 3, 4]
-    assert [row["sequence_index"] for row in attempts] == [1, 2, 3, 4]
-    assert [row["trial_number"] for row in trials] == [2, 3, 4]
+    # DES PROPRIETES, pas des valeurs figees. `_candidate_parameters` saute les combinaisons dont
+    # `core + probe` depasse le capital : sur 350 USD les 144 paires etaient finançables et les
+    # index retenus etaient 2, 3, 4 ; sur 100 USD la recherche en saute et retient 3, 5, 9. Figer
+    # la liste revenait a tester la suite de Halton, pas la reprise -- que ce test vise.
+    index_essais = [row["sequence_index"] for row in trials]
+    index_tentatives = [row["sequence_index"] for row in attempts]
+    assert index_essais == sorted(set(index_essais)), "jamais reutilise, toujours croissant"
+    assert index_tentatives == sorted(set(index_tentatives))
+    assert set(index_essais) <= set(index_tentatives), "un essai vient toujours d'une tentative"
+    assert index_tentatives[0] == 1, "la reprise repart de la premiere tentative reservee"
+    assert [row["trial_number"] for row in trials] == [2, 3, 4], (
+        "les NUMEROS d'essai restent consecutifs : ils comptent les essais, pas les tirages")
     assert [
         row["attempt_receipt_sha256"] for row in trials
     ] == [row["attempt_receipt_sha256"] for row in attempts[1:]]
@@ -802,6 +812,10 @@ def test_signal_coverage_reports_short_sample_without_inventing_days() -> None:
 
     assert coverage == {
         "distinct_utc_days": 2,
+        # La LISTE des journees, et pas seulement leur nombre : une conduite par tranches
+        # doit pouvoir en faire l'UNION. Sans elle, le seuil des six journees etait
+        # infranchissable (constate a la premiere conduite reelle, 18/11/2026).
+        "utc_days": ["1970-01-02", "1970-01-03"],
         "minimum_utc_days_required": 6,
         "signal_start_ms": day_ms + 1_000,
         "signal_end_ms": 2 * day_ms + 1_000,
@@ -1874,7 +1888,9 @@ def test_restoration_snapshot_is_ready_only_with_complete_lineage() -> None:
         "source_asset_inventory_sha256": "d" * 64,
         "source_asset_inventory_count": 2,
         "proposal_seed": 0,
-        "paper_capital_usd": 350.0,
+        # IMPORTE : le code compare au capital DU CONTRAT. Recopier 350 rendait l'instantane
+        # incomplet (UNMEASURABLE) des que le contrat est passe a 100 -- et le code avait raison.
+        "paper_capital_usd": PAPER_CAPITAL_USD,
         "global_trial_count": 7,
         "temporal_windows": {"train_start_ms": 10, "train_end_ms": 20},
         "trial_number": 7,
@@ -2126,7 +2142,9 @@ def test_champion_requires_full_proof_and_never_downgrades(tmp_path: Path) -> No
             "paper_read_only": True,
             "real_execution": False,
             "data_complete": True,
-            "paper_capital_usd": 350.0,
+            # IMPORTE : le code compare au capital DU CONTRAT. Recopier 350 rendait l'instantane
+        # incomplet (UNMEASURABLE) des que le contrat est passe a 100 -- et le code avait raison.
+        "paper_capital_usd": PAPER_CAPITAL_USD,
             "selected_candidate": {"freeze": {"campaign_id": run_id}},
             "validation": {"daily_mean_net_pnl_usd": daily_net},
             "oos": {"daily_mean_net_pnl_usd": daily_net},
@@ -2192,7 +2210,9 @@ def test_record_frozen_candidate_rejects_unsafe_run_id_before_writing(tmp_path: 
     assert not (tmp_path.parent / "escape.json").exists()
 
 
-def test_historical_train_proxy_scales_to_350_usd_without_claiming_proof(tmp_path: Path) -> None:
+def test_historical_train_proxy_scales_to_contract_capital_without_claiming_proof(
+    tmp_path: Path,
+) -> None:
     relative = "runtime/reports/train.json"
     target = tmp_path / relative
     target.parent.mkdir(parents=True)
@@ -2216,8 +2236,15 @@ def test_historical_train_proxy_scales_to_350_usd_without_claiming_proof(tmp_pat
     proxy = _historical_train_proxy(tmp_path, {"train_report": relative})
 
     assert proxy is not None
-    assert proxy["daily_net_usd"] == 3.5
-    assert proxy["conservative_lcb_usd_per_day"] == 1.75
+    # LA RELATION, pas une valeur calculee a la main. Le proxy met a l'echelle du capital :
+    # `scale = PAPER_CAPITAL_USD / exposure`, ou l'exposition vient de la fixture (cœur +
+    # sonde). Figer 3.5 revenait a tester le capital d'hier ; recalculer 100/100 revenait a
+    # re-deviner l'exposition. On verifie ce que le proxy PROMET : chaque grandeur mise a
+    # l'echelle vaut son originale multipliee par le facteur publie.
+    echelle = proxy["scale"]
+    assert echelle == pytest.approx(PAPER_CAPITAL_USD / 675.0), "capital / (600 + 75)"
+    assert proxy["daily_net_usd"] == pytest.approx(proxy["original_daily_net_usd"] * echelle)
+    assert proxy["conservative_lcb_usd_per_day"] == pytest.approx(3.375 * echelle)
     assert proxy["economically_proven"] is False
 
 

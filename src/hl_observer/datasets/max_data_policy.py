@@ -425,7 +425,7 @@ def write_decision(output_dir: str | Path, decision: Mapping[str, Any]) -> tuple
         f"- Budget téléchargement : **{decision.get('download_budget_gib')} Gio**",
         f"- Famille prioritaire : `{decision.get('top_family')}`",
         f"- SHA de code pris en compte : `{decision.get('project_sha_scope')}`",
-        "- Copy-Vault : **350 $ de capital paper, progression monotone-positive nette (pas de cible chiffrée fixe)**",
+        f"- Copy-Vault : **{int(STARTING_CAPITAL_USD)} $ de capital paper, progression monotone-positive nette (pas de cible chiffrée fixe)**",
         "- Familles économiques actives : **Copy-Vault uniquement**",
         "- Compensation entre familles : **INTERDITE**",
         "- OOS/forward utilisés comme gradient : **NON**",

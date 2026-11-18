@@ -33,6 +33,8 @@ from typing import Any
 import numpy as np
 from scipy.stats import rankdata
 
+from hl_observer.backtesting.copy_vault_protocol import PAPER_EQUITY_USD
+
 # v2 (2026-11-11) : la note bayésienne v1 dégénérait (toutes les notes égales) dès que la variance
 # entre vaults passait sous le bruit moyen — 57 dates sur 86 dans l'analyse primaire réelle. Le
 # « meilleur quantile » était alors les premiers vaults du tableau (ordre des adresses) et l'IC de
@@ -65,7 +67,7 @@ class PersistenceConfig:
     confidence: float = 0.95
     negligible_ic: float = 0.05
     dates_for_rejection: int = 40
-    capital_usd: float = 350.0
+    capital_usd: float = PAPER_EQUITY_USD
     seed: int = 20_261_111
 
     def as_dict(self) -> dict[str, Any]:

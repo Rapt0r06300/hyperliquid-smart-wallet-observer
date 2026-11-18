@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any, Iterable
 
+from hl_observer.backtesting.copy_vault_protocol import PAPER_EQUITY_USD
 from hl_observer.instrument_identity import preserve_native_instrument_symbol
 
 EXIT_ACTION_MARKERS = ("CLOSE", "REDUCE", "STOP", "TAKE_PROFIT", "TRAILING")
@@ -138,7 +139,7 @@ def evaluate_coin_side_session_memory(
     min_edge_required_bps: float,
     consensus_wallets: int,
     liquidity_score: float,
-    starting_equity_usdt: float = 350.0,
+    starting_equity_usdt: float = PAPER_EQUITY_USD,
     cooldown_usdc: float | None = None,
     extra_edge_after_loss_bps: float = 35.0,
     min_consensus_after_loss: int = 3,

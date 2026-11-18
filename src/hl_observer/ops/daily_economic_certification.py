@@ -145,7 +145,14 @@ def apply_daily_gate(
     min_forward_observation_seconds: float = MIN_FORWARD_OBSERVATION_SECONDS,
     min_forward_coverage_ratio: float = MIN_FORWARD_COVERAGE_RATIO,
 ) -> dict[str, Any]:
-    """Add the verified +5 USD/day requirement without weakening base proof."""
+    """Mesure le PnL net par jour et la qualite du forward, SANS en faire une condition.
+
+    Le montant par jour n'est PAS un seuil : `quality_certified` exige une qualite temporelle
+    prouvee et un PnL POSITIF, et le resultat publie `reference_target_is_gate: False`. Le
+    franchissement de `target_net_usd_per_day` est publie sous `daily_target_reached` a titre
+    d'information -- le lire comme une condition serait une regression du contrat du 18/11/2026,
+    qui retire tout objectif chiffre des regles actives.
+    """
 
     result = dict(base_result)
     reasons = [str(value) for value in result.get("reasons", []) if str(value)]
@@ -307,7 +314,10 @@ def certify_daily_campaign(
     expected_family: str,
     payload: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
-    """Run the existing strict certification, then the +5 USD/day gate."""
+    """Certification stricte, puis MESURE du net par jour (qui n'est pas un gate).
+
+    Voir `apply_daily_gate` : le montant par jour est publie, jamais exige.
+    """
 
     return apply_daily_gate(certify_campaign(expected_family, payload), payload)
 

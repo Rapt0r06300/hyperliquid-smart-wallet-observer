@@ -31,6 +31,11 @@ from hl_observer.backtesting.copy_vault_protocol import (
     classify_live_entry_action,
 )
 from hl_observer.economics.assumptions import EconomicConfigError, EconomicRunMode
+from hl_observer.backtesting.copy_vault_protocol import (
+    MAX_GROSS_EXPOSURE_USD,
+    NOTIONAL_USD,
+    PAPER_EQUITY_USD,
+)
 
 
 @pytest.mark.parametrize(
@@ -315,11 +320,13 @@ def test_portfolio_exposure_uses_decimal_before_comparing_the_paper_cap(monkeypa
     trades = {
         "first": {
             "trade_id": "trade-first", "entry_ts_ms": 10, "exit_ts_ms": 100,
-            "notional_usd": 175.00000000000006,
+            # capital/2 PLUS un epsilon de flottant : la somme des deux lignes depasse le
+            # plafond d'un cheveu, et seule une comparaison en Decimal doit le voir.
+            "notional_usd": PAPER_EQUITY_USD / 2 + 6e-14,
         },
         "second": {
             "trade_id": "trade-second", "entry_ts_ms": 20, "exit_ts_ms": 200,
-            "notional_usd": 175.0,
+            "notional_usd": PAPER_EQUITY_USD / 2,
         },
     }
 
@@ -339,7 +346,7 @@ def test_portfolio_exposure_uses_decimal_before_comparing_the_paper_cap(monkeypa
     assert [trade["trade_id"] for trade in accepted] == ["trade-first"]
     assert counters["capital_margin_rejected"] == 1
 
-    trades["first"]["notional_usd"] = 175.0
+    trades["first"]["notional_usd"] = PAPER_EQUITY_USD / 2
     accepted_at_limit, exact_limit_counters = replay_metaorders(
         metaorders, {}, horizon_ms=1_000
     )
@@ -1837,7 +1844,7 @@ def test_capacity_and_duplicate_trade_guards_fail_closed() -> None:
     metaorder = cluster_metaorders([_entry("a", 1_000)])[0][0]
     books = [
         _book(1_000, 99.0, 101.0),
-        _book(61_000, 100.0, 102.0, capacity=149.99),
+        _book(61_000, 100.0, 102.0, capacity=NOTIONAL_USD - 0.01),
         _book(361_000, 109.0, 111.0),
     ]
     trade, reason = execute_metaorder(metaorder, books, horizon_ms=300_000)
@@ -2047,9 +2054,11 @@ def test_protocol_signature_invalidates_pre_vwap_pre_complete_day_freezes() -> N
     assert signature["causal_book_gap_identity_policy"] == (
         "same_connection_and_explicit_gap_epoch_required_for_causal_stream_triplets_v1"
     )
-    assert signature["paper_equity_usd"] == 350.0
-    assert signature["max_gross_exposure_usd"] == 350.0
-    assert signature["notional_usd"] == 150.0
+    # La signature DOIT suivre le contrat : son role est d'invalider les gels anterieurs
+    # quand il change. On verifie qu'elle publie le capital courant, jamais un montant fige.
+    assert signature["paper_equity_usd"] == PAPER_EQUITY_USD
+    assert signature["max_gross_exposure_usd"] == MAX_GROSS_EXPOSURE_USD
+    assert signature["notional_usd"] == NOTIONAL_USD
     assert signature["execution_pricing_policy"] == (
         "observed_side_specific_l2_vwap_full_size_v1"
     )

@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+from hl_observer.backtesting.copy_vault_protocol import PAPER_EQUITY_USD
+
 from .fee_model import calculate_fee_usdt
 from .slippage_model import apply_slippage
 
@@ -30,7 +32,7 @@ class WalletFollowingResult:
     economic_proof_status: str = "UNMEASURABLE"
 
 
-def simulate_wallet_following(events: Iterable[dict[str, object]], *, starting_equity: float = 350.0, fee_bps: float = 4.0, slippage_bps: float = 2.0) -> WalletFollowingResult:
+def simulate_wallet_following(events: Iterable[dict[str, object]], *, starting_equity: float = PAPER_EQUITY_USD, fee_bps: float = 4.0, slippage_bps: float = 2.0) -> WalletFollowingResult:
     equity = float(starting_equity)
     curve = [equity]
     trades: list[BacktestTrade] = []

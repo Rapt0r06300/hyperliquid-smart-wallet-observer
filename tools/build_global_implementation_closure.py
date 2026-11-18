@@ -9,6 +9,7 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
+from hl_observer.contrat_paper import PAPER_EQUITY_USD
 
 
 ANALYSIS_KINDS = (
@@ -22,10 +23,14 @@ ANALYSIS_KINDS = (
 
 
 def scoreboard_scope_issue(scoreboard: Mapping[str, Any]) -> str | None:
-    """Reject legacy multi-family and non-350 USD economic receipts."""
+    """Refuse les recus multi-familles et ceux hors capital DU CONTRAT.
+
+    Le montant etait recopie ici (`!= 350.0`), jusque dans cette docstring : au passage du
+    contrat a 100 USD, ce validateur refusait tous les recus valides.
+    """
     if scoreboard.get("active_families") != ["copy_vault"]:
         return "CURRENT_SCOREBOARD_ACTIVE_SCOPE_INVALID"
-    if scoreboard.get("starting_capital_usd") != 350.0:
+    if scoreboard.get("starting_capital_usd") != PAPER_EQUITY_USD:
         return "CURRENT_SCOREBOARD_CAPITAL_INVALID"
     families = scoreboard.get("families")
     if not isinstance(families, Mapping) or set(families) != {"copy_vault"}:

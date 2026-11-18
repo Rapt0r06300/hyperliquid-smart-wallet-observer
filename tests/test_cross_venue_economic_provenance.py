@@ -4,6 +4,7 @@ import pytest
 
 from hl_observer.backtesting.cross_venue_certified import FOUR_FILL_CONTRACT_VERSION, SOURCE_MODE
 from hl_observer.simulation.economic_objective import evaluate_objective
+from hl_observer.simulation.economic_objective import STARTING_CAPITAL_USD
 
 pytestmark = pytest.mark.skip(
     reason="cross-venue is disabled by the active Copy-Vault-only scope",
@@ -17,7 +18,7 @@ def _segment(net, gross, char, *, oos=False, forward=False):
 def _proof(meta):
     return {
         "family": "cross_venue_dislocation_v2", "paper_read_only": True, "real_execution": False,
-        "starting_capital_usd": 350.0, "parameters_frozen": True,
+        "starting_capital_usd": STARTING_CAPITAL_USD, "parameters_frozen": True,
         "opened_positions": 4, "closed_positions": 4,
         "gross_pnl_usd": 6.4, "fees_usd": 0.5, "spread_cost_usd": 0.4, "slippage_cost_usd": 0.3, "latency_cost_usd": 0.2, "net_pnl_usd": 5.0,
         "liquidatable_net": True, "all_positions_two_leg_closed": True,

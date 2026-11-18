@@ -103,13 +103,32 @@ _TRIAL_CHAIN_GENESIS = "0" * 64
 _IMPROVEMENT_CHAIN_GENESIS = "0" * 64
 _IMPROVEMENT_RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$")
 _HALTON_BASES = (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71)
+def _domaine_notionnel(debut: int, fin: int, pas: int) -> tuple[float, ...]:
+    """Un domaine de notionnel borne au capital du contrat, au pas demande.
+
+    Une valeur superieure au capital ne peut jamais etre financee : la proposer revient a faire
+    tirer la recherche dans le vide. La borne basse est conservee telle quelle -- si elle depassait
+    le capital, on rendrait au moins elle, pour que le domaine ne soit jamais VIDE : un domaine
+    vide ferait disparaitre le parametre sans rien dire, ce qui est pire qu'un domaine a un point.
+    """
+    plafond = int(min(fin, PAPER_CAPITAL_USD))
+    if plafond < debut:
+        return (float(debut),)
+    return tuple(float(value) for value in range(debut, plafond + 1, pas))
+
+
 _PARAMETER_DOMAINS: tuple[tuple[str, tuple[Any, ...]], ...] = (
     # #8 — grille élargie et affinée (bornes plus larges + pas plus fin) pour que
     # l'optimum « entre deux points » ou « hors plage » devienne atteignable. La
     # pénalité anti-overfit porte sur les essais RÉELLEMENT menés (pas sur la taille
     # du domaine), donc élargir ne dégrade pas la rigueur ; Halton explore plus finement.
-    ("core_notional_usd", tuple(float(value) for value in range(30, 201, 10))),
-    ("probe_notional_usd", tuple(float(value) for value in range(10, 81, 10))),
+    # Les notionnels sont BORNES AU CAPITAL : proposer 200 USD sur un capital de 100 ferait
+    # chercher dans un espace dont les quatre cinquiemes n'existent pas, et Halton -- qui tire pour
+    # couvrir uniformement -- passerait son temps sur des combinaisons mortes. Mesure du
+    # 18/11/2026 : sur 350 USD les 144 paires etaient toutes finançables, sur 100 seules 28,
+    # soit 81 % de tirages rejetes et un index 1 qui ne produisait AUCUN candidat.
+    ("core_notional_usd", _domaine_notionnel(30, 200, 10)),
+    ("probe_notional_usd", _domaine_notionnel(10, 80, 10)),
     ("minimum_leader_fill_notional_usd", tuple(float(value) for value in range(5, 121, 5))),
     ("signed_depth_imbalance_minimum", tuple(round(-0.3 + i * 0.05, 2) for i in range(13))),
     ("stop_loss_bps", tuple(float(value) for value in range(30, 341, 10))),
@@ -117,7 +136,16 @@ _PARAMETER_DOMAINS: tuple[tuple[str, tuple[Any, ...]], ...] = (
     # #4 — l'option 1_000_000 = "sans plafond journalier" (jamais atteint sur ce capital) :
     # laisse la recherche découvrir des stratégies qui gagnent plus les bons jours. La
     # rigueur anti-overfit décide si c'est vraiment mieux (sinon une valeur plafonnée gagne).
-    ("daily_profit_lock_usd", (2.0, 5.0, 10.0, 15.0, 1_000_000.0)),
+    # PLAFOND DE PROFIT RETIRE DES REGLES ACTIVES (contrat du 18/11/2026). Ce parametre arrete la
+    # journee des que `realized_today >= daily_profit_lock_usd` : le domaine proposait 2, 5, 10 et
+    # 15 USD, donc la recherche pouvait elire un candidat qui CESSE DE GAGNER a deux dollars, puis
+    # le mesurer comme le meilleur -- parce qu'il etait regulier, pas parce qu'il gagnait. Le
+    # contrat demande de maximiser le PnL net sans objectif fixe ; un verrou de gain n'est aucune
+    # des contraintes nommees (risque, cout, drawdown, exposition, liquidite, capacite).
+    # Le parametre SURVIT avec sa valeur « sans plafond » : les gels deja ecrits le portent, et le
+    # code qui le lit continue de fonctionner. Seul le CHOIX d'un plafond disparait.
+    # `daily_loss_cap_usd`, le plafond de PERTE, reste entier : c'est une contrainte de risque.
+    ("daily_profit_lock_usd", (1_000_000.0,)),
     ("horizon_ms", (30_000, 60_000, 120_000, 180_000, 300_000, 900_000, 1_800_000, 3_600_000)),
     ("vault_daily_limit", (2, 3, 4)),
     ("coin_daily_limit", (2, 3, 4)),
@@ -1936,7 +1964,8 @@ def _signal_coverage(timestamps: list[int]) -> dict[str, int | float | None]:
         {timestamp for timestamp in timestamps if type(timestamp) is int and timestamp > 0}
     )
     day_ms = 86_400_000
-    distinct_days = len({timestamp // day_ms for timestamp in valid})
+    jours = sorted({timestamp // day_ms for timestamp in valid})
+    distinct_days = len(jours)
     median_gap_s: float | None = None
     p95_gap_s: float | None = None
     gap_count_gt_60s = 0
@@ -1948,6 +1977,14 @@ def _signal_coverage(timestamps: list[int]) -> dict[str, int | float | None]:
         gap_count_gt_60s = sum(1 for g in gaps if g > 60_000)
     return {
         "distinct_utc_days": distinct_days,
+        # La LISTE, pas seulement le nombre : une conduite par tranches doit pouvoir faire l'UNION
+        # des journees de ses tranches, et deux tranches de la meme journee ne font qu'une journee.
+        # Sans cette cle, `agregation_tranches.unir_les_jours` lisait zero partout et le seuil des
+        # six journees etait infranchissable -- constate a la premiere conduite reelle.
+        "utc_days": [
+            datetime.fromtimestamp(jour * day_ms / 1000, UTC).strftime("%Y-%m-%d")
+            for jour in jours
+        ],
         "minimum_utc_days_required": _MINIMUM_SIGNAL_UTC_DAYS,
         "signal_start_ms": valid[0] if valid else None,
         "signal_end_ms": valid[-1] if valid else None,
@@ -4810,7 +4847,10 @@ def run_historical_trade_replay(
     )
     comparable = [
         row for row in trials
-        if row["capital_usd"] == 350.0
+        # LA CONSTANTE, pas un montant recopie : cette ligne portait `== 350.0` a cinq lignes de sa
+        # voisine qui utilisait deja `PAPER_CAPITAL_USD`. Au passage du capital a 100 USD, la liste
+        # devenait vide et le `max()` ci-dessous levait une exception nue au milieu du replay.
+        if row["capital_usd"] == PAPER_CAPITAL_USD
         and row["fee_multiplier"] == row["spread_multiplier"] == row["latency_multiplier"] == row["slippage_multiplier"] == 1.0
         and int(row["sample_count"]) >= 4
     ]
@@ -4818,7 +4858,10 @@ def run_historical_trade_replay(
         value = decimal_value(row["daily_net_pnl_usd_exact_decimal"])
         return value if value is not None else Decimal("-Infinity")
 
-    best = max(comparable, key=exact_daily_rank)
+    # « Aucun essai comparable » est un ETAT POSSIBLE -- aucun essai n'a atteint le minimum
+    # d'echantillons -- et il doit se lire, pas exploser. Sans comparable, il n'y a rien de mieux
+    # que la reference : on rend la baseline, et le rapport dira que rien ne l'a battue.
+    best = max(comparable, key=exact_daily_rank) if comparable else baseline
     rng = random.Random(21_200_540)
     bootstrap_rows = {id(row): row for row in (baseline, best)}
     for row in bootstrap_rows.values():

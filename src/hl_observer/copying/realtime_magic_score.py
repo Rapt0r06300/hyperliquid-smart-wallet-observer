@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from hl_observer.backtesting.copy_vault_protocol import PAPER_EQUITY_USD
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 from hl_observer.simulation.live_filters import (
     DEFAULT_SIMULATION_MAX_COPY_DEGRADATION_BPS,
     DEFAULT_SIMULATION_MAX_SIGNAL_AGE_MS,
@@ -9,7 +11,6 @@ from hl_observer.simulation.live_filters import (
     DEFAULT_SIMULATION_MIN_LIQUIDITY_SCORE,
     DEFAULT_SIMULATION_SINGLE_WALLET_MIN_EDGE_BPS,
 )
-from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 
 @dataclass(slots=True)
@@ -33,7 +34,7 @@ class RealtimeCopyRiskConfig:
     crowding_penalty_bps_per_wallet: float = 2.0
     max_copy_degradation_bps: float = DEFAULT_SIMULATION_MAX_COPY_DEGRADATION_BPS
     max_price_deviation_bps: float = 18.0
-    starting_equity_usdt: float = 350.0
+    starting_equity_usdt: float = PAPER_EQUITY_USD
     max_position_notional_usdt: float = 50.0
     min_position_notional_usdt: float = 5.0
     max_total_exposure_usdt: float = 100.0
@@ -328,9 +329,9 @@ def score_realtime_copy_candidate(
     # Intersection stricte : ne peut qu'AJOUTER des raisons de refus, jamais créer un trade.
     # Enregistre aussi l'historique d'edge (observabilité) même flag OFF. Fail-safe total.
     try:
-        from hl_observer.signals.v26_entry_vetos import apply_v26_entry_vetos
-
         import os as _os
+
+        from hl_observer.signals.v26_entry_vetos import apply_v26_entry_vetos
 
         _snapshot = None
         if str(_os.environ.get("HYPERSMART_V26_RECORD_CANDIDATES", "0")).lower() in ("1", "true", "yes", "on"):

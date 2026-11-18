@@ -10,6 +10,7 @@ from enum import Enum
 from hashlib import sha256
 from typing import Any
 
+from hl_observer.contrat_paper import PAPER_EQUITY_USD
 from hl_observer.economics.numeric import (
     USD_RECONCILIATION_ABS_TOLERANCE,
     decimal_difference,
@@ -80,7 +81,7 @@ class LedgerPosition:
 
 @dataclass(slots=True)
 class PaperLedger:
-    starting_balance_usdc: float = 350.0
+    starting_balance_usdc: float = PAPER_EQUITY_USD
     session_id: str = field(default_factory=lambda: f"paper:{uuid.uuid4().hex}")
     events: list[PaperEvent] = field(default_factory=list)
     positions: dict[str, LedgerPosition] = field(default_factory=dict)
@@ -1242,8 +1243,8 @@ class LedgerScope(str, Enum):
 class ScopedLedgerBook:
     """Independent capital, positions, drawdown and reports per research lane."""
 
-    strict_starting_balance_usdc: float = 350.0
-    experimental_starting_balance_usdc: float = 350.0
+    strict_starting_balance_usdc: float = PAPER_EQUITY_USD
+    experimental_starting_balance_usdc: float = PAPER_EQUITY_USD
     session_id: str = field(default_factory=lambda: f"paper-book:{uuid.uuid4().hex}")
     _ledgers: dict[LedgerScope, PaperLedger] = field(init=False)
 

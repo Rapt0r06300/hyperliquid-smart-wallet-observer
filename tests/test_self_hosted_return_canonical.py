@@ -16,6 +16,7 @@ from hl_observer.ops.daily_economic_certification import certify_daily_workspace
 from hl_observer.ops.final_economic_certification import certify_workspace
 from hl_observer.simulation.economic_objective import CANONICAL_FAMILIES, evaluate_objective
 from hl_observer.simulation.vnext_promotion_protocol import build_freeze_manifest
+from hl_observer.simulation.economic_objective import STARTING_CAPITAL_USD
 
 FAMILIES = ("copy_vault", "lead_lag", "cross_venue_dislocation_v2")
 
@@ -61,7 +62,7 @@ def _campaign(family: str) -> dict:
     economic_contract = _economic_contract(family)
     row = {
         "family": family,
-        "starting_capital_usd": 350.0,
+        "starting_capital_usd": STARTING_CAPITAL_USD,
         "paper_read_only": True,
         "real_execution": False,
         "economic_contract": economic_contract,

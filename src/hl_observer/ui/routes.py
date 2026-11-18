@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 import math
 import os
+from collections import Counter, defaultdict
 from datetime import timezone
 from hashlib import sha256
-from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +15,7 @@ from sqlalchemy import desc, func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 
 from hl_observer import __version__
+from hl_observer.backtesting.copy_vault_protocol import PAPER_EQUITY_USD
 from hl_observer.config.settings import ExecutionEnvironment, Settings
 from hl_observer.copying.realtime_magic_score import (
     RealtimeCopyRiskConfig,
@@ -23,10 +24,11 @@ from hl_observer.copying.realtime_magic_score import (
 )
 from hl_observer.copying.runtime_v9_adapter import attach_v9_runtime_diagnostics
 from hl_observer.data_sources.warehouse_coverage import build_warehouse_coverage_report
+from hl_observer.edge.edge_source import edge_brut
 from hl_observer.loops.dashboard_payload import build_loop_dashboard_payload
 from hl_observer.markets.realtime_liquidity import resolve_realtime_liquidity_score
-from hl_observer.edge.edge_source import edge_brut
 from hl_observer.opportunities.fresh_opportunity import FreshOpportunity, find_fresh_opportunities
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 from hl_observer.risk.risk_engine_v3 import (
     EntryCostGuardConfig,
     SessionEntryRiskContext,
@@ -34,11 +36,13 @@ from hl_observer.risk.risk_engine_v3 import (
 )
 from hl_observer.risk.session_pnl_guard import evaluate_session_pnl_guard
 from hl_observer.security.safety_audit import run_safety_audit
-from hl_observer.strategies.strategy_mode import (
-    classify as classify_strategy_mode,
-    mode_of_position,
+from hl_observer.signals.fill_admission import (
+    KIND_ENTRY,
+    KIND_EXIT,
+    FillAdmissionConfig,
+    admit_live_fill,
+    fill_identity,
 )
-from hl_observer.signals.fill_admission import KIND_ENTRY, KIND_EXIT, FillAdmissionConfig, admit_live_fill, fill_identity
 from hl_observer.simulation.decision_replay_analyzer import (
     LOGS_TO_SEND_DIRNAME,
     SUMMARY_CACHE_FILE,
@@ -62,11 +66,10 @@ from hl_observer.simulation.live_filters import (
 )
 from hl_observer.storage.database import create_session_factory, create_sqlite_engine
 from hl_observer.storage.models import (
-    ApiHealth,
-    CollectionRun,
+    AutoWatchlist,
     CoinOpportunity,
+    CollectionRun,
     EdgeMetric,
-    ExplorerEndpoint,
     ExplorerEvent,
     ExplorerRevalidationResult,
     ExplorerRun,
@@ -98,10 +101,9 @@ from hl_observer.storage.models import (
     TopWallet,
     TopWalletSource,
     Wallet,
-    AutoWatchlist,
+    WalletBootstrapRun,
     WalletCandidateModel,
     WalletCandidateScoreModel,
-    WalletBootstrapRun,
     WalletClosing,
     WalletCoinProfileModel,
     WalletCoinScoreModel,
@@ -111,9 +113,14 @@ from hl_observer.storage.models import (
     WalletOpening,
     WalletOpeningPatternStats,
     WalletPlaybook,
-    WalletScanQueue,
     WalletScoreModel,
     WalletSource,
+)
+from hl_observer.strategies.strategy_mode import (
+    classify as classify_strategy_mode,
+)
+from hl_observer.strategies.strategy_mode import (
+    mode_of_position,
 )
 from hl_observer.ui.action_catalog import build_action_catalog
 from hl_observer.ui.event_bus import UiEventBus
@@ -140,7 +147,6 @@ from hl_observer.wallets.delta_utils import (
     copy_delta_direction,
     delta_event_time_ms,
 )
-from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 
 def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRouter:
@@ -762,7 +768,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         mid_price_sources: dict[str, str] | None = None,
         mid_price_timestamps_ms: dict[str, int] | None = None,
         orderbooks_by_coin: dict[str, dict[str, Any]] | None = None,
-        starting_equity_usdt: float = 350.0,
+        starting_equity_usdt: float = PAPER_EQUITY_USD,
         max_position_notional_usdt: float = 50.0,
         max_open_positions: int = 6,
         max_events: int = 2_000,
@@ -1490,6 +1496,8 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             try:
                 from hl_observer.signals.copy_decision import (
                     CopyInputs as _V12In,
+                )
+                from hl_observer.signals.copy_decision import (
                     evaluate_copy_candidate as _v12_eval,
                 )
                 _v12 = _v12_eval(_V12In(
@@ -1570,7 +1578,9 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             # REJECTED unless a primary whale fill backs it (shadow_whale_primary). Stricter
             # intersection: can only reduce trades. None (signal unknown) never blocks. OFF default.
             try:
-                from hl_observer.signals.whale_primary_gate import apply_whale_primary_promotion as _v14_whale_promote
+                from hl_observer.signals.whale_primary_gate import (
+                    apply_whale_primary_promotion as _v14_whale_promote,
+                )
                 decision_reason = _v14_whale_promote(
                     score_reason=decision_reason,
                     whale_primary=_v13.get("shadow_whale_primary"),
@@ -1596,8 +1606,10 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             # Stricter intersection: can only reduce trades. None age never blocks. OFF default.
             try:
                 from hl_observer.signals.consensus_window import (
-                    consensus_window_status as _v14_cw_status,
                     apply_consensus_window_promotion as _v14_cw_promote,
+                )
+                from hl_observer.signals.consensus_window import (
+                    consensus_window_status as _v14_cw_status,
                 )
                 _cw_in_window = None
                 if age_ms is not None:
@@ -1615,8 +1627,10 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             _v14b: dict = {}
             try:
                 from hl_observer.copy_fidelity.exec_cost_model import model_exec_costs
+                from hl_observer.copy_fidelity.exec_cost_promotion import (
+                    apply_exec_cost_promotion as _v14_exec_promote,
+                )
                 from hl_observer.copy_fidelity.slippage_model import slippage_bps as _v14_slip
-                from hl_observer.copy_fidelity.exec_cost_promotion import apply_exec_cost_promotion as _v14_exec_promote
                 _raw_base_net_edge = getattr(score, "edge_remaining_bps", None)
                 _base_net_edge = (
                     None if _raw_base_net_edge is None else float(_raw_base_net_edge)
@@ -1655,7 +1669,9 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 if calibrated_bool_env("HYPERSMART_V14_EXEC_COST_AUTHORITATIVE", False):
                     decision_reason = "REJECT_EXEC_COST_EVIDENCE_UNAVAILABLE"
             try:
-                from hl_observer.signals.entry_quality_gate import apply_entry_quality_promotion as _v14_eq_promote
+                from hl_observer.signals.entry_quality_gate import (
+                    apply_entry_quality_promotion as _v14_eq_promote,
+                )
                 _min_liq = float(getattr(realtime_score_config, "min_liquidity_score", 0.0) or 0.0)
                 _depth_ok = (float(liquidity_score) >= _min_liq) if _min_liq > 0 else None
                 _sm_ok = (float(confidence) * 100.0) >= calibrated_float_env("HYPERSMART_V14_SMART_MONEY_MIN_SCORE", 60.0)
@@ -2689,8 +2705,11 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         sltp_runtime_cfg = None
         try:
             from hl_observer.paper_trading.sltp_runtime import sltp_config_from_env
+
             # V26 L2 : wrapper barrieres ajustees a la volatilite (flag OFF = passthrough exact)
-            from hl_observer.paper_trading.vol_adjusted_barriers import apply_sltp_exits_vol_adjusted as apply_sltp_exits
+            from hl_observer.paper_trading.vol_adjusted_barriers import (
+                apply_sltp_exits_vol_adjusted as apply_sltp_exits,
+            )
             sltp_runtime_cfg = sltp_config_from_env()
             apply_sltp_exits(positions, ledger_events, mid_prices, cost_bps=cost_bps, now_ms=current_ms, config=sltp_runtime_cfg)
         except Exception:
@@ -3991,9 +4010,10 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         except Exception:
             panels["extended"] = None
         try:
+            import os as _os
+
             from hl_observer.ml.inference import get_model
             from hl_observer.ml.model_panel import build_model_panel
-            import os as _os
             _model_path = _os.environ.get("HYPERSMART_V13_MODEL_PATH") or "runtime/models/trade_model_v13.json"
             _report_path = _os.environ.get("HYPERSMART_V13_MODEL_REPORT") or (_model_path + ".report.json")
             panels["model"] = build_model_panel(
@@ -4007,6 +4027,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             _preds = []
             try:
                 import os as _os
+
                 from hl_observer.ml.inference import get_model as _gm
                 from hl_observer.ml.ledger_extract import rows_outcomes_from_samples as _ros
                 _m = _gm()
@@ -4049,6 +4070,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             import glob as _glob
             import json as _rj
             import os as _ro
+
             from hl_observer.risk.risk_panel import build_risk_panel
             _pnls = []
             _sp = _ro.environ.get("HYPERSMART_V13_SAMPLES_PATH") or "runtime/ml/training_samples.jsonl"
@@ -4106,9 +4128,13 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
     def observability_metrics() -> Any:
         """#208 — read-only observability (Prometheus text): open positions + lag/throughput.
         No action, no order; counters default to 0 until wired to the live loop."""
+        import glob as _g
+        import json as _j
+        import os as _o
+
         from fastapi.responses import PlainTextResponse
+
         from hl_observer.realtime.metrics_endpoint import build_metrics, format_metrics_prometheus
-        import glob as _g, json as _j, os as _o
         _pos = 0
         try:
             _snaps = _g.glob("logs/**/simulation_snapshot_latest.json", recursive=True)
@@ -5676,7 +5702,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
     async def actions(request: UiActionRequest) -> dict[str, Any]:
         if request.action == "reset_simulation_session":
             state.simulation_started_at_ms = now_ms()
-            state.simulation_starting_equity_usdt = 350.0
+            state.simulation_starting_equity_usdt = PAPER_EQUITY_USD
             state.simulation_processed_delta_keys.clear()
             state.simulation_virtual_positions.clear()
             state.simulation_ledger_events.clear()

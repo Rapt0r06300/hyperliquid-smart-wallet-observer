@@ -322,7 +322,7 @@ def walk_forward_selection(table: pd.DataFrame, *, horizon_h: int, niveau: float
             "eligibles": summarize_events(table.iloc[:0], horizon_h=horizon_h, niveau=niveau, config=config),
             "ecartes": summarize_events(table.iloc[:0], horizon_h=horizon_h, niveau=niveau, config=config),
             "ecart_retenus_moins_eligibles": {"jours": 0, "moyenne_bps": None, "intervalle_bps": None},
-            "capital_350": {"status": "UNMEASURABLE", "reason": "aucune décision retenue"}}
+            "compte_paper": {"status": "UNMEASURABLE", "reason": "aucune décision retenue"}}
     if not len(table):
         return vide
     duree = int(horizon_h) * HOUR_MS
@@ -348,7 +348,7 @@ def walk_forward_selection(table: pd.DataFrame, *, horizon_h: int, niveau: float
         "retenus": summarize_events(travail.loc[retenu], horizon_h=horizon_h, niveau=niveau, config=config),
         "eligibles": summarize_events(travail.loc[eligible], horizon_h=horizon_h, niveau=niveau, config=config),
         "ecartes": summarize_events(travail.loc[eligible & ~retenu], horizon_h=horizon_h, niveau=niveau, config=config),
-        "capital_350": simulate_capital(travail.loc[retenu], horizon_h=horizon_h, config=config),
+        "compte_paper": simulate_capital(travail.loc[retenu], horizon_h=horizon_h, config=config),
     }
     # écart apparié par jour : même marché, mêmes journées, seule la sélection diffère
     a, b = serie_par_jour(travail.loc[retenu], "net_bps"), serie_par_jour(travail.loc[eligible], "net_bps")
@@ -451,7 +451,7 @@ def run_event_study(fills: pd.DataFrame, units: Mapping[str, str], panels: Mappi
                    "decisions_observees_en_direct": int(evenements["post"].sum()) if len(evenements) else 0,
                    "prix": list(panels), "coins_avec_ecart": len(half_spread_bps), "rejets_primaire": rejets_totaux},
         "hypotheses_tested": cellules_totales, "confidence_after_multiplicity": niveau,
-        "primary": primaire, "capital_350": capital, "cells": cellules,
+        "primary": primaire, "compte_paper": capital, "cells": cellules,
         "selection": {"regle": {"historique_minimal": config.selection_min_history,
                                 "decisions_nulles_a_priori": config.selection_prior_events,
                                 "segment": config.segments[0], "horizon_h": config.horizons_h[0]},

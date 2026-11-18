@@ -27,6 +27,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
+from hl_observer.backtesting.copy_vault_protocol import PAPER_EQUITY_USD
+
 SCHEMA_VERSION = "hypersmart.economic_revalidation.v1"
 RAPPORT_RELPATH = Path("runtime") / "reports" / "economic_revalidation.json"
 
@@ -369,7 +371,7 @@ def _capacite_du_lot(racine: Path, episodes: Sequence[Episode], carnet_relpath: 
     return resume
 
 
-def revalider(root: Path | str, *, starting_equity_usd: float = 350.0,
+def revalider(root: Path | str, *, starting_equity_usd: float = PAPER_EQUITY_USD,
               ledgers: Mapping[str, str] | None = None,
               carnet_relpath: str | None = "runtime/data/carnet_venues.jsonl") -> dict[str, Any]:
     """Revalide chaque ledger connu. Ledger absent ou non appariable ⇒ statut explicite, jamais un zéro."""

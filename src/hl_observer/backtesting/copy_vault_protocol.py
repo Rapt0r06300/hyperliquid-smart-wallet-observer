@@ -15,6 +15,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from hl_observer.contrat_paper import (
+    MAX_GROSS_EXPOSURE_USD,
+    PAPER_EQUITY_USD,
+    PAPER_LEVERAGE,
+    PAPER_TARGET_NET_USD_PER_DAY,
+)
 from hl_observer.economics.families import build_copy_vault_contract
 from hl_observer.instrument_identity import preserve_native_instrument_symbol
 
@@ -36,10 +42,19 @@ MAX_REFERENCE_LAG_MS = 30_000
 MAX_TARGET_LAG_MS = 30_000
 HORIZONS_MS = (30_000, 60_000, 120_000, 180_000, 300_000, 900_000, 1_800_000, 3_600_000)
 MAX_OPEN_POSITIONS = 6
-PAPER_EQUITY_USD = 350.0
-PAPER_LEVERAGE = 1.0
-MAX_GROSS_EXPOSURE_USD = PAPER_EQUITY_USD * PAPER_LEVERAGE
-PAPER_TARGET_NET_USD_PER_DAY = 5.0
+#: Le capital paper du contrat. Passe de 350 a 100 USD le 18/11/2026.
+#: Les grandeurs qui en DERIVENT suivent (exposition brute, notionnel) ; celles qui sont calibrees
+#: en absolu ne suivent pas et ont ete reprises une par une -- la plus dangereuse etait une egalite
+#: stricte `capital == 350` dans les controles de risque, qui aurait refuse toute evaluation.
+# (reexportes depuis hl_observer.contrat_paper -- voir l'import en tete)
+#: REPERE D'AFFICHAGE, JAMAIS UNE CONDITION. Le contrat du 18/11/2026 retire tout objectif chiffre
+#: des regles actives : on maximise le PnL net causal reproductible sous contraintes de risque, de
+#: cout, de drawdown, d'exposition, de liquidite et de capacite -- sans cible a franchir. La
+#: certification exige un PnL POSITIF et une qualite temporelle prouvee, pas un montant par jour.
+#: Verifie : `apply_daily_gate` publie `reference_target_is_gate: False`, et `quality_certified`
+#: n'en depend pas. Cette constante ne sert plus qu'a situer un resultat, et tout code qui la
+#: comparerait a un resultat pour decider serait une regression.
+# PAPER_TARGET_NET_USD_PER_DAY : reexporte depuis hl_observer.contrat_paper
 PAPER_EXECUTION_STYLE = "maker"
 PAPER_FEE_POLICY = "EXPLICIT_VENUE_SNAPSHOT_REQUIRED"
 PAPER_L2_FRESHNESS_MS = 90_000

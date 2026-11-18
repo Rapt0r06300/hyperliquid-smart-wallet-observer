@@ -20,6 +20,7 @@ from hl_observer.simulation.economic_proof_audit import (
     audit_reports,
     write_audit,
 )
+from hl_observer.simulation.economic_objective import STARTING_CAPITAL_USD
 
 AUDIT_AS_OF_MS = int(datetime(2026, 8, 31, tzinfo=UTC).timestamp() * 1000)
 
@@ -171,7 +172,7 @@ def _positive_copy_evidence() -> tuple[dict, dict]:
     snapshot_hash = economic_contract["assumption_snapshot_hash"]
     campaign = {
         "family": "copy_vault",
-        "starting_capital_usd": 350.0,
+        "starting_capital_usd": STARTING_CAPITAL_USD,
         "paper_read_only": True,
         "real_execution": False,
         "economic_contract": economic_contract,

@@ -12,12 +12,16 @@ from __future__ import annotations
 
 from typing import Any
 
+from hl_observer.backtesting.copy_vault_protocol import PAPER_EQUITY_USD
 from hl_observer.paper_trading.canonical_execution import CausalMarketSnapshot
-from hl_observer.paper_trading.execution_truth import ExecutionTruth
 from hl_observer.paper_trading.cross_venue_execution import (
-    CrossVenueExecutionRequest, CrossVenueLeg, CrossVenueScenarioSnapshots,
-    MeasuredLatencyDistribution, execute_non_atomic_cross_venue,
+    CrossVenueExecutionRequest,
+    CrossVenueLeg,
+    CrossVenueScenarioSnapshots,
+    MeasuredLatencyDistribution,
+    execute_non_atomic_cross_venue,
 )
+from hl_observer.paper_trading.execution_truth import ExecutionTruth
 from hl_observer.simulation.paper_ledger import PaperLedger
 
 
@@ -44,7 +48,7 @@ def executer_paire_cross_venue(*, coin: str, venue1: str, venue2: str, action1: 
     """Assemble et exécute la paire non-atomique. Les deux jambes sont BOOKÉES au ledger fourni (ou un neuf).
     Le stress adverse s'applique à la 2e jambe + l'unwind selon le sens de la 1re (BUY → prix baissés, SELL →
     montés). Retourne {report, ledger, matched_notional, paired_edge, positions, chaine_ok}."""
-    ledger = ledger if ledger is not None else PaperLedger(starting_balance_usdc=350.0)
+    ledger = ledger if ledger is not None else PaperLedger(starting_balance_usdc=PAPER_EQUITY_USD)
     dist = MeasuredLatencyDistribution(samples_ms=tuple(float(x) for x in latences_ms),
                                        source="recorded_cross_venue_round_trip")
     lat_max = max(latences_ms)

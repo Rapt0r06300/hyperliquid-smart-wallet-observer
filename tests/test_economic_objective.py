@@ -52,7 +52,9 @@ def _proof(**overrides):
         "family": "copy_vault",
         "paper_read_only": True,
         "real_execution": False,
-        "starting_capital_usd": 350.0,
+        # IMPORTE, jamais recopie : au passage 200 -> 350 puis 350 -> 100, c'est precisement
+        # cette ligne qui avait fige l'ancien capital et fait rendre INVALID_STARTING_CAPITAL.
+        "starting_capital_usd": STARTING_CAPITAL_USD,
         "parameters_frozen": True,
         "opened_positions": 4,
         "closed_positions": 4,
@@ -130,9 +132,20 @@ def _proof(**overrides):
     return row
 
 
-def test_canonical_capital_contract_is_350_usd_and_five_usd_per_day():
-    assert STARTING_CAPITAL_USD == 350.0
-    assert TARGET_NET_USD == TARGET_NET_USD_PER_DAY == 5.0
+def test_le_capital_du_contrat_est_unique_et_partage():
+    """Le capital vient d'UNE source, et le ledger paper part du meme montant.
+
+    Le titre ne nomme plus le montant : `..._is_350_usd_and_five_usd_per_day` aurait ete a reecrire
+    a chaque changement de contrat, et un nom qui ment survit longtemps. Ce qui compte n'est pas le
+    chiffre mais qu'il n'en existe QU'UN.
+
+    Le repere par jour est verifie comme un REPERE, pas comme une condition : le contrat du
+    18/11/2026 retire tout objectif chiffre des regles actives.
+    """
+    from hl_observer.backtesting.copy_vault_protocol import PAPER_EQUITY_USD
+
+    assert STARTING_CAPITAL_USD == PAPER_EQUITY_USD == 100.0
+    assert TARGET_NET_USD == TARGET_NET_USD_PER_DAY
     assert PaperLedger().starting_balance_usdc == STARTING_CAPITAL_USD
 
     accepted = evaluate_objective(

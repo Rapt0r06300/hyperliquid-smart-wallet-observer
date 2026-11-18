@@ -25,6 +25,7 @@ from hl_observer.analysis.opening_patterns import compute_opening_pattern_stats
 from hl_observer.analysis.trader_playbook import generate_trader_playbook
 from hl_observer.analysis.v19_repo_matrix import format_repo_fusion_matrix
 from hl_observer.autoscan import format_autoscan_report, run_autoscan
+from hl_observer.backtesting.copy_vault_protocol import PAPER_EQUITY_USD
 from hl_observer.calibration.ledger_pnl_calibration import (
     build_ledger_pnl_calibration_report,
     format_ledger_pnl_calibration_report,
@@ -1366,7 +1367,7 @@ def opportunity_report(
         risk_config=RealtimeCopyRiskConfig(
             min_edge_required_bps=max(1.0, simulation_min_edge_bps),
             max_signal_age_ms=max_signal_age_ms,
-            starting_equity_usdt=350.0,
+            starting_equity_usdt=PAPER_EQUITY_USD,
         ),
     )
     typer.echo(format_fresh_opportunity_report(report))

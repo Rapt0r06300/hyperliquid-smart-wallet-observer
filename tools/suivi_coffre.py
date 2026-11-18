@@ -46,8 +46,52 @@ def lire_statut(chemin: Path) -> dict | None:
         return None
 
 
-def rendre(st: dict | None, *, maintenant_ms: float) -> list[str]:
-    """Construit les lignes de l'écran — FONCTION PURE (testable)."""
+#: Le plan ecrit par le certificateur apres chaque scellement reussi.
+CHEMIN_PLAN = ("runtime", "reports", "plan_tranches.json")
+
+
+def lire_le_plan(racine: Path) -> dict | None:
+    """Le dernier plan de tranches connu, ou ``None``.
+
+    Un plan absent ou illisible ne doit RIEN casser : le suivi affiche alors une ligne qui le dit
+    et continue. Un ecran de suivi qui planterait sur un JSON tronque serait pire qu'un ecran sans
+    plan -- et un JSON tronque arrive, puisque le certificateur l'ecrit pendant qu'on le lit.
+    """
+    chemin = Path(racine).joinpath(*CHEMIN_PLAN)
+    try:
+        charge = json.loads(chemin.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return charge if isinstance(charge, dict) else None
+
+
+def lignes_du_plan(plan: dict | None) -> list[str]:
+    """Les deux ou trois lignes du decoupage — FONCTION PURE elle aussi."""
+    if not plan:
+        return ["  Plan labo : aucun (il sera ecrit a la fin de la prochaine certification)"]
+    tranches = plan.get("tranches")
+    if not isinstance(tranches, list) or not tranches:
+        return ["  Plan labo : illisible — la certification reste valide"]
+    couv = plan.get("couverture") if isinstance(plan.get("couverture"), dict) else {}
+    heures = float(couv.get("etendue_ms") or 0) / 3_600_000
+    continu = "continu" if couv.get("continue") else "DISCONTINU"
+    au_plus = " au plus" if str(plan.get("borne") or "").upper() == "HAUTE" else ""
+    lignes = [f"  Plan labo : {len(tranches)} tranche(s){au_plus}  |  {heures:.0f} h  |  {continu}"]
+    mesure = plan.get("mesure") if isinstance(plan.get("mesure"), dict) else {}
+    fills = mesure.get("lignes")
+    if isinstance(fills, int):
+        lignes.append(f"              {fills:,} fills dans la fenetre du labo".replace(",", " "))
+    if au_plus:
+        lignes.append("              (borne haute : fills BRUTS du coffre, doublons et non-causaux"
+                      " seront ecartes)")
+    return lignes
+
+
+def rendre(st: dict | None, *, maintenant_ms: float, plan: dict | None = None) -> list[str]:
+    """Construit les lignes de l'écran — FONCTION PURE (testable).
+
+    ``plan`` est PASSE, jamais lu ici : c'est ce qui garde cette fonction testable sans fichier.
+    """
     L: list[str] = []
     L.append("=" * 64)
     L.append("  ALINA - SUIVI COFFRE : certification -> coffre (temps reel)")
@@ -55,6 +99,8 @@ def rendre(st: dict | None, *, maintenant_ms: float) -> list[str]:
     if not st:
         L.append("  En attente d'une certification...")
         L.append("  (lance 'Certificateur Coffre Fort.cmd' ou arrete les collecteurs)")
+        L.append("  " + "-" * 60)
+        L.extend(lignes_du_plan(plan))
         L.append("=" * 64)
         return L
     age_s = max(0.0, (maintenant_ms - float(st.get("updated_ms") or 0)) / 1000.0)
@@ -93,6 +139,8 @@ def rendre(st: dict | None, *, maintenant_ms: float) -> list[str]:
         L.append(f"  Gardees coffre : {resume.get('deposes', resume.get('entrees', '?'))}"
                  f"  |  ecartees : {resume.get('quarantaine', '?')}"
                  f"  |  doublons : {resume.get('doublons', '?')}")
+    L.append("  " + "-" * 60)
+    L.extend(lignes_du_plan(plan))
     L.append("=" * 64)
     L.append("  q = quitter")
     return L
@@ -112,12 +160,18 @@ def _quitter_demande(duree: float) -> bool:
     return False
 
 
-def boucle(chemin: Path, *, intervalle: float = 1.0) -> int:
+def boucle(chemin: Path, *, intervalle: float = 1.0, racine: Path | None = None) -> int:
     fin_affichee = 0
+    # La racine du depot : le plan de tranches y est relu a chaque rafraichissement. C'est un
+    # petit JSON, et le relire a chaque cycle le montre des que le certificateur l'a ecrit --
+    # sans quoi il faudrait quitter et relancer le suivi pour le voir apparaitre.
+    racine = Path(racine) if racine is not None else Path(__file__).resolve().parents[1]
     while True:
         st = lire_statut(chemin)
+        plan = lire_le_plan(racine)
         os.system("cls" if os.name == "nt" else "clear")
-        print("\n".join(rendre(st, maintenant_ms=time.time() * 1000)), flush=True)
+        print("\n".join(rendre(st, maintenant_ms=time.time() * 1000, plan=plan)),
+              flush=True)
         # Une fois terminé, on garde l'écran quelques cycles puis on sort.
         if st and st.get("termine"):
             fin_affichee += 1
