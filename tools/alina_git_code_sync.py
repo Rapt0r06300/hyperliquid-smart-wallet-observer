@@ -1569,10 +1569,39 @@ class Synchronizer:
             "--untracked-files=no",
             "--", *self._pathspecs(include_protected=True),
         ).stdout
-        if dirty:
+        # LE CHURN RUNTIME NE BLOQUE PAS LA PROMOTION. `if dirty:` refusait toute modification
+        # suivie, y compris les classements de leaders que les collecteurs reecrivent en continu et
+        # que `RUNTIME_CHURN_FILES` declare deja comme du churn -- precisement « pour ne pas
+        # bloquer AlinaSync a chaque rafraichissement ». La garde de sync/pousse consultait cette
+        # liste, celle de promotion ne la consultait pas : la promotion etait donc impossible tant
+        # que la collecte tourne, c'est-a-dire en exploitation normale.
+        bloquants: list[str] = []
+        churn: list[str] = []
+        # `self.command` peut rendre la sortie en OCTETS : la decouper avec une chaine leve
+        # « a bytes-like object is required, not 'str' ». L'ancien `if dirty:` ne s'en apercevait
+        # pas, puisqu'il ne regardait que la verite de l'objet, jamais son contenu.
+        texte = dirty.decode("utf-8", "replace") if isinstance(dirty, bytes) else dirty
+        for entree in texte.split("\0"):
+            if len(entree) < 4:
+                continue
+            chemin = entree[3:].strip().replace("\\", "/")
+            if not chemin:
+                continue
+            (churn if chemin.casefold() in RUNTIME_CHURN_FILES else bloquants).append(chemin)
+        if bloquants:
+            # On NOMME les chemins : l'ancien message laissait deviner lesquels.
+            apercu = ", ".join(sorted(bloquants)[:8])
+            reste = "" if len(bloquants) <= 8 else f" (+{len(bloquants) - 8} autres)"
             raise SyncBlocked(
                 "Promotion refusee: des modifications suivies restent presentes "
-                "apres le checkpoint; donnees conservees, aucune bascule."
+                f"apres le checkpoint ({apercu}{reste}); donnees conservees, "
+                "aucune bascule."
+            )
+        if churn:
+            # Dit, pour qu'on ne croie pas l'arbre immacule.
+            self.say(
+                f"[PROMOTION] {len(churn)} fichier(s) de churn runtime ignore(s) "
+                f"(reecrits par la collecte) : {', '.join(sorted(churn)[:4])}"
             )
         self.say(
             f"[PROMOTION] Fast-forward local de main depuis {source_branch} "
