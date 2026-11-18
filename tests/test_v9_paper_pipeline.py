@@ -2,6 +2,7 @@ from hl_observer.copying.v9_paper_pipeline import (
     V9PipelineConfig,
     run_v9_paper_session,
 )
+from hl_observer.contrat_paper import PAPER_EQUITY_USD
 
 NOW = 1_000_000_000
 
@@ -123,7 +124,8 @@ def test_exposure_cap_blocks_after_max():
 
 def test_empty_session_is_no_data():
     r = run_v9_paper_session([], now_ms=NOW)
-    assert r.entries_opened == 0 and r.equity_usdt == r.starting_equity_usdt == 350.0
+    assert r.entries_opened == 0
+    assert r.equity_usdt == r.starting_equity_usdt == PAPER_EQUITY_USD
     assert r.supply_report.bottleneck == "NO_DATA"
 
 

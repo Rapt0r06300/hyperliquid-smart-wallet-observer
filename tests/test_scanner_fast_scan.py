@@ -20,6 +20,7 @@ from hl_observer.scanner.throughput_planner import (
     plan_safe_high_throughput_scan,
 )
 from hl_observer.scanner.wallet_priority import score_wallet_priority
+from hl_observer.contrat_paper import PAPER_EQUITY_USD
 
 
 GOOD_WALLET = "0x" + "a" * 40
@@ -149,9 +150,9 @@ def test_default_schedule_matches_safe_scan_architecture() -> None:
     assert all("execution" not in item.description.lower() for item in schedule)
 
 
-def test_paper_config_is_locked_to_350_and_prudent_caps() -> None:
+def test_paper_config_is_locked_to_the_contract_capital_and_prudent_caps() -> None:
     cfg = RealtimeCopyRiskConfig()
-    assert cfg.starting_equity_usdt == 350.0
+    assert cfg.starting_equity_usdt == PAPER_EQUITY_USD
     assert cfg.max_position_notional_usdt == 50.0
     assert cfg.max_total_exposure_usdt == 100.0
 
