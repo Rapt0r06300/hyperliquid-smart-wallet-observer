@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-MAIN_LAUNCHER = ROOT / "POUSSER-GITHUB-FORCE.cmd"
+MAIN_LAUNCHER = ROOT / "POUSSER-GITHUB.cmd"
 ALIASES = [ROOT / "tools/launchers/POUSSER_TOUT_LE_TRAVAIL.cmd", ROOT / "tools/launchers/REPARER_ET_POUSSER.cmd"]
 HELPER = ROOT / "tools" / "push_github_safe.ps1"
 DRIVER = ROOT / "tools" / "alina_git_code_sync.py"
@@ -80,7 +80,7 @@ def test_push_launchers_share_one_safe_implementation() -> None:
 
     for alias in [ROOT / "ALINA_SYNC_COMPLETE.cmd", *ALIASES]:
         alias_text = alias.read_text(encoding="utf-8")
-        assert "POUSSER-GITHUB-FORCE.cmd" in alias_text
+        assert "POUSSER-GITHUB.cmd" in alias_text
         assert "FETCH_HEAD" not in alias_text
 
 

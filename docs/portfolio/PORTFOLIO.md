@@ -20,7 +20,7 @@ automatique ni une garantie.
 - `LANCER_LAB_QUANT_COPY_VAULT.cmd` : exploite les shards SAFE pour les backtests et replays et conserve chaque essai/candidat, même si son résultat est provisoire ou moins bon.
 - Les lanceurs de support sont rangés dans `tools/launchers/`; seuls les quatre lanceurs principaux et AlinaSync restent à la racine.
 - `LANCER_HYPERSMART.cmd` : lance le moteur avec affichage de simulation paper ; il doit respecter le scope Copy-Vault.
-- `POUSSER-GITHUB-FORCE.cmd` : réconcilie et publie le code Git sans force. Il ne transfère pas les shards.
+- `POUSSER-GITHUB.cmd` : réconcilie et publie le code Git sans force. Il ne transfère pas les shards.
 
 Ces fichiers décrivent les rôles opérateur attendus ; leur nom ne vaut pas certification de leur branchement réel. Le code au HEAD et les receipts font foi.
 

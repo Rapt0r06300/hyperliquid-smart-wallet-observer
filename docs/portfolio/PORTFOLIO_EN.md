@@ -15,7 +15,7 @@ The terminal research objective is **at least $5 net per day on $200 paper capit
 - `LANCER_LAB_QUANT_COPY_VAULT.cmd`: uses SAFE shards for backtests and replays and preserves every experiment/candidate, including provisional or weaker results.
 - Support launchers live in `tools/launchers/`; only the four main launchers and AlinaSync remain at the repository root.
 - `LANCER_HYPERSMART.cmd`: runs the engine with a visible paper simulation; it must enforce Copy-Vault scope.
-- `POUSSER-GITHUB-FORCE.cmd`: reconciles and publishes Git code without force. It does not transfer shards.
+- `POUSSER-GITHUB.cmd`: reconciles and publishes Git code without force. It does not transfer shards.
 
 These filenames record the intended operator roles; their names alone do not certify their actual wiring. The code at HEAD and its receipts are authoritative.
 

@@ -7,7 +7,7 @@ Le registre exécutable est `src/hl_observer/ops/entrypoint_topology.py`. À la 
 | `LANCER_COLLECTEURS_COPY_VAULT.cmd` | Collecteurs Copy-Vault |
 | `LANCER_LAB_QUANT_COPY_VAULT.cmd` | Laboratoire principal : backtests et replays Copy-Vault ; audit SHA-256 exact CPU borné |
 | `LANCER_HYPERSMART.cmd` | Moteur paper avec affichage de simulation |
-| `POUSSER-GITHUB-FORCE.cmd` | Réconciliation prudente du code avec GitHub |
+| `POUSSER-GITHUB.cmd` | Réconciliation prudente du code avec GitHub |
 | `ALINA_SYNC_COMPLETE.cmd` | AlinaSync pour les shards SAFE |
 
 `ALINA_SYNC_COMPLETE.sh` reste également à la racine pour les clones utilisés sous Linux/macOS. La portabilité signifie ici qu'un clone fonctionne quel que soit son chemin local ; elle ne dépend pas de la création d'une archive portable.

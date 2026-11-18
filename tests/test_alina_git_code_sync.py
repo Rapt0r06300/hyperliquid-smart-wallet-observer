@@ -262,7 +262,7 @@ def test_commit_subject_names_unexpected_engine_error_guard() -> None:
 
 def test_commit_subject_names_the_sync_engine_and_launcher_change() -> None:
     assert _commit_subject([
-        "POUSSER-GITHUB-FORCE.cmd",
+        "POUSSER-GITHUB.cmd",
         "tools/alina_git_code_sync.py",
         "tests/test_alina_git_code_sync.py",
     ]) == "fix(sync): verify final GitHub SHA in receipt (3 paths)"
@@ -317,7 +317,7 @@ def test_commit_subject_names_the_l4_and_entity_provenance_guard() -> None:
 
 def test_commit_subject_names_branch_promotion_from_changed_lines() -> None:
     assert _commit_subject(
-        ["POUSSER-GITHUB-FORCE.cmd"],
+        ["POUSSER-GITHUB.cmd"],
         "+set \"SYNC_OPTION=--promote-current-to-main\"\n"
         "+promotion fast-forward securisee vers main",
     ) == "fix(sync): promote current branch safely (1 paths)"
@@ -326,7 +326,7 @@ def test_commit_subject_names_branch_promotion_from_changed_lines() -> None:
 def test_commit_subject_does_not_overclaim_a_mixed_batch() -> None:
     subject = _commit_subject(
         [
-            "POUSSER-GITHUB-FORCE.cmd",
+            "POUSSER-GITHUB.cmd",
             "docs/release/README.md",
             "runtime/reports/LAST_SYNC.json",
             "tools/alina_git_code_sync.py",
@@ -688,7 +688,7 @@ def test_write_report_keeps_last_receipt_and_bounded_history(
 
 
 def test_launcher_uses_tracked_canonical_engine_and_preserves_failure_status() -> None:
-    launcher = Path("POUSSER-GITHUB-FORCE.cmd").read_text(encoding="utf-8")
+    launcher = Path("POUSSER-GITHUB.cmd").read_text(encoding="utf-8")
     assert "ALINA_ENGINE_REQUIRED_BUILD=2026-11-12-compact-fresh-index-v15" in launcher
     assert r"tools\alina_git_code_sync.py" in launcher
     assert r"tools\sync_complete_clone.py" in launcher
@@ -1787,7 +1787,7 @@ def test_conflict_kit_python_source_has_no_invalid_escape_warnings() -> None:
 
 def test_windows_launcher_uses_repository_tools_without_external_bootstrap() -> None:
     """The supported launcher must never fetch executable helpers at runtime."""
-    launcher = Path(__file__).resolve().parents[1] / "POUSSER-GITHUB-FORCE.cmd"
+    launcher = Path(__file__).resolve().parents[1] / "POUSSER-GITHUB.cmd"
     source = launcher.read_text(encoding="utf-8-sig")
     assert 'call "%~dp0PREPARER_GIT_PORTABLE.cmd"' not in source
     assert "download_source" not in source

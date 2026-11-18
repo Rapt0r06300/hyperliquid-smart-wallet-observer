@@ -240,7 +240,7 @@ def test_preflight_never_downloads_and_avoids_snapshot_mutation(monkeypatch, tmp
 def test_root_entrypoints_are_reusable_in_existing_checkout():
     windows = (ROOT / "ALINA_SYNC_COMPLETE.cmd").read_text(encoding="utf-8")
     unix = (ROOT / "ALINA_SYNC_COMPLETE.sh").read_text(encoding="utf-8")
-    assert 'set "UNIFIED=%ALINA_ROOT%POUSSER-GITHUB-FORCE.cmd"' in windows
+    assert 'set "UNIFIED=%ALINA_ROOT%POUSSER-GITHUB.cmd"' in windows
     assert "DEFAULT_SAFE_ARGS=--download-safe --all-safe --unpack-safe" in windows
     assert 'call "%UNIFIED%" --shards-only --preflight-only --skip-update' not in windows
     assert "EnableDelayedExpansion" in windows

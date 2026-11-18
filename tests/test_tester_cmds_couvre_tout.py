@@ -59,7 +59,7 @@ def test_les_lanceurs_a_effet_EXTERNE_restent_en_danger():
     """Pousser sur GitHub ou installer un nœud ne doit jamais partir d'une passe de test."""
     harnais = _harnais()
     dangereux = {e[1] for e in harnais.REGISTRE if e[4] == "danger"}
-    for fichier in ("POUSSER-GITHUB-FORCE.cmd", "Installer Noeud HL.cmd", "Noeud-HL.cmd"):
+    for fichier in ("POUSSER-GITHUB.cmd", "Installer Noeud HL.cmd", "Noeud-HL.cmd"):
         assert fichier in dangereux, f"{fichier} doit rester en categorie danger"
 
 

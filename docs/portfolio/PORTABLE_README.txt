@@ -9,7 +9,7 @@ LANCEURS À LA RACINE
 - LANCER_COLLECTEURS_COPY_VAULT.cmd : collecte Copy-Vault.
 - LANCER_LAB_QUANT_COPY_VAULT.cmd : laboratoire de backtests et replays.
 - LANCER_HYPERSMART.cmd : moteur avec simulation PAPER visible.
-- POUSSER-GITHUB-FORCE.cmd : synchronisation prudente du code, sans push forcé.
+- POUSSER-GITHUB.cmd : synchronisation prudente du code, sans push forcé.
 - ALINA_SYNC_COMPLETE.cmd / ALINA_SYNC_COMPLETE.sh : synchronisation du code et des shards SAFE.
 
 UTILITAIRES DE SUPPORT

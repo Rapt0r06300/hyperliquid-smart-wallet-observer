@@ -26,7 +26,7 @@ ENTRYPOINT_ROLES: dict[str, EntrypointRole] = {
     "LANCER_COLLECTEURS_COPY_VAULT.cmd": EntrypointRole.OFFICIAL_COLLECTION,
     "LANCER_HYPERSMART.cmd": EntrypointRole.OFFICIAL_RUNTIME,
     "LANCER_LAB_QUANT_COPY_VAULT.cmd": EntrypointRole.OFFICIAL_ANALYSIS,
-    "POUSSER-GITHUB-FORCE.cmd": EntrypointRole.OFFICIAL_GIT_SYNC,
+    "POUSSER-GITHUB.cmd": EntrypointRole.OFFICIAL_GIT_SYNC,
     # Root support launchers the operator actually double-clicks. The certificateur is the
     # operator's sixth module; the collectors' shutdown opens SUIVI_COFFRE.cmd from the root
     # (tools/affichage_temps_reel.py). Explicitly registered: never an unclassified root .cmd.
@@ -89,7 +89,7 @@ ROOT_ENTRYPOINTS = {
     "LANCER_COLLECTEURS_COPY_VAULT.cmd",
     "LANCER_HYPERSMART.cmd",
     "LANCER_LAB_QUANT_COPY_VAULT.cmd",
-    "POUSSER-GITHUB-FORCE.cmd",
+    "POUSSER-GITHUB.cmd",
 }
 
 #: Registered root support launchers (maintenance role). Any OTHER root .cmd stays forbidden.
@@ -113,7 +113,7 @@ OFFICIAL_ENTRYPOINTS = {
     EntrypointRole.OFFICIAL_RUNTIME: "LANCER_HYPERSMART.cmd",
     EntrypointRole.OFFICIAL_ANALYSIS: "LANCER_LAB_QUANT_COPY_VAULT.cmd",
     EntrypointRole.OFFICIAL_COLLECTION: "LANCER_COLLECTEURS_COPY_VAULT.cmd",
-    EntrypointRole.OFFICIAL_GIT_SYNC: "POUSSER-GITHUB-FORCE.cmd",
+    EntrypointRole.OFFICIAL_GIT_SYNC: "POUSSER-GITHUB.cmd",
     EntrypointRole.OFFICIAL_DATA_SYNC: "ALINA_SYNC_COMPLETE.cmd",
     EntrypointRole.OFFICIAL_RESEARCH: "tools/launchers/LANCER-RECHERCHE-CONTINUE.cmd",
 }

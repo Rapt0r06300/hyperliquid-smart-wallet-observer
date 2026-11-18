@@ -14,7 +14,7 @@ Audit lecture seule : aucun launcher n'est exécuté, supprimé ou modifié.
 | `copy_vault_collectors` | `LANCER_COLLECTEURS_COPY_VAULT.cmd` | `canonical` | 1 | 30 | aucun |
 | `hypersmart_engine` | `LANCER_HYPERSMART.cmd` | `canonical` | 36 | 110 | aucun |
 | `copy_vault_lab` | `LANCER_LAB_QUANT_COPY_VAULT.cmd` | `canonical` | 1 | 37 | aucun |
-| `git_sync` | `POUSSER-GITHUB-FORCE.cmd` | `canonical` | 3 | 42 | aucun |
+| `git_sync` | `POUSSER-GITHUB.cmd` | `canonical` | 3 | 42 | aucun |
 
 ## Inventaire complet
 
@@ -25,7 +25,7 @@ Audit lecture seule : aucun launcher n'est exécuté, supprimé ou modifié.
 | `LANCER_COLLECTEURS_COPY_VAULT.cmd` | `canonical` | `copy_vault_collectors` | 1 |
 | `LANCER_HYPERSMART.cmd` | `canonical` | `hypersmart_engine` | 36 |
 | `LANCER_LAB_QUANT_COPY_VAULT.cmd` | `canonical` | `copy_vault_lab` | 1 |
-| `POUSSER-GITHUB-FORCE.cmd` | `canonical` | `git_sync` | 3 |
+| `POUSSER-GITHUB.cmd` | `canonical` | `git_sync` | 3 |
 | `archive/racine-2026-07-11/LANCER_REPLAY_OUVERT.cmd` | `auxiliary` | `research_support` | 0 |
 | `archive/racine-2026-07-11/STOP_REPLAY.cmd` | `auxiliary` | `research_support` | 0 |
 | `archive/racine-2026-07-11/SUIVRE_REPLAY_4H.cmd` | `auxiliary` | `research_support` | 0 |

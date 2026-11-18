@@ -236,13 +236,13 @@ def test_rig_018_workflows_are_cloud_only_and_minimally_scoped() -> None:
 
 def test_rig_019_official_launchers_use_portable_safety_contracts() -> None:
     runtime = (ROOT / "LANCER_HYPERSMART.cmd").read_text(encoding="utf-8", errors="replace").lower()
-    push = (ROOT / "POUSSER-GITHUB-FORCE.cmd").read_text(encoding="utf-8", errors="replace").lower()
+    push = (ROOT / "POUSSER-GITHUB.cmd").read_text(encoding="utf-8", errors="replace").lower()
     assert "paper" in runtime and "read-only" in runtime
     assert "push force" in push and "aucun telechargement de shards" in push
     sync = (ROOT / "ALINA_SYNC_COMPLETE.cmd").read_text(encoding="utf-8", errors="replace").lower()
     assert "--download-safe" in sync and "--unpack-safe" in sync
     # Interdire les vraies operations git destructrices, sans faux positif sur le
-    # nom de fichier POUSSER-GITHUB-FORCE.cmd (reference obligatoire pour le preflight).
+    # nom de fichier POUSSER-GITHUB.cmd (reference obligatoire pour le preflight).
     assert "push --force" not in sync and "--force" not in sync
     assert "reset --hard" not in sync and "git clean" not in sync
 

@@ -1,4 +1,4 @@
-"""Tests réalistes de POUSSER-GITHUB-FORCE (moteur alina_git_code_sync).
+"""Tests réalistes de POUSSER-GITHUB (moteur alina_git_code_sync).
 
 Couvre le cahier des charges : séparation code/données (#8), messages de commit
 intelligents (#4), « rien à faire » sans faux échec (le fix du NO_GO), et des

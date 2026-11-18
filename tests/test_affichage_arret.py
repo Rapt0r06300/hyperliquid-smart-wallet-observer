@@ -30,7 +30,7 @@ def _procs() -> list[tuple[int, str]]:
         (116, f'python.exe "{R}\\tools\\sync_complete_clone.py"'),
         (117, f'python.exe "{R}\\tools\\alina_quant_lab_console.py"'),
         (118, "python.exe C:\\autre_projet\\collecter_bbo.py"),
-        (119, f'cmd.exe /c ""{R}\\POUSSER-GITHUB-FORCE.cmd""'),
+        (119, f'cmd.exe /c ""{R}\\POUSSER-GITHUB.cmd""'),
     ]
 
 

@@ -15,7 +15,7 @@ def _source(root: Path) -> Path:
         "LANCER_HYPERSMART.cmd": "@echo off\n",
         "LANCER_COLLECTEURS_COPY_VAULT.cmd": "@echo off\n",
         "LANCER_LAB_QUANT_COPY_VAULT.cmd": "@echo off\n",
-        "POUSSER-GITHUB-FORCE.cmd": "@echo off\n",
+        "POUSSER-GITHUB.cmd": "@echo off\n",
         "ALINA_SYNC_COMPLETE.cmd": "@echo off\n",
         "tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd": "@echo off\n",
         "tools/launchers/CREER_ARCHIVE_PORTABLE.cmd": "@echo off\n",
