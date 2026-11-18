@@ -20,27 +20,53 @@ from typing import Any
 
 from hl_observer.alerts.durability import SingleWriterFileLock, WriterBusy
 from hl_observer.backtesting import copy_vault_executable as cv
-from hl_observer.backtesting.overshoot_signal import build_overshoot_index, copie_bloquee
-from hl_observer.backtesting.leader_quality_signal import (
-    SEUIL_LEADER_OFF_USD,
-    build_leader_quality_index,
-    copie_leader_faible,
+from hl_observer.backtesting import copy_vault_fenetre_locale as _FENETRE_LOCALE
+from hl_observer.backtesting import copy_vault_rubans_lourds as _LOURDS
+from hl_observer.backtesting.copy_vault_champion_deploye import (
+    CHEMIN_CHAMPION_DEPLOYE,
+    _ecrire_champion_deploye,
+    charger_champion_deploye,
+    seuil_overshoot_champion,
+)
+from hl_observer.backtesting.copy_vault_chargeurs_safe import (
+    charger_asset_ctx_safe as _charger_asset_ctx_safe,
+)
+from hl_observer.backtesting.copy_vault_chargeurs_safe import (
+    charger_leader_fills_safe as _charger_leader_fills_safe,
+)
+from hl_observer.backtesting.copy_vault_contexte_tranchable import publier_le_contexte_tranchable
+from hl_observer.backtesting.copy_vault_identite_campagne import (
+    digest_de_campagne as _digest_de_campagne,
+)
+from hl_observer.backtesting.copy_vault_identite_campagne import (
+    nom_de_campagne as _nom_de_campagne,
 )
 from hl_observer.backtesting.copy_vault_protocol import (
     PAPER_EQUITY_USD,
     PAPER_TARGET_NET_USD_PER_DAY,
     canonical_copy_vault_coin,
 )
+from hl_observer.backtesting.copy_vault_signal_alignment import evaluable_signals
+from hl_observer.backtesting.copy_vault_tier_local import (
+    _charger_tier_local,
+    adresses_archivees,
+)
+from hl_observer.backtesting.copy_vault_train_executability import resume_lisible, sonder_train
 from hl_observer.backtesting.copy_vault_v21_frozen import (
     evaluate_frozen_v21,
     evaluate_frozen_v21_segment,
 )
+from hl_observer.backtesting.leader_quality_signal import (
+    SEUIL_LEADER_OFF_USD,
+    build_leader_quality_index,
+    copie_leader_faible,
+)
+from hl_observer.backtesting.overshoot_signal import build_overshoot_index, copie_bloquee
 from hl_observer.backtesting.train_statistics import (
     lcb_rank_is_numerically_resolved,
     summarize_daily_values,
 )
 from hl_observer.collection.userfills_live import userfill_required_fields_reason
-from hl_observer.backtesting.copy_vault_train_executability import resume_lisible, sonder_train
 from hl_observer.datasets.v2_pipeline import copy_vault_heartbeat_reason
 from hl_observer.economics.numeric import (
     USD_RECONCILIATION_ABS_TOLERANCE,
@@ -52,18 +78,6 @@ from hl_observer.economics.numeric import (
 from hl_observer.normalization.l2_book import normalize_l2_levels
 from hl_observer.simulation.economic_freeze_registry import parameter_hash
 from tools.copy_vault_continuity import load_release_history_audits
-from hl_observer.backtesting.copy_vault_tier_local import (
-    _charger_tier_local,
-    adresses_archivees,
-)
-from hl_observer.backtesting import copy_vault_fenetre_locale as _FENETRE_LOCALE
-from hl_observer.backtesting import copy_vault_rubans_lourds as _LOURDS
-from hl_observer.backtesting.copy_vault_contexte_tranchable import publier_le_contexte_tranchable
-from hl_observer.backtesting.copy_vault_chargeurs_safe import (
-    charger_asset_ctx_safe as _charger_asset_ctx_safe,
-    charger_leader_fills_safe as _charger_leader_fills_safe,
-)
-from hl_observer.backtesting.copy_vault_signal_alignment import evaluable_signals
 
 OBJECTIVE_USD_PER_DAY = PAPER_TARGET_NET_USD_PER_DAY
 PAPER_CAPITAL_USD = PAPER_EQUITY_USD
@@ -2351,113 +2365,6 @@ def _append_jsonl(path: Path, record: Mapping[str, Any]) -> None:
         os.fsync(handle.fileno())
 
 
-CHEMIN_CHAMPION_DEPLOYE = ("runtime", "champion_deploye.json")
-
-
-def _ecrire_champion_deploye(
-    root: str | Path,
-    best: Mapping[str, Any],
-    *,
-    extra: Mapping[str, Any] | None = None,
-) -> Path | None:
-    """Écrit (atomiquement) le champion gelé dans un fichier de déploiement stable.
-
-    Étape 1 du cliquet labo->moteur. PUREMENT additif et fail-soft : ne lève jamais,
-    n'altère ni la campagne ni ses gardiens. Le moteur ne l'applique QUE s'il opte
-    explicitement (voir ``note``). ``best['candidate']`` = params que v21 interprète,
-    dont ``overshoot_seuil_bps``.
-    """
-    try:
-        if not isinstance(best, Mapping):
-            return None
-        params = best.get("candidate")
-        if not isinstance(params, Mapping):
-            return None
-        root = Path(root)
-        cible = root.joinpath(*CHEMIN_CHAMPION_DEPLOYE)
-        cible.parent.mkdir(parents=True, exist_ok=True)
-        if cible.is_symlink():
-            raise OSError("CHAMPION_DEPLOYE_SYMLINKED")
-        payload: dict[str, Any] = {
-            "schema_version": "hypersmart.copy_vault_champion_deploy.v1",
-            "ecrit_le_utc": datetime.now(UTC).isoformat(),
-            "candidate_id": best.get("candidate_id"),
-            "params": dict(params),
-            "overshoot_seuil_bps": params.get("overshoot_seuil_bps"),
-            "score_usd_per_active_day": best.get("score_usd_per_active_day"),
-            "train_daily_mean_net_pnl_usd": (
-                best.get("train", {}).get("daily_mean_net_pnl_usd")
-                if isinstance(best.get("train"), Mapping) else None
-            ),
-            "trial_number": best.get("trial_number"),
-            "paper_read_only": True,
-            "real_execution": False,
-            "applique_par_defaut": False,
-            "note": (
-                "Champion gelé par le labo. Le moteur ne l'applique QUE si "
-                "HL_APPLY_CHAMPION=1. Aucun ordre, aucune clé, aucune signature."
-            ),
-        }
-        if extra:
-            for cle, valeur in extra.items():
-                payload.setdefault(str(cle), valeur)
-        tmp = cible.with_suffix(cible.suffix + ".tmp")
-        texte = json.dumps(payload, ensure_ascii=False, sort_keys=True, allow_nan=False, indent=2)
-        with tmp.open("w", encoding="utf-8", newline="\n") as handle:
-            handle.write(texte)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(tmp, cible)
-        return cible
-    except Exception:  # fail-soft : jamais bloquer la campagne pour un fichier annexe
-        return None
-
-
-def charger_champion_deploye(
-    root: str | Path,
-    *,
-    respecter_opt_in: bool = True,
-) -> dict[str, Any] | None:
-    """Lit le champion déployé par le labo (côté moteur). Read-only, fail-soft.
-
-    Par défaut, ne renvoie quelque chose QUE si le moteur a opté explicitement via
-    ``HL_APPLY_CHAMPION=1`` (garde-fou : rien n'est appliqué sans décision humaine).
-    Renvoie le payload (dont ``overshoot_seuil_bps``) ou ``None``.
-    """
-    try:
-        if respecter_opt_in and os.environ.get("HL_APPLY_CHAMPION") != "1":
-            return None
-        cible = Path(root).joinpath(*CHEMIN_CHAMPION_DEPLOYE)
-        if cible.is_symlink() or not cible.is_file():
-            return None
-        payload = json.loads(cible.read_text(encoding="utf-8"))
-        if not isinstance(payload, dict):
-            return None
-        if payload.get("schema_version") != "hypersmart.copy_vault_champion_deploy.v1":
-            return None
-        return payload
-    except Exception:
-        return None
-
-
-def seuil_overshoot_champion(
-    root: str | Path,
-    *,
-    respecter_opt_in: bool = True,
-) -> float | None:
-    """Raccourci : le seuil overshoot du champion déployé, ou ``None`` (porte off)."""
-    payload = charger_champion_deploye(root, respecter_opt_in=respecter_opt_in)
-    if not payload:
-        return None
-    seuil = payload.get("overshoot_seuil_bps")
-    try:
-        seuil = float(seuil) if seuil is not None else None
-    except (TypeError, ValueError):
-        return None
-    # Valeur « off » conventionnelle du labo (très grande) -> porte désactivée.
-    if seuil is None or seuil >= 1_000_000.0:
-        return None
-    return seuil
 
 
 def _load_campaign_trials(path: Path, selection_digest: str) -> list[dict[str, Any]]:
@@ -2528,17 +2435,6 @@ def _load_campaign_trials(path: Path, selection_digest: str) -> list[dict[str, A
             rows.append(row)
     _campaign_trial_chain(rows)
     return rows
-
-
-def _digest_de_campagne(nom: str) -> str:
-    """Le digest porte par un dossier de campagne, qu'il soit tranche ou non.
-
-    Un dossier s'appelle `{selection_digest}` (campagne entiere) ou
-    `{selection_digest}-t{debut}-{fin}` (une tranche de temps). Les LIGNES de ses recus portent
-    toujours le digest nu, donc c'est lui qu'il faut passer aux lecteurs de recus -- qui LEVENT sur
-    un digest different au lieu de filtrer.
-    """
-    return nom.split("-t", 1)[0]
 
 
 def _prior_copy_vault_trial_count(
@@ -2697,27 +2593,6 @@ def _campaign_lock(path: Path) -> SingleWriterFileLock:
     return lock
 
 
-def _nom_de_campagne(selection_digest: str, tranche: tuple[int, int] | None) -> str:
-    """La TRANCHE fait partie de l'identite de la campagne, pas seulement de sa lecture.
-
-    DEFAUT TROUVE LE 18/11/2026, avant d'avoir conduit la premiere tranche. `selection_digest`
-    identifie la SOURCE (le manifeste SAFE) et ne change pas d'une tranche a l'autre. Sans ce nom,
-    les dix-neuf tranches partageaient donc `TRIALS.jsonl`, `ATTEMPTS.jsonl` et `CHECKPOINT.json`,
-    avec deux consequences :
-
-    * `seen` (les signatures de parametres deja essayees) etait commun, donc la tranche 2 AURAIT
-      SAUTE les parametres essayes sur la tranche 1 -- sur des donnees differentes ;
-    * la reprise aurait fait croire a la tranche 2 qu'elle continuait la campagne de la tranche 1.
-
-    On ne touche PAS a `selection_digest` : il est verifie contre le manifeste et scelle dans les
-    recus (3 120 valides). C'est le NOM DU DOSSIER de campagne qui porte la tranche, donc chaque
-    tranche a son propre historique, et une conduite sans tranche garde exactement l'ancien chemin.
-    """
-    if tranche is None:
-        return selection_digest
-    return f"{selection_digest}-t{int(tranche[0])}-{int(tranche[1])}"
-
-
 def run_local_campaign(
     workspace: str | Path,
     *,
@@ -2730,6 +2605,7 @@ def run_local_campaign(
     input_change_check: Callable[[], bool] | None = None,
     leader_review_ledger_path: str | Path | None = None,
     tranche: tuple[int, int] | None = None,
+    jours_du_corpus: int | None = None,
 ) -> dict[str, Any]:
     """``tranche`` borne la reconstruction a ``(depuis_ms, jusqu_a_ms)`` INCLUS.
 
@@ -2741,6 +2617,17 @@ def run_local_campaign(
     combinaison de plusieurs tranches appartient a un conducteur separe, pour qu'elle soit un objet
     qu'on peut lire et refuser -- une agregation ecrite a la hate dans le chemin economique y
     ferait une moyenne de moyennes.
+
+    ``jours_du_corpus`` est le nombre de journees UTC distinctes MESURE sur le corpus entier, que
+    seul l'appelant connait. Sans lui, la porte des six journees juge la TRANCHE : comme une tranche
+    dure de 4 a 11 heures, elle rendait toujours `INSUFFICIENT_DISTINCT_SIGNAL_DAYS` sans explorer
+    un seul candidat (constate le 18/11/2026). Avec lui, la porte juge l'ENSEMBLE -- le niveau
+    juste, puisqu'une tranche n'est pas censee conclure.
+
+    EN ECHANGE, UN RAPPORT DE TRANCHE NE CONCLUT RIEN : il porte ``verdict_partiel: True``, et
+    c'est `agregation_tranches` qui reapplique le seuil sur l'UNION des journees de toutes les
+    tranches. Ouvrir la porte sans cette marque ferait lire une mesure de quatre heures comme une
+    conclusion. Le seuil n'est pas deplace, il est applique UNE FOIS, au bon niveau.
     """
     workspace = Path(workspace)
     say = progress or (lambda _message: None)
@@ -2888,11 +2775,25 @@ def run_local_campaign(
     aligned_adds = alignment["aligned_adds"]
     bounds = _bounds(alignment["timestamps"])
     signal_coverage = {**_signal_coverage(timestamps), "evaluable": alignment["summary"]}
+    # Les portes des six journees jugent l'ENSEMBLE quand une tranche est en cours et que les
+    # journees du corpus sont connues ; sinon elles jugent ce qu'elles ont sous les yeux, comme
+    # avant. Il y a TROIS portes, dont une qui garde l'exploration overshoot en levant.
+    _juge_sur_l_ensemble = (
+        tranche is not None and type(jours_du_corpus) is int and jours_du_corpus > 0
+    )
+    jours_juges = (
+        jours_du_corpus if _juge_sur_l_ensemble else signal_coverage["distinct_utc_days"]
+    )
+    jours_evaluables_juges = (
+        jours_du_corpus
+        if _juge_sur_l_ensemble
+        else alignment["summary"]["evaluable_utc_days"]
+    )
     # --- Exploration AUTOMATIQUE de la variante overshoot (consultative) : un filtre anti-débordement
     # (mark vs oracle) bat-il la baseline ? Sautée sans jours évaluables ou sans contexte : jamais à vide.
     overshoot_exploration: dict[str, Any] = {"status": "NOT_RUN"}
     try:
-        if alignment["summary"]["evaluable_utc_days"] < _MINIMUM_SIGNAL_UTC_DAYS:
+        if jours_evaluables_juges < _MINIMUM_SIGNAL_UTC_DAYS:
             raise LookupError("INSUFFICIENT_EVALUABLE_SIGNAL_DAYS")
         from hl_observer.backtesting.copy_vault_overshoot_train import explorer_si_le_contexte_existe
         _asset_ctx_safe = _charger_asset_ctx_safe(workspace)
@@ -2918,6 +2819,10 @@ def run_local_campaign(
 
     base = {
         "paper_read_only": True, "real_execution": False,
+        # Un rapport de tranche n'est jamais une conclusion : il est une CONTRIBUTION.
+        "tranche": list(tranche) if tranche is not None else None,
+        "verdict_partiel": tranche is not None,
+        "jours_du_corpus": jours_du_corpus,
         "overshoot_exploration": overshoot_exploration,
         "objective_usd_per_day": OBJECTIVE_USD_PER_DAY,
         "paper_capital_usd": PAPER_CAPITAL_USD,
@@ -2980,12 +2885,12 @@ def run_local_campaign(
             "freeze_created": False,
             "economically_proven": False,
         }
-    if signal_coverage["distinct_utc_days"] < _MINIMUM_SIGNAL_UTC_DAYS:
+    if jours_juges < _MINIMUM_SIGNAL_UTC_DAYS:
         return {
             **base, "status": "MORE_DATA", "reason": "INSUFFICIENT_DISTINCT_SIGNAL_DAYS",
             "candidates_tested": 0, "freeze_created": False, "economically_proven": False,
         }
-    if alignment["summary"]["evaluable_utc_days"] < _MINIMUM_SIGNAL_UTC_DAYS:
+    if jours_evaluables_juges < _MINIMUM_SIGNAL_UTC_DAYS:
         return {
             **base, "status": "MORE_DATA", "reason": "INSUFFICIENT_EVALUABLE_SIGNAL_DAYS",
             "candidates_tested": 0, "freeze_created": False, "economically_proven": False,
@@ -3709,7 +3614,16 @@ def run_local_campaign(
                 break
         final_best_train = best.get("train") if isinstance(best, dict) else None
         champion_deploye_path = None
-        if best is not None:
+        champion_deploye_refuse = None
+        if best is not None and tranche is not None:
+            # UNE TRANCHE N'ECRIT PAS LE CHAMPION. `runtime/champion_deploye.json` est un chemin
+            # unique et le cliquet labo -> moteur : dix-neuf tranches s'y ecraseraient l'une
+            # l'autre, et le fichier final porterait un candidat choisi sur quatre a onze heures,
+            # presente comme deployable. Choisir sur l'ensemble demande de comparer les candidats
+            # des tranches : cela appartient au conducteur, et n'est pas simule ici.
+            champion_deploye_refuse = "VERDICT_PARTIEL_TRANCHE"
+            say("Champion deploye NON ecrit : cette campagne ne couvre qu'une tranche de temps")
+        elif best is not None:
             champion_deploye_path = _ecrire_champion_deploye(
                 repository_root,
                 best,
@@ -3723,6 +3637,7 @@ def run_local_campaign(
             "champion_deploye_path": (
                 str(champion_deploye_path) if champion_deploye_path else None
             ),
+            "champion_deploye_refuse": champion_deploye_refuse,
             "status": status,
             "reason": reason,
             "candidates_tested": len(history_rows),
@@ -4989,6 +4904,9 @@ def hash_cache_invalidation_receipt(
 
 
 __all__ = [
+    # Reexportes depuis `copy_vault_champion_deploye` : des appelants (dont
+    # `tests/test_champion_deploye.py`) les importent d'ici depuis toujours.
+    "CHEMIN_CHAMPION_DEPLOYE", "charger_champion_deploye", "seuil_overshoot_champion",
     "OBJECTIVE_USD_PER_DAY", "PAPER_CAPITAL_USD", "evaluate_current_copy_vault",
     "evaluate_objective_independent",
     "hash_cache_invalidation_receipt",

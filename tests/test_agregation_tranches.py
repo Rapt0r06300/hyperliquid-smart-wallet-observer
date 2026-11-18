@@ -233,4 +233,111 @@ def test_sans_tranche_manquante_les_mesures_ne_sont_PAS_touchees():
     assert a["totaux"]["net_pnl_usd"]["complet"] is True
     assert a["taux"]["n/d"]["mesurable"] is True
     assert "tranches_sans_rapport" not in a["totaux"]["net_pnl_usd"]
+# ───────── le seuil du labo, réappliqué ICI sur l'union des journées ─────────
+# La porte des six journées a été déplacée du labo vers l'ensemble : une tranche de quelques heures
+# ne pouvait jamais la franchir. C'est donc l'agrégat qui la referme, sinon le déplacement serait
+# un desserrage sans contrepartie.
+
+def _six_jours(nombre):
+    return [
+        _r(status="MORE_DATA", signal_coverage={"utc_days": [f"2026-11-{13 + i:02d}"]})
+        for i in range(nombre)
+    ]
+
+
+def test_un_agregat_de_TROIS_journees_n_est_pas_exploitable_avec_un_seuil_de_six():
+    rapports = _six_jours(3)
+    a = AG.combiner(rapports, tranches=[(1 + i * JOUR, (i + 1) * JOUR) for i in range(3)],
+                    jours_minimum=6)
+    assert a["exploitable"] is False
+    assert a["raison_non_exploitable"] == "JOURNEES_INSUFFISANTES"
+    assert a["assez_de_jours"] is False and a["jours_minimum"] == 6
+    assert a["jours"]["distincts"] == 3
+
+
+def test_SIX_journees_distinctes_franchissent_le_seuil():
+    rapports = _six_jours(6)
+    a = AG.combiner(rapports, tranches=[(1 + i * JOUR, (i + 1) * JOUR) for i in range(6)],
+                    jours_minimum=6)
+    assert a["exploitable"] is True and a["assez_de_jours"] is True
+    assert "raison_non_exploitable" not in a
+
+
+def test_des_tranches_qui_REPETENT_le_meme_jour_ne_franchissent_pas_le_seuil():
+    """Le piège que `unir_les_jours` ferme : découper une journée en six ne fait pas six journées."""
+    rapports = [
+        _r(status="MORE_DATA", signal_coverage={"utc_days": ["2026-11-13"]}) for _ in range(6)
+    ]
+    a = AG.combiner(rapports, tranches=[(1 + i * JOUR, (i + 1) * JOUR) for i in range(6)],
+                    jours_minimum=6)
+    assert a["jours"]["distincts"] == 1 and a["exploitable"] is False
+    assert a["raison_non_exploitable"] == "JOURNEES_INSUFFISANTES"
+
+
+def test_SANS_seuil_le_comportement_est_INCHANGE():
+    a = AG.combiner(_six_jours(1), tranches=[(1, JOUR)])
+    assert a["exploitable"] is True and a["jours_minimum"] is None
+    assert a["assez_de_jours"] is True, "aucun seuil demandé : rien à refuser"
+
+
+def test_un_TROU_prime_sur_le_manque_de_journees_dans_la_raison():
+    """Deux défauts à la fois : la raison nomme celui qui empêche de lire le total."""
+    a = AG.combiner(_six_jours(2), tranches=[(1, JOUR), (3 * JOUR, 4 * JOUR)], jours_minimum=6)
+    assert a["exploitable"] is False and a["raison_non_exploitable"] == "TROU"
+    assert a["assez_de_jours"] is False, "les deux défauts restent lisibles séparément"
+# ───────── la preuve par juxtaposition : des morceaux non concluants ne concluent pas ─────────
+
+def test_un_seul_rapport_PARTIEL_rend_la_preuve_IMPOSSIBLE():
+    """Des rapports qui se déclarent tous non concluants ne concluent pas en s'additionnant."""
+    rapports = [
+        _r(status="PROMISING", verdict_partiel=True, candidates_tested=12,
+           signal_coverage={"utc_days": [f"2026-11-{13 + i:02d}"]})
+        for i in range(6)
+    ]
+    a = AG.combiner(rapports, tranches=[(1 + i * JOUR, (i + 1) * JOUR) for i in range(6)],
+                    jours_minimum=6)
+    assert a["rapports_partiels"] == 6
+    assert a["preuve_possible"] is False
+    assert a["raison_preuve_impossible"] == "RAPPORTS_PARTIELS"
+    # mais les mesures restent publiées : ce sont des mesures, et elles valent
+    assert a["exploitable"] is True and a["verdict"]["status"] == "PROMISING"
+    assert a["essais_totaux"] == 72
+
+
+def test_des_rapports_NON_partiels_laissent_la_preuve_possible():
+    rapports = [
+        _r(status="PROVEN", verdict_partiel=False, candidates_tested=3,
+           signal_coverage={"utc_days": [f"2026-11-{13 + i:02d}"]})
+        for i in range(6)
+    ]
+    a = AG.combiner(rapports, tranches=[(1 + i * JOUR, (i + 1) * JOUR) for i in range(6)],
+                    jours_minimum=6)
+    assert a["rapports_partiels"] == 0 and a["preuve_possible"] is True
+    assert "raison_preuve_impossible" not in a
+
+
+def test_UN_rapport_partiel_sur_six_suffit_a_refuser_la_preuve():
+    """Le mélange est le cas dangereux : cinq rapports complets ne rachètent pas le sixième."""
+    rapports = [
+        _r(status="PROVEN", verdict_partiel=(i == 3), candidates_tested=1,
+           signal_coverage={"utc_days": [f"2026-11-{13 + i:02d}"]})
+        for i in range(6)
+    ]
+    a = AG.combiner(rapports, tranches=[(1 + i * JOUR, (i + 1) * JOUR) for i in range(6)],
+                    jours_minimum=6)
+    assert a["rapports_partiels"] == 1 and a["preuve_possible"] is False
+
+
+def test_les_ESSAIS_sont_totalises_pour_juger_la_multiplicite():
+    """Le labo corrige la multiplicité par tranche ; l'ensemble doit pouvoir être jugé aussi."""
+    rapports = [_r(status="MORE_DATA", candidates_tested=n) for n in (5, 0, 17)]
+    a = AG.combiner(rapports, tranches=[(1, JOUR), (JOUR + 1, 2 * JOUR), (2 * JOUR + 1, 3 * JOUR)])
+    assert a["essais_totaux"] == 22
+
+
+def test_un_candidates_tested_ABSENT_ne_compte_pas_pour_zero():
+    a = AG.combiner([_r(status="MORE_DATA", candidates_tested=4), _r(status="MORE_DATA")],
+                    tranches=[(1, JOUR), (JOUR + 1, 2 * JOUR)])
+    assert a["essais_totaux"] == 4, "le total reste lisible"
+    assert a["rapports_partiels"] == 0, "aucun rapport ne s'est déclaré partiel"
 

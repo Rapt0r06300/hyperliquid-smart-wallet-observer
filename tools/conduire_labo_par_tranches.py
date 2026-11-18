@@ -20,7 +20,9 @@ PAPER / LECTURE SEULE : aucune requête réseau, aucun ordre, aucune écriture h
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 import re
 import sys
 import time
@@ -45,9 +47,17 @@ RUBAN_FILLS = Path("runtime") / "data" / "vault_fills_live.jsonl"
 #: Sert a estimer le besoin d'une tranche avant de la lancer, pas a le garantir.
 OCTETS_PAR_FILL = 3_754
 
-#: Marge pour les carnets de la tranche et le reste de l'etape 2. Mesure : 1,54 Go de fills plus
-#: 1,27 Go de carnets pour la journee du 18/11, soit un rapport d'environ 1,8.
-FACTEUR_CARNETS = 1.8
+#: Marge pour les carnets de la tranche et le reste de l'etape 2.
+#:
+#: MESURE SUR LES 129 HEURES DU CORPUS (18/11/2026), rapport des octets carnets/fills :
+#:     median 0,70  |  p10 0,43  |  p90 1,03  |  max 1,39
+#: soit un facteur `1 + rapport` : median 1,70, p90 2,03, max 2,39.
+#:
+#: J'avais d'abord pose 1,8, deduit de la seule journee du 18/11 : ce facteur SOUS-ESTIME le besoin
+#: une heure sur dix. Pour une GARDE memoire, se tromper vers le bas est le mauvais sens de
+#: l'erreur -- elle laisserait partir une tranche qu'elle croyait legere. On prend donc le maximum
+#: observe, arrondi vers le haut.
+FACTEUR_CARNETS = 2.4
 
 #: Lignes de fills par tranche. 500 000 lignes ont été mesurées à 1,54 Go de pic pour l'étape 2
 #: (476 078 fills retenus le 18/11), carnets non compris : c'est un budget prudent sur une machine
@@ -59,6 +69,16 @@ BUDGET_LIGNES = 500_000
 PAS_MS = 3_600_000
 
 _TS = re.compile(rb'"ts_ms":\s*(\d+)')
+
+#: Le seuil du labo, reapplique par l'agregat sur l'UNION des journees des tranches. Il vaut
+#: `copy_vault_local_lab._MINIMUM_SIGNAL_UTC_DAYS` : importe plutot que recopie, pour qu'une seule
+#: valeur existe.
+try:
+    from hl_observer.backtesting.copy_vault_local_lab import (  # noqa: E402
+        _MINIMUM_SIGNAL_UTC_DAYS as JOURS_MINIMUM,
+    )
+except ImportError:            # pragma: no cover - le labo doit etre importable ; on le dit
+    JOURS_MINIMUM = 6
 
 
 def densite_par_pas(ruban: Path, *, pas_ms: int = PAS_MS) -> dict[int, int]:
@@ -94,6 +114,14 @@ def decouper(
     Un pas seul au-dessus du budget n'est pas découpé plus fin : on le rend tel quel et l'appelant
     verra sa taille. Le casser en deux séparerait des fills que la reconstruction doit voir
     ensemble, et ce serait un mensonge plus coûteux qu'une tranche lourde.
+
+    CE QUE LA COUVERTURE COUVRE. Les tranches s'étendent sur la période où il y a des FILLS, et
+    non sur le calendrier. Une période sans aucun fill n'est donc dans aucune tranche -- et
+    c'est correct : sans signal il n'y a rien à évaluer, et un carnet sans signal ne sert à
+    rien. Le ruban L2 du corpus porte ainsi quelques milliers de carnets d'octobre, très
+    antérieurs au premier jour liable : aucune tranche ne les lira, et aucune mesure ne les
+    réclame. Lire `couverture()` comme « tout le corpus est couvert » serait donc un
+    contresens : elle dit que les tranches ne laissent ni trou ni recouvrement ENTRE ELLES.
     """
     if not densite:
         return []
@@ -110,6 +138,95 @@ def decouper(
             cumul += lignes
     tranches.append((debut, seaux[-1] + pas_ms - 1))
     return tranches
+
+
+CORPUS_INCONNU = "corpus-inconnu"
+
+
+def digest_du_corpus(workspace: Path) -> str:
+    """L'identite de la SOURCE : le `selection_digest` du manifeste SAFE du workspace.
+
+    Il scelle le catalogue des shards consommes. Un manifeste illisible ne fait pas echouer la
+    conduite : on rend `CORPUS_INCONNU`, qui est distinct de tout digest reel -- donc un journal
+    ecrit avec un digest connu ne sera pas repris par erreur, et l'inverse non plus.
+    """
+    chemin = Path(workspace) / "SAFE_INPUT_MANIFEST.json"
+    try:
+        manifeste = json.loads(chemin.read_text(encoding="utf-8"))
+        digest = manifeste["selection_digest"]
+    except (OSError, ValueError, TypeError, KeyError):
+        return CORPUS_INCONNU
+    return digest if isinstance(digest, str) and digest else CORPUS_INCONNU
+
+
+def empreinte_du_decoupage(
+    tranches: Sequence[tuple[int, int]], *, corpus: str = CORPUS_INCONNU
+) -> str:
+    """Ce qui identifie une conduite : son decoupage ET son corpus.
+
+    Les bornes viennent de la densite du ruban, donc un ruban different donne presque toujours un
+    decoupage different -- mais « presque toujours » n'est pas « toujours ». Deux corpus de meme
+    densite horaire et de contenu different donneraient les memes bornes : la reprise rendrait alors
+    des rapports qui ne decrivent pas les donnees presentes. D'ou le digest de la source.
+
+    Un journal ecrit pour une autre empreinte est inutilisable -- pas « approximativement bon ».
+    """
+    bornes = ";".join(f"{int(debut)}-{int(fin)}" for debut, fin in tranches)
+    graine = f"{corpus}|{bornes}"
+    return hashlib.sha256(graine.encode("utf-8")).hexdigest()[:16]
+
+
+def lire_le_journal(chemin: Path, empreinte: str) -> dict[str, Any]:
+    """Les rapports deja obtenus pour CE decoupage, plus ce qu'on a refuse de lire.
+
+    Une ligne illisible est COMPTEE et sautee : une interruption peut tronquer la derniere ligne, et
+    la deviner serait inventer un rapport.
+    """
+    deja: dict[tuple[int, int], Mapping[str, Any]] = {}
+    illisibles = 0
+    autre_decoupage = 0
+    try:
+        flux = chemin.open("r", encoding="utf-8")
+    except OSError:
+        return {"rapports": deja, "lignes_illisibles": 0, "autre_decoupage": 0, "journal": False}
+    with flux:
+        for ligne in flux:
+            ligne = ligne.strip()
+            if not ligne:
+                continue
+            try:
+                enregistre = json.loads(ligne)
+                bornes = enregistre["tranche"]
+                cle = (int(bornes[0]), int(bornes[1]))
+                rapport = enregistre["rapport"]
+                signature = str(enregistre["empreinte"])
+            except (ValueError, TypeError, KeyError, IndexError):
+                illisibles += 1
+                continue
+            if signature != empreinte:
+                autre_decoupage += 1
+                continue
+            if not isinstance(rapport, Mapping):
+                illisibles += 1
+                continue
+            deja[cle] = rapport
+    return {
+        "rapports": deja, "lignes_illisibles": illisibles,
+        "autre_decoupage": autre_decoupage, "journal": True,
+    }
+
+
+def _noter_au_journal(chemin: Path, empreinte: str, tranche: tuple[int, int],
+                      rapport: Mapping[str, Any]) -> None:
+    """Ecrit APRES la tranche et vidange tout de suite : une coupure ne perd que la derniere."""
+    chemin.parent.mkdir(parents=True, exist_ok=True)
+    with open(chemin, "a", encoding="utf-8", newline="") as flux:
+        flux.write(json.dumps(
+            {"empreinte": empreinte, "tranche": [int(tranche[0]), int(tranche[1])],
+             "rapport": rapport},
+            ensure_ascii=False, default=str) + chr(10))
+        flux.flush()
+        os.fsync(flux.fileno())
 
 
 def _rss() -> int:
@@ -139,6 +256,8 @@ def conduire(
     ratios: Sequence[tuple[str, str]] = (),
     journal: Callable[[str], None] | None = None,
     estimation: Callable[[tuple[int, int]], int] | None = None,
+    jours_minimum: int | None = None,
+    journal_reprise: Path | None = None,
     gouverneur: Callable[..., Mapping[str, Any]] = RAM.decision,
     respirer: Callable[[], Mapping[str, Any]] = RAM.attendre_que_ca_respire,
 ) -> dict[str, Any]:
@@ -152,7 +271,28 @@ def conduire(
     rapports: list[Mapping[str, Any]] = []
     incidents: list[dict[str, Any]] = []
     memoires: list[dict[str, Any]] = []
+    empreinte = empreinte_du_decoupage(
+        list(tranches), corpus=digest_du_corpus(Path(workspace)))
+    reprise = (
+        lire_le_journal(journal_reprise, empreinte)
+        if journal_reprise is not None
+        else {"rapports": {}, "lignes_illisibles": 0, "autre_decoupage": 0, "journal": False}
+    )
+    if reprise["rapports"]:
+        dire(f"  reprise : {len(reprise['rapports'])} tranche(s) deja faite(s) pour ce decoupage")
+    if reprise["autre_decoupage"]:
+        dire(f"  {reprise['autre_decoupage']} ligne(s) d'un AUTRE decoupage ignoree(s)")
+    if reprise["lignes_illisibles"]:
+        dire(f"  {reprise['lignes_illisibles']} ligne(s) illisible(s) sautee(s), jamais devinee(s)")
+    reprises = 0
     for index, tranche in enumerate(tranches, start=1):
+        cle = (int(tranche[0]), int(tranche[1]))
+        if cle in reprise["rapports"]:
+            rapports.append({**reprise["rapports"][cle], "tranche": list(tranche),
+                             "repris_du_journal": True})
+            reprises += 1
+            dire(f"[{index}/{len(tranches)}] déjà fait — repris du journal")
+            continue
         dire(f"[{index}/{len(tranches)}] {_jour(tranche[0])} → {_jour(tranche[1])}")
         besoin = int(estimation(tranche)) if estimation is not None else None
         avis = gouverneur(besoin_octets=besoin)
@@ -196,14 +336,28 @@ def conduire(
             "niveau_avant": avis.get("niveau"),
         })
         rapports.append({**rapport, "tranche": list(tranche)})
+        if journal_reprise is not None:
+            try:
+                _noter_au_journal(journal_reprise, empreinte, tranche, rapport)
+            except OSError as exc:
+                # Ne pas perdre la tranche pour autant : on la garde en memoire et on le DIT.
+                incidents.append({
+                    "tranche": list(tranche), "index": index,
+                    "erreur": "JOURNAL_NON_ECRIT", "message": str(exc)[:200],
+                })
+                dire("      (journal de reprise non ecrit : cette tranche sera refaite)")
         dire(f"      {rapport.get('status', '?')} en {time.time() - depart:.0f} s"
              + (f" · {consomme / 1e9:+.2f} Go" if consomme else ""))
-    agregat = AG.combiner(rapports, tranches=tranches, additifs=additifs, ratios=ratios)
+    agregat = AG.combiner(rapports, tranches=tranches, additifs=additifs, ratios=ratios,
+                          jours_minimum=jours_minimum)
     return {
         "schema": SCHEMA,
         "tranches": [list(t) for t in tranches],
         "incidents": incidents,
         "memoire_par_tranche": memoires,
+        "tranches_reprises": reprises,
+        "empreinte_du_decoupage": empreinte,
+        "digest_du_corpus": digest_du_corpus(Path(workspace)),
         "agregat": agregat,
         "rapports": rapports,
         "paper_read_only": True,
@@ -211,7 +365,22 @@ def conduire(
     }
 
 
-def _lanceur_reel(max_trials: int, campaign_root: Path | None, repository_root: Path):
+def journees_utc(densite: Mapping[int, int]) -> list[str]:
+    """Les journees UTC distinctes ou le corpus porte au moins un fill.
+
+    MESUREES, pas supposees : elles sortent du ruban que le conducteur vient de lire. Le labo en a
+    besoin pour appliquer son seuil de six journees a l'ENSEMBLE plutot qu'a chaque tranche, et
+    l'agregat les reunit ensuite pour refermer la porte.
+    """
+    jours = {
+        datetime.fromtimestamp(seau / 1000, UTC).strftime("%Y-%m-%d")
+        for seau, lignes in densite.items() if int(lignes) > 0
+    }
+    return sorted(jours)
+
+
+def _lanceur_reel(max_trials: int, campaign_root: Path | None, repository_root: Path,
+                  jours_du_corpus: int | None = None):
     """Le vrai appel au labo, isolé ici pour que `conduire` reste testable sans lui.
 
     CHAQUE TRANCHE A SA PROPRE RACINE DE CAMPAGNE. Une racine commune ferait partager
@@ -229,6 +398,7 @@ def _lanceur_reel(max_trials: int, campaign_root: Path | None, repository_root: 
         return run_local_campaign(
             workspace, tranche=tranche, max_trials=max_trials,
             campaign_root=propre, repository_root=repository_root,
+            jours_du_corpus=jours_du_corpus,
         )
 
     return lancer
@@ -243,6 +413,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     p.add_argument("--max-trials", type=int, default=1)
     p.add_argument("--plan-seulement", action="store_true",
                    help="mesurer et afficher le découpage, sans lancer le labo")
+    p.add_argument("--journal", default="",
+                   help="journal de reprise (JSONL) : les tranches deja faites sont reprises")
     p.add_argument("--sortie", default="")
     args = p.parse_args(argv)
 
@@ -274,9 +446,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         lignes = sum(n for seau, n in densite.items() if tranche[0] <= seau <= tranche[1])
         return int(lignes * OCTETS_PAR_FILL * FACTEUR_CARNETS)
 
+    jours = journees_utc(densite)
+    print(f"  journees UTC du corpus : {len(jours)} ({jours[0]} -> {jours[-1]})")
     resultat = conduire(
-        workspace, tranches, estimation=estimer,
-        lancer=_lanceur_reel(args.max_trials, workspace.parent / "campagne-tranches", RACINE),
+        workspace, tranches, estimation=estimer, jours_minimum=JOURS_MINIMUM,
+        journal_reprise=Path(args.journal) if args.journal else None,
+        lancer=_lanceur_reel(args.max_trials, workspace.parent / "campagne-tranches", RACINE,
+                             jours_du_corpus=len(jours)),
         additifs=("net_pnl_usd", "entries", "metaorders", "candidates_tested"),
         ratios=(("temporally_aligned_add_signals", "entries"),),
         journal=lambda message: print(message, flush=True),
@@ -286,7 +462,15 @@ def main(argv: Sequence[str] | None = None) -> int:
           f"(exploitable={agregat['exploitable']})")
     if not agregat["exploitable"]:
         print(f"  non exploitable : {agregat.get('raison_non_exploitable')}")
-    print(f"  jours UTC distincts (union) : {agregat['jours']['distincts']}")
+    print(f"  jours UTC distincts (union) : {agregat['jours']['distincts']}"
+          f" / {agregat.get('jours_minimum') or '-'} requis")
+    # Une donnée publiée mais jamais affichée est une donnée invisible : ces trois lignes
+    # empêchent de lire un verdict d'ensemble comme une preuve.
+    if agregat.get("preuve_possible") is False:
+        print(f"  PREUVE IMPOSSIBLE : {agregat.get('raison_preuve_impossible')}"
+              f" ({agregat.get('rapports_partiels')} rapport(s) partiel(s) sur"
+              f" {agregat.get('rapports_recus')})")
+    print(f"  candidats essayés, toutes tranches : {agregat.get('essais_totaux')}")
     if resultat["incidents"]:
         print(f"  {len(resultat['incidents'])} tranche(s) sans rapport :")
         for incident in resultat["incidents"]:
