@@ -206,3 +206,137 @@ def test_le_pas_de_decoupage_est_reglable(tmp_path, heures):
         tmp_path / "runtime" / "data" / "vault_fills_live.jsonl", pas_ms=heures * HEURE)
     assert sum(densite.values()) == 30
     assert len(densite) == (3 if heures == 1 else 2)
+# ───────────────────── la garde mémoire : jamais de crash, jamais de zéro ─────────────────────
+# Une tranche pèse ~2,5 Go. Enchaîner dix-neuf tranches sans regarder la mémoire reproduirait
+# exactement ce qui a fait couper le rejeu. Le gouverneur est injecté pour tester sans pression
+# réelle : une garde qu'on ne peut déclencher à volonté n'est pas une garde vérifiée.
+
+from hl_observer.ops import budget_ram as RAM
+
+
+def _avis(action, raison="essai"):
+    return {"action": action, "niveau": "ROUGE" if action == RAM.PAUSER else "VERT",
+            "facteur": 1.0, "raison": raison}
+
+
+def test_en_RAM_SAINE_la_tranche_part_sans_attendre(tmp_path):
+    souffles = []
+    resultat = CD.conduire(
+        tmp_path, [(1, HEURE)], lancer=lambda _w, _t: {"status": "MORE_DATA"},
+        gouverneur=lambda **_k: _avis(RAM.CONTINUER),
+        respirer=lambda: souffles.append(1) or {},
+    )
+    assert souffles == [] and len(resultat["rapports"]) == 1
+
+
+def test_en_RAM_CRITIQUE_on_SOUFFLE_puis_on_lance_si_ca_s_est_degage(tmp_path):
+    """La dégradation est progressive : on ne renonce pas au premier signal rouge."""
+    avis = iter((_avis(RAM.PAUSER), _avis(RAM.CONTINUER)))
+    souffles = []
+    resultat = CD.conduire(
+        tmp_path, [(1, HEURE)], lancer=lambda _w, _t: {"status": "MORE_DATA"},
+        gouverneur=lambda **_k: next(avis),
+        respirer=lambda: souffles.append(1) or {"attendu_s": 12.0},
+    )
+    assert len(souffles) == 1, "on a bien attendu"
+    assert len(resultat["rapports"]) == 1 and resultat["incidents"] == []
+
+
+def test_si_la_RAM_reste_critique_la_tranche_est_NON_EVALUEE_jamais_un_zero(tmp_path):
+    resultat = CD.conduire(
+        tmp_path, [(1, HEURE), (HEURE + 1, 2 * HEURE)],
+        lancer=lambda _w, _t: {"status": "MORE_DATA", "net_pnl_usd": 3.0},
+        gouverneur=lambda **_k: _avis(RAM.PAUSER, "RAM critique (0.4 Go libres)"),
+        respirer=lambda: {"attendu_s": 30.0},
+        additifs=("net_pnl_usd",),
+    )
+    assert len(resultat["incidents"]) == 2
+    assert resultat["incidents"][0]["erreur"] == "MEMOIRE_INSUFFISANTE"
+    assert "0.4 Go" in resultat["incidents"][0]["message"]
+    assert resultat["incidents"][0]["apres_attente_s"] == 30.0
+    assert resultat["agregat"]["exploitable"] is False
+    total = resultat["agregat"]["totaux"]["net_pnl_usd"]
+    assert total["total"] == 0 and total["complet"] is False, "aucun rapport : rien n'est affirmé"
+
+
+def test_une_tranche_refusee_n_empeche_pas_les_SUIVANTES(tmp_path):
+    """La mémoire peut se libérer entre deux tranches : renoncer à tout serait excessif."""
+    avis = iter((_avis(RAM.PAUSER), _avis(RAM.PAUSER), _avis(RAM.CONTINUER)))
+    lancees = []
+    resultat = CD.conduire(
+        tmp_path, [(1, HEURE), (HEURE + 1, 2 * HEURE)],
+        lancer=lambda _w, t: lancees.append(t[0]) or {"status": "MORE_DATA"},
+        gouverneur=lambda **_k: next(avis),
+        respirer=lambda: {"attendu_s": 1.0},
+    )
+    assert lancees == [HEURE + 1], "la 1ʳᵉ est refusée, la 2ᵈ part"
+    assert len(resultat["incidents"]) == 1 and len(resultat["rapports"]) == 1
+
+
+def test_le_BESOIN_estime_est_transmis_au_gouverneur(tmp_path):
+    """Sans besoin estimé, le gouverneur ne peut pas refuser un bloc trop gros en RAM saine."""
+    vus = []
+    CD.conduire(
+        tmp_path, [(1, HEURE)], lancer=lambda _w, _t: {"status": "MORE_DATA"},
+        estimation=lambda _t: 7_000_000_000,
+        gouverneur=lambda **kw: vus.append(kw.get("besoin_octets")) or _avis(RAM.CONTINUER),
+    )
+    assert vus == [7_000_000_000]
+
+
+def test_SANS_estimation_le_gouverneur_est_consulte_quand_meme(tmp_path):
+    vus = []
+    CD.conduire(
+        tmp_path, [(1, HEURE)], lancer=lambda _w, _t: {"status": "MORE_DATA"},
+        gouverneur=lambda **kw: vus.append(kw.get("besoin_octets")) or _avis(RAM.CONTINUER),
+    )
+    assert vus == [None], "l'état mémoire se lit même sans besoin annoncé"
+
+
+def test_la_memoire_consommee_est_PUBLIEE_par_tranche(tmp_path):
+    resultat = CD.conduire(
+        tmp_path, [(1, HEURE)], lancer=lambda _w, _t: {"status": "MORE_DATA"},
+        estimation=lambda _t: 1_000,
+        gouverneur=lambda **_k: _avis(RAM.CONTINUER),
+    )
+    ligne = resultat["memoire_par_tranche"][0]
+    assert ligne["tranche"] == [1, HEURE] and ligne["besoin_estime_octets"] == 1_000
+    assert ligne["niveau_avant"] == "VERT" and "octets_consommes" in ligne
+
+
+def test_une_tranche_REFUSEE_n_apparait_pas_dans_la_memoire_par_tranche(tmp_path):
+    resultat = CD.conduire(
+        tmp_path, [(1, HEURE)], lancer=lambda _w, _t: {"status": "MORE_DATA"},
+        gouverneur=lambda **_k: _avis(RAM.PAUSER), respirer=lambda: {},
+    )
+    assert resultat["memoire_par_tranche"] == [], "rien n'a tourné, rien à mesurer"
+
+
+def test_le_gouverneur_REEL_est_le_defaut():
+    import inspect
+
+    signature = inspect.signature(CD.conduire)
+    assert signature.parameters["gouverneur"].default is RAM.decision
+    assert signature.parameters["respirer"].default is RAM.attendre_que_ca_respire
+
+
+def test_l_estimation_de_la_CLI_suit_la_densite_mesuree(tmp_path, capsys, monkeypatch):
+    """Le besoin annoncé doit venir de la densité réelle, pas d'une moyenne supposée."""
+    _ruban(tmp_path, [1_000])
+    vus = []
+
+    def faux_lanceur(*_a, **_k):
+        return lambda _w, _t: {"status": "MORE_DATA"}
+
+    monkeypatch.setattr(CD, "_lanceur_reel", faux_lanceur)
+    monkeypatch.setattr(CD, "conduire", lambda *a, **kw: vus.append(kw.get("estimation")) or {
+        "agregat": {"verdict": {"status": "MORE_DATA"}, "exploitable": True,
+                    "jours": {"distincts": 1}},
+        "incidents": [],
+    })
+    CD.main([str(tmp_path), "--budget", "5000"])
+    estimer = vus[0]
+    assert estimer is not None
+    attendu = int(1_000 * CD.OCTETS_PAR_FILL * CD.FACTEUR_CARNETS)
+    assert estimer((HEURE, 2 * HEURE - 1)) == attendu
+

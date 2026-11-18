@@ -34,11 +34,20 @@ if str(RACINE / "src") not in sys.path:
     sys.path.insert(0, str(RACINE / "src"))
 
 from hl_observer.backtesting import agregation_tranches as AG  # noqa: E402
+from hl_observer.ops import budget_ram as RAM  # noqa: E402
 
 SCHEMA = "hypersmart.conduite_labo_tranches.v1"
 
 #: Le ruban dont la densité décide du découpage : c'est lui qui pèse le plus (7,12 Go mesurés).
 RUBAN_FILLS = Path("runtime") / "data" / "vault_fills_live.jsonl"
+
+#: Octets par fill en memoire, MESURES le 18/11/2026 (400 000 lignes chargees = 1,50 Go).
+#: Sert a estimer le besoin d'une tranche avant de la lancer, pas a le garantir.
+OCTETS_PAR_FILL = 3_754
+
+#: Marge pour les carnets de la tranche et le reste de l'etape 2. Mesure : 1,54 Go de fills plus
+#: 1,27 Go de carnets pour la journee du 18/11, soit un rapport d'environ 1,8.
+FACTEUR_CARNETS = 1.8
 
 #: Lignes de fills par tranche. 500 000 lignes ont été mesurées à 1,54 Go de pic pour l'étape 2
 #: (476 078 fills retenus le 18/11), carnets non compris : c'est un budget prudent sur une machine
@@ -103,6 +112,20 @@ def decouper(
     return tranches
 
 
+def _rss() -> int:
+    """La memoire de CE processus, ou 0 si on ne peut pas la lire.
+
+    Un chiffre indisponible ne doit pas empecher la conduite : il rend la ligne de rapport moins
+    informative, rien de plus. On ne devine pas une valeur a sa place.
+    """
+    try:
+        import psutil
+
+        return int(psutil.Process().memory_info().rss)
+    except Exception:          # noqa: BLE001 — psutil absent ou refuse : on le dit par un 0
+        return 0
+
+
 def _jour(ms: int) -> str:
     return datetime.fromtimestamp(ms / 1000, UTC).strftime("%Y-%m-%d %H:%M")
 
@@ -115,6 +138,9 @@ def conduire(
     additifs: Sequence[str] = (),
     ratios: Sequence[tuple[str, str]] = (),
     journal: Callable[[str], None] | None = None,
+    estimation: Callable[[tuple[int, int]], int] | None = None,
+    gouverneur: Callable[..., Mapping[str, Any]] = RAM.decision,
+    respirer: Callable[[], Mapping[str, Any]] = RAM.attendre_que_ca_respire,
 ) -> dict[str, Any]:
     """Appelle `lancer` une fois par tranche, puis combine. Un échec ne devient jamais un zéro.
 
@@ -125,8 +151,27 @@ def conduire(
     dire = journal or (lambda _m: None)
     rapports: list[Mapping[str, Any]] = []
     incidents: list[dict[str, Any]] = []
+    memoires: list[dict[str, Any]] = []
     for index, tranche in enumerate(tranches, start=1):
         dire(f"[{index}/{len(tranches)}] {_jour(tranche[0])} → {_jour(tranche[1])}")
+        besoin = int(estimation(tranche)) if estimation is not None else None
+        avis = gouverneur(besoin_octets=besoin)
+        if avis.get("action") == RAM.PAUSER:
+            dire(f"      RAM critique — je souffle avant de lancer : {avis.get('raison')}")
+            souffle = respirer()
+            avis = gouverneur(besoin_octets=besoin)
+            if avis.get("action") == RAM.PAUSER:
+                incidents.append({
+                    "tranche": list(tranche), "index": index,
+                    "erreur": "MEMOIRE_INSUFFISANTE",
+                    "message": str(avis.get("raison"))[:300],
+                    "apres_attente_s": round(float(souffle.get("attendu_s", 0.0)), 1)
+                    if isinstance(souffle, Mapping) else None,
+                })
+                dire("      NON EVALUEE : la memoire est restee critique "
+                     "(ce n'est pas un zero — l'agregat le dira)")
+                continue
+        rss_avant = _rss()
         depart = time.time()
         try:
             rapport = lancer(workspace, tranche)
@@ -143,13 +188,22 @@ def conduire(
                 "erreur": "RAPPORT_NON_LISIBLE", "message": type(rapport).__name__,
             })
             continue
+        consomme = _rss() - rss_avant
+        memoires.append({
+            "tranche": list(tranche), "index": index,
+            "octets_consommes": consomme,
+            "besoin_estime_octets": besoin,
+            "niveau_avant": avis.get("niveau"),
+        })
         rapports.append({**rapport, "tranche": list(tranche)})
-        dire(f"      {rapport.get('status', '?')} en {time.time() - depart:.0f} s")
+        dire(f"      {rapport.get('status', '?')} en {time.time() - depart:.0f} s"
+             + (f" · {consomme / 1e9:+.2f} Go" if consomme else ""))
     agregat = AG.combiner(rapports, tranches=tranches, additifs=additifs, ratios=ratios)
     return {
         "schema": SCHEMA,
         "tranches": [list(t) for t in tranches],
         "incidents": incidents,
+        "memoire_par_tranche": memoires,
         "agregat": agregat,
         "rapports": rapports,
         "paper_read_only": True,
@@ -158,13 +212,23 @@ def conduire(
 
 
 def _lanceur_reel(max_trials: int, campaign_root: Path | None, repository_root: Path):
-    """Le vrai appel au labo, isolé ici pour que `conduire` reste testable sans lui."""
+    """Le vrai appel au labo, isolé ici pour que `conduire` reste testable sans lui.
+
+    CHAQUE TRANCHE A SA PROPRE RACINE DE CAMPAGNE. Une racine commune ferait partager
+    `TRIALS.jsonl` et `CHECKPOINT.json` : la tranche 2 sauterait les paramètres essayés sur la
+    tranche 1, sur des données différentes. Le labo applique la même règle quand on ne lui passe
+    rien (`_nom_de_campagne`) ; ici on garde la racine demandée mais on y ajoute la tranche.
+    """
     from hl_observer.backtesting.copy_vault_local_lab import run_local_campaign
 
     def lancer(workspace: Path, tranche: tuple[int, int]) -> Mapping[str, Any]:
+        propre = (
+            campaign_root / f"t{int(tranche[0])}-{int(tranche[1])}"
+            if campaign_root is not None else None
+        )
         return run_local_campaign(
             workspace, tranche=tranche, max_trials=max_trials,
-            campaign_root=campaign_root, repository_root=repository_root,
+            campaign_root=propre, repository_root=repository_root,
         )
 
     return lancer
@@ -206,8 +270,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.plan_seulement:
         return 0
 
+    def estimer(tranche: tuple[int, int]) -> int:
+        lignes = sum(n for seau, n in densite.items() if tranche[0] <= seau <= tranche[1])
+        return int(lignes * OCTETS_PAR_FILL * FACTEUR_CARNETS)
+
     resultat = conduire(
-        workspace, tranches,
+        workspace, tranches, estimation=estimer,
         lancer=_lanceur_reel(args.max_trials, workspace.parent / "campagne-tranches", RACINE),
         additifs=("net_pnl_usd", "entries", "metaorders", "candidates_tested"),
         ratios=(("temporally_aligned_add_signals", "entries"),),

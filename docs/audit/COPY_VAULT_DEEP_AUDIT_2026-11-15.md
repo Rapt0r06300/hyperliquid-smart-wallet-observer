@@ -2914,3 +2914,141 @@ initiative : le dernier rejeu complet a été coupé pour mémoire critique et l
 pas le relancer sans demande — même si c'est précisément ce régime-là que ce chantier a rendu
 inoffensif.
 
+---
+
+## 18/11/2026 — ITÉRATION 25 : la conduite demande l'avis du gouverneur avant chaque tranche
+
+Une tranche pèse ~2,5 Go. Enchaîner dix-neuf tranches sans regarder la mémoire reproduirait
+exactement ce qui a fait couper le rejeu : la machine se remplit et quelqu'un d'autre tue le
+processus. La conduite consulte donc `budget_ram.decision` **avant** chaque tranche, avec un besoin
+estimé depuis la densité réellement mesurée (3 754 octets par fill, × 1,8 pour les carnets).
+
+La règle appliquée est celle du dépôt : **jamais d'arrêt brutal, jamais de zéro inventé.**
+
+* RAM saine → la tranche part sans attendre ;
+* RAM critique → on souffle, puis on redemande l'avis. Si c'est redevenu praticable, la tranche
+  part : on ne renonce pas au premier signal rouge ;
+* RAM encore critique après l'attente → la tranche est consignée **NON ÉVALUÉE**, avec la raison du
+  gouverneur et la durée attendue. La conduite passe à la suivante, parce que la mémoire peut se
+  libérer entre deux tranches. L'agrégat sera déclaré non exploitable — et c'est le résultat juste.
+
+La mémoire consommée est **publiée par tranche** (`memoire_par_tranche`), avec le besoin estimé et
+le niveau observé avant le départ. Sans cela, on découvrirait la saturation en se faisant tuer.
+
+Le gouverneur et l'attente sont **injectables** : une garde qu'on ne peut pas déclencher à volonté
+n'est pas une garde vérifiée. Un test exige d'ailleurs que les valeurs par défaut soient bien les
+fonctions réelles, pour qu'un double de test ne puisse pas rester branché par mégarde.
+
+### Une hypothèse de goulot, réfutée par la mesure
+
+Je soupçonnais un défaut rédhibitoire : chaque appel au labo revérifie l'empreinte des rubans
+matérialisés, donc dix-neuf tranches hacheraient 250 Go. Mesure :
+
+```
+vault_fills_live.jsonl     7,12 Go   5,6 s
+copy_vault_l2_tape.jsonl   6,01 Go   4,9 s
+TOTAL                     13,15 Go    11 s   →  19 tranches = 250 Go et 3 minutes
+```
+
+Trois minutes sur une conduite qui en prendra des heures : **ce n'est pas un goulot**, et ce n'est
+donc pas une raison d'affaiblir une garde d'intégrité par une mémoïsation. L'hypothèse est écartée,
+et elle reste écrite ici pour que personne ne « l'optimise » plus tard sans la remesurer.
+
+**Tests** : 10 nouveaux sur la garde (RAM saine, souffle puis départ, non évaluée après attente,
+tranche suivante tentée quand même, besoin transmis, mesure publiée, défauts réels), 40 verts sur
+la suite de la conduite.
+
+---
+
+## 18/11/2026 — ITÉRATION 26 : deux tranches partageaient leur campagne
+
+Défaut trouvé **avant d'avoir conduit la première tranche**, en lisant ce que `run_local_campaign`
+fait de sa racine de campagne :
+
+```python
+campaign_root = Path(campaign_root) if campaign_root else (
+    repository_root / "runtime" / "codex_research" / "copy_vault_continuous_lab" / selection_digest
+)
+```
+
+`selection_digest` identifie la **source** — le manifeste SAFE — et ne change pas d'une tranche à
+l'autre. Les dix-neuf tranches auraient donc partagé `TRIALS.jsonl`, `ATTEMPTS.jsonl` et
+`CHECKPOINT.json`, avec deux conséquences qui n'auraient rien fait rougir :
+
+* `seen`, l'ensemble des signatures de paramètres déjà essayées, était commun : **la tranche 2
+  aurait sauté les paramètres essayés sur la tranche 1**, alors qu'ils portent sur d'autres
+  données ;
+* la reprise aurait fait croire à la tranche 2 qu'elle continuait la campagne de la tranche 1.
+
+Mon conducteur aggravait le cas en passant la *même* racine aux dix-neuf appels.
+
+**Correction.** Un `_nom_de_campagne(selection_digest, tranche)` porte la tranche dans le nom du
+dossier, et le conducteur dérive une racine par tranche. On ne touche **pas** à
+`selection_digest` : il est vérifié contre le manifeste et scellé dans les 3 120 reçus ; le
+modifier les invaliderait tous. Sans tranche, le chemin est exactement l'ancien, et un test l'exige.
+
+### Le même piège, trois fois — alors un garde-fou
+
+Chaque fois qu'un chargeur de production gagne un paramètre, les classes et lambdas qui le doublent
+dans les tests lèvent `TypeError`. Aujourd'hui : `test_copy_vault_local_lab` (3 doubles),
+`test_pipeline_copie_reel` (1 lambda), `test_copy_vault_campaign_lock` (1 double) — découverts l'un
+après l'autre, par des suites rouges successives.
+
+Un double figé n'est pas seulement gênant : **c'est un test qui ne vérifie plus ce qu'il croit
+vérifier**. Un contrôle parcourt donc maintenant tous les fichiers de tests et refuse une
+définition ou une lambda de ces trois chargeurs qui n'accepte pas `**kwargs`.
+
+Et comme un garde-fou qui ne peut pas échouer n'en est pas un, il a été **vérifié dans les deux
+sens** : avec un double figé déposé exprès, il échoue en nommant le fichier et la ligne ; retiré, il
+repasse au vert.
+
+**Tests** : 7 sur l'identité de campagne (dont deux qui vérifient l'appel réel du conducteur, pas
+son code) + le garde-fou ; 99 verts sur les quatre suites concernées.
+
+---
+
+## 18/11/2026 — ITÉRATION 27 : ma propre correction aurait fait planter la deuxième tranche
+
+En relisant l'effet de l'itération 26, un second défaut est apparu — celui-là **introduit par ma
+correction**. Le compteur d'essais antérieurs relisait les reçus des autres campagnes ainsi :
+
+```python
+rows = _load_campaign_trials(trial_path, campaign.name)
+```
+
+Il supposait que le nom du dossier *est* le `selection_digest`. C'était vrai avant ; ce ne l'est
+plus, puisque j'y ai mis la tranche. Et `_load_campaign_trials` ne **filtre** pas sur le digest :
+il **lève** (« trial ledger identity mismatch »). Dès la deuxième tranche, le labo aurait donc
+planté en comptant ses essais antérieurs.
+
+**Réparé** par `_digest_de_campagne(nom)`, qui extrait le digest du nom qu'il soit tranché ou non,
+et par une exclusion de la campagne **courante par son nom complet** plutôt que par son digest.
+
+### Pourquoi ce détail décide de l'honnêteté du résultat
+
+L'exclusion par digest aurait écarté **toutes** les tranches de la même source. Chaque tranche se
+serait donc crue seule à chercher, alors que dix-neuf tranches cherchent. Or `prior_trial_count`
+alimente le correctif d'essais multiples : chercher un gagnant à travers dix-neuf fenêtres
+multiplie les chances d'en trouver un par hasard, et une tranche qui l'ignore publie un seuil de
+signification trop permissif. Avec la réparation, **la tranche 2 sait que la tranche 1 a cherché**,
+et un test l'exige explicitement.
+
+### Le garde-fou a servi le jour même
+
+Les doubles de `_prior_copy_vault_trial_count` dans les tests du verrou avaient la signature
+`(root, *, exclude_selection_digest)` et ont levé dès l'ajout du nouveau paramètre — quatrième
+occurrence du même piège dans la journée. Cette fonction a donc été **ajoutée à la liste
+surveillée** par le contrôle de l'itération 26, qui en couvre maintenant quatre.
+
+### Et sept de mes tests étaient faux
+
+Mes nouveaux tests rendaient tous `None` au lieu d'un compte : le compteur sort tôt quand le
+registre d'hypothèses est absent, et mes fixtures ne le créaient pas. Ce n'était pas un défaut du
+code — c'est même un comportement voulu, que le dernier test du fichier verrouille désormais :
+**`None` veut dire « je ne sais pas », zéro veut dire « rien cherché ailleurs »**, et les deux ne
+doivent jamais se confondre.
+
+**Tests** : 12 sur le comptage (dont la lecture d'un dossier tranché sans lever, les essais des
+autres tranches comptés, la campagne courante exclue, la rétrocompatibilité de l'ancien paramètre,
+et un reçu incohérent qui lève toujours) ; 340 verts sur les treize suites concernées.
+

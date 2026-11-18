@@ -2530,11 +2530,33 @@ def _load_campaign_trials(path: Path, selection_digest: str) -> list[dict[str, A
     return rows
 
 
+def _digest_de_campagne(nom: str) -> str:
+    """Le digest porte par un dossier de campagne, qu'il soit tranche ou non.
+
+    Un dossier s'appelle `{selection_digest}` (campagne entiere) ou
+    `{selection_digest}-t{debut}-{fin}` (une tranche de temps). Les LIGNES de ses recus portent
+    toujours le digest nu, donc c'est lui qu'il faut passer aux lecteurs de recus -- qui LEVENT sur
+    un digest different au lieu de filtrer.
+    """
+    return nom.split("-t", 1)[0]
+
+
 def _prior_copy_vault_trial_count(
     root: Path,
     *,
     exclude_selection_digest: str | None = None,
+    exclude_campaign_name: str | None = None,
 ) -> int | None:
+    """Les essais Copy-Vault deja tentes AILLEURS, pour le correctif d'essais multiples.
+
+    ``exclude_campaign_name`` retire la campagne COURANTE, tranche comprise. Les autres tranches de
+    la meme source restent comptees, et c'est voulu : chercher un gagnant a travers dix-neuf
+    tranches multiplie les chances d'en trouver un par hasard. Une tranche qui se croirait seule
+    publierait un seuil de signification trop permissif.
+
+    ``exclude_selection_digest`` reste accepte pour les appelants anciens : il exclut alors le
+    dossier dont le nom est exactement ce digest (la campagne non tranchee).
+    """
     ledger = root / "runtime" / "codex_research" / "HYPOTHESIS_LEDGER.jsonl"
     if ledger.is_symlink() or not ledger.is_file():
         return None
@@ -2562,15 +2584,19 @@ def _prior_copy_vault_trial_count(
                 raise ValueError("prior Copy-Vault campaign directory is symlinked")
             if not campaign.is_dir():
                 continue
-            if campaign.name == exclude_selection_digest:
+            if exclude_campaign_name is not None and campaign.name == exclude_campaign_name:
+                continue
+            if exclude_campaign_name is None and campaign.name == exclude_selection_digest:
                 continue
             trial_path = campaign / "TRIALS.jsonl"
             attempt_path = campaign / "ATTEMPTS.jsonl"
             checkpoint_path = campaign / "CHECKPOINT.json"
             if trial_path.is_symlink() or attempt_path.is_symlink() or checkpoint_path.is_symlink():
                 raise ValueError("prior Copy-Vault campaign receipt is symlinked")
-            rows = _load_campaign_trials(trial_path, campaign.name)
-            attempts = _load_campaign_attempts(attempt_path, campaign.name)
+            # Les recus portent le digest NU, pas le nom du dossier (qui peut porter la tranche).
+            digest_du_dossier = _digest_de_campagne(campaign.name)
+            rows = _load_campaign_trials(trial_path, digest_du_dossier)
+            attempts = _load_campaign_attempts(attempt_path, digest_du_dossier)
             checkpoint = None
             if checkpoint_path.is_file():
                 checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
@@ -2669,6 +2695,27 @@ def _campaign_lock(path: Path) -> SingleWriterFileLock:
     except OSError as exc:
         raise RuntimeError("COPY_VAULT_CAMPAIGN_LOCK_UNREADABLE") from exc
     return lock
+
+
+def _nom_de_campagne(selection_digest: str, tranche: tuple[int, int] | None) -> str:
+    """La TRANCHE fait partie de l'identite de la campagne, pas seulement de sa lecture.
+
+    DEFAUT TROUVE LE 18/11/2026, avant d'avoir conduit la premiere tranche. `selection_digest`
+    identifie la SOURCE (le manifeste SAFE) et ne change pas d'une tranche a l'autre. Sans ce nom,
+    les dix-neuf tranches partageaient donc `TRIALS.jsonl`, `ATTEMPTS.jsonl` et `CHECKPOINT.json`,
+    avec deux consequences :
+
+    * `seen` (les signatures de parametres deja essayees) etait commun, donc la tranche 2 AURAIT
+      SAUTE les parametres essayes sur la tranche 1 -- sur des donnees differentes ;
+    * la reprise aurait fait croire a la tranche 2 qu'elle continuait la campagne de la tranche 1.
+
+    On ne touche PAS a `selection_digest` : il est verifie contre le manifeste et scelle dans les
+    recus (3 120 valides). C'est le NOM DU DOSSIER de campagne qui porte la tranche, donc chaque
+    tranche a son propre historique, et une conduite sans tranche garde exactement l'ancien chemin.
+    """
+    if tranche is None:
+        return selection_digest
+    return f"{selection_digest}-t{int(tranche[0])}-{int(tranche[1])}"
 
 
 def run_local_campaign(
@@ -2963,7 +3010,8 @@ def run_local_campaign(
     campaign_config, campaign_config_sha = _campaign_search_config(bounds)
     engine_source_sha = _campaign_engine_source_sha256(pipeline)
     campaign_root = Path(campaign_root) if campaign_root else (
-        repository_root / "runtime" / "codex_research" / "copy_vault_continuous_lab" / selection_digest
+        repository_root / "runtime" / "codex_research" / "copy_vault_continuous_lab"
+        / _nom_de_campagne(selection_digest, tranche)
     )
     campaign_root.mkdir(parents=True, exist_ok=True)
     trial_path = campaign_root / "TRIALS.jsonl"
@@ -2981,6 +3029,9 @@ def run_local_campaign(
         prior_trial_count = _prior_copy_vault_trial_count(
             repository_root,
             exclude_selection_digest=selection_digest,
+            # La campagne courante s'exclut par son NOM (tranche comprise) : les autres tranches de
+            # la meme source doivent compter dans le correctif d'essais multiples.
+            exclude_campaign_name=campaign_root.name,
         )
         history_rows = _load_campaign_trials(trial_path, selection_digest)
         attempt_rows = _load_campaign_attempts(attempt_path, selection_digest)
