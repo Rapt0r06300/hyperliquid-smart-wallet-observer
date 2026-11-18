@@ -63,7 +63,7 @@ Expected: All tests in the file pass; any unrelated timeout must be reported by 
 ### Task 2: Real local-to-GitHub parity run
 
 **Files:**
-- Execute: `POUSSER-GITHUB-FORCE.cmd --promote-current-to-main`
+- Execute: `POUSSER-GITHUB.cmd --promote-current-to-main`
 - Verify: `runtime/reports/git-sync/LAST_SYNC.json`
 
 **Interfaces:**

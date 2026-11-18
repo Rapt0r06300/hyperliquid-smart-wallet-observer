@@ -25,7 +25,7 @@ REQUIRED_POST_TRANSFER_FILES = (
     "LANCER_HYPERSMART.cmd",
     "LANCER_COLLECTEURS_COPY_VAULT.cmd",
     "LANCER_LAB_QUANT_COPY_VAULT.cmd",
-    "POUSSER-GITHUB-FORCE.cmd",
+    "POUSSER-GITHUB.cmd",
     "ALINA_SYNC_COMPLETE.cmd",
     "tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd",
     "tools/launchers/CREER_ARCHIVE_PORTABLE.cmd",
@@ -320,7 +320,7 @@ def prove_transferred_clone(
     commands: list[tuple[str, list[str], int]] = [
         ("portable_check", ["cmd.exe", "/d", "/c", str(launcher), "portable-check"], 600),
         ("portable_smoke", [str(python), "-m", "hl_observer.ops.portable_smoke", "--root", str(project), "--json"], 600),
-        ("github_push_self_check", ["cmd.exe", "/d", "/c", str(project / "POUSSER-GITHUB-FORCE.cmd"), "--portable-self-check"], 120),
+        ("github_push_self_check", ["cmd.exe", "/d", "/c", str(project / "POUSSER-GITHUB.cmd"), "--portable-self-check"], 120),
         ("archive_self_check", ["cmd.exe", "/d", "/c", str(project / "tools" / "launchers" / "CREER_ARCHIVE_PORTABLE.cmd"), "--portable-self-check"], 120),
     ]
     steps: list[dict[str, Any]] = []

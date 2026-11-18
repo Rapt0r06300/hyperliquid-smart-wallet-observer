@@ -5,7 +5,7 @@ Les lanceurs destinés au double-clic restent à la racine :
 - `LANCER_COLLECTEURS_COPY_VAULT.cmd`
 - `LANCER_LAB_QUANT_COPY_VAULT.cmd`
 - `LANCER_HYPERSMART.cmd`
-- `POUSSER-GITHUB-FORCE.cmd`
+- `POUSSER-GITHUB.cmd`
 - `ALINA_SYNC_COMPLETE.cmd` et `ALINA_SYNC_COMPLETE.sh`
 
 Les scripts ci-dessous sont conservés pour les workflows, les diagnostics, la restauration et la compatibilité. Ils ne remplacent pas les quatre outils principaux. Leur bootstrap remonte de `tools/launchers/` à la racine du clone ; aucun chemin `C:\Users\...` n'est requis.

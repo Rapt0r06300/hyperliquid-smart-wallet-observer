@@ -598,7 +598,7 @@ def record_authority_preflight(evidence_dir: Path) -> dict[str, Any]:
             **common,
             "task_id": "T001",
             "status": "VERIFIED_DONE",
-            "files": [".git", "POUSSER-GITHUB-FORCE.cmd"],
+            "files": [".git", "POUSSER-GITHUB.cmd"],
             "proofs": ["git checks captured in this receipt", "remote main SHA observed", "dirty WIP preserved"],
             "observations": git_checks,
         },
@@ -781,8 +781,8 @@ def record_command_preflight(evidence_dir: Path) -> dict[str, Any]:
             ["LANCER_HYPERSMART.cmd", "tests/test_portable_official_cmds.py"],
         ),
         "T116": (
-            "POUSSER-GITHUB-FORCE.cmd uses the shared safe synchronization contract",
-            ["POUSSER-GITHUB-FORCE.cmd", "tests/test_push_github_launcher.py"],
+            "POUSSER-GITHUB.cmd uses the shared safe synchronization contract",
+            ["POUSSER-GITHUB.cmd", "tests/test_push_github_launcher.py"],
         ),
         "T117": (
             "ALINA_SYNC_COMPLETE.cmd and the clone/restore contract remain aligned",
@@ -794,7 +794,7 @@ def record_command_preflight(evidence_dir: Path) -> dict[str, Any]:
         ),
         "T119": (
             "launcher, restore and workflow failure paths remain fail-closed locally",
-            ["POUSSER-GITHUB-FORCE.cmd", "tests/test_push_github_launcher.py", "tests/test_sync_complete_clone.py", "tests/test_workflow_bounds.py"],
+            ["POUSSER-GITHUB.cmd", "tests/test_push_github_launcher.py", "tests/test_sync_complete_clone.py", "tests/test_workflow_bounds.py"],
         ),
         "T120": (
             "Linux and Windows hosted jobs execute one explicit platform-responsibility contract while remaining PAPER and fail-closed",

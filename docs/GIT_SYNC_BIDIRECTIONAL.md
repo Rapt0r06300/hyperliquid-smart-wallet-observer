@@ -4,7 +4,7 @@ Dernière mise à jour : **2026-11-11**.
 
 ## Contrat de sécurité
 
-`POUSSER-GITHUB-FORCE.cmd` conserve son nom historique pour les raccourcis
+`POUSSER-GITHUB.cmd` conserve son nom historique pour les raccourcis
 Windows, mais **n'utilise jamais `git push --force`**. C'est un bouton de
 synchronisation de **code uniquement**, sans téléchargement de shards.
 **AlinaSync** reste seul responsable des shards SAFE et de leur décompression.
@@ -53,13 +53,13 @@ le système d'exploitation à la fin de son processus.
 ## Modes
 
 ```cmd
-POUSSER-GITHUB-FORCE.cmd
-POUSSER-GITHUB-FORCE.cmd --dry-run
-POUSSER-GITHUB-FORCE.cmd --wip-only
-POUSSER-GITHUB-FORCE.cmd --portable-self-check
-POUSSER-GITHUB-FORCE.cmd --full
-POUSSER-GITHUB-FORCE.cmd --shards-only
-POUSSER-GITHUB-FORCE.cmd --preflight-only
+POUSSER-GITHUB.cmd
+POUSSER-GITHUB.cmd --dry-run
+POUSSER-GITHUB.cmd --wip-only
+POUSSER-GITHUB.cmd --portable-self-check
+POUSSER-GITHUB.cmd --full
+POUSSER-GITHUB.cmd --shards-only
+POUSSER-GITHUB.cmd --preflight-only
 ```
 
 - **Normal** : checkpoint local, réception de GitHub, fusion prudente et

@@ -154,7 +154,7 @@ T112|P1|Préserver les refus honnêtes|14 OOS, forward et preuves économiques
 T113|P4|Tester LANCER_COLLECTEURS_COPY_VAULT.cmd|15 certification des cinq CMD
 T114|P4|Tester LANCER_LAB_QUANT_COPY_VAULT.cmd|15 certification des cinq CMD
 T115|P4|Tester LANCER_HYPERSMART.cmd|15 certification des cinq CMD
-T116|P4|Tester POUSSER-GITHUB-FORCE.cmd|15 certification des cinq CMD
+T116|P4|Tester POUSSER-GITHUB.cmd|15 certification des cinq CMD
 T117|P4|Tester ALINA_SYNC_COMPLETE.cmd|15 certification des cinq CMD
 T118|P4|Tester les interactions|15 certification des cinq CMD
 T119|P4|Tester les échecs|15 certification des cinq CMD

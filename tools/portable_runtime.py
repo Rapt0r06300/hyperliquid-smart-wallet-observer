@@ -48,7 +48,7 @@ REQUIRED_RELOCATION_FILES: tuple[str, ...] = (
     "LANCER_HYPERSMART.cmd",
     "LANCER_COLLECTEURS_COPY_VAULT.cmd",
     "LANCER_LAB_QUANT_COPY_VAULT.cmd",
-    "POUSSER-GITHUB-FORCE.cmd",
+    "POUSSER-GITHUB.cmd",
     "ALINA_SYNC_COMPLETE.cmd",
     "tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd",
     "tools/launchers/CREER_ARCHIVE_PORTABLE.cmd",

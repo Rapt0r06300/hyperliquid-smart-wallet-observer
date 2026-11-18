@@ -4,7 +4,7 @@ set "ALINA_LAUNCH_RUN_ID=%DATE%_%TIME%_%RANDOM%_%RANDOM%"
 set "ALINA_LAUNCH_MODE=argument-dispatch"
 set "ALINA_LAUNCH_PYTHON=unresolved"
 chcp 65001 >nul
-call "%~dp0tools\launcher_log.cmd" "POUSSER-GITHUB-FORCE" START preflight "repo-and-options" ""
+call "%~dp0tools\launcher_log.cmd" "POUSSER-GITHUB" START preflight "repo-and-options" ""
 set "ALINA_PUSHD_OK=0"
 pushd "%~dp0" >nul 2>nul
 if errorlevel 1 goto :bad_location
@@ -57,7 +57,7 @@ goto :bad_option
 if "%ALINA_SKIP_UPDATE%"=="1" set "ALINA_SHARDS_ARGS=%ALINA_SHARDS_ARGS% --skip-update"
 if defined ALINA_COPY_VAULT_ONLY set "ALINA_SHARDS_ARGS=%ALINA_SHARDS_ARGS% %ALINA_COPY_VAULT_ONLY%"
 if /I "%ALINA_MODE%"=="code" (set "ALINA_LAUNCH_MODE=code-sync") else if /I "%ALINA_MODE%"=="shards" (set "ALINA_LAUNCH_MODE=safe-data-sync") else if /I "%ALINA_MODE%"=="all" (set "ALINA_LAUNCH_MODE=code-plus-safe") else set "ALINA_LAUNCH_MODE=%ALINA_MODE%"
-call "%ALINA_ROOT%tools\launcher_log.cmd" "POUSSER-GITHUB-FORCE" STEP preflight "selected-mode-and-engine-validation" "0"
+call "%ALINA_ROOT%tools\launcher_log.cmd" "POUSSER-GITHUB" STEP preflight "selected-mode-and-engine-validation" "0"
 
 rem --- Git ---
 set "HYPERSMART_GIT="
@@ -100,7 +100,7 @@ if errorlevel 1 goto :invalid_engine
 if errorlevel 1 goto :engine_build_mismatch
 "%HYPERSMART_PYTHON%" %PYARGS% -c "import ast,sys; ast.parse(open(sys.argv[1],'rb').read())" "%ALINA_SHARDS_ENGINE%" >nul 2>nul
 if errorlevel 1 goto :missing_shards_engine
-call "%ALINA_ROOT%tools\launcher_log.cmd" "POUSSER-GITHUB-FORCE" RESULT preflight "git-python-and-canonical-engines-valid" "0"
+call "%ALINA_ROOT%tools\launcher_log.cmd" "POUSSER-GITHUB" RESULT preflight "git-python-and-canonical-engines-valid" "0"
 "%HYPERSMART_PYTHON%" %PYARGS% "%ALINA_ROOT%tools\cmd_progress.py" percent 8 "Moteurs canoniques valides"
 if /I "%ALINA_MODE%"=="self-check" goto :self_check
 
@@ -133,12 +133,12 @@ set "ALINA_ATTEMPT=0"
 :code_attempt
 set /a ALINA_ATTEMPT+=1
 call :ensure_no_stale_lock
-call "%ALINA_ROOT%tools\launcher_log.cmd" "POUSSER-GITHUB-FORCE" STEP git-code-sync "attempt-%ALINA_ATTEMPT%-of-%ALINA_MAX_ATTEMPTS%" ""
+call "%ALINA_ROOT%tools\launcher_log.cmd" "POUSSER-GITHUB" STEP git-code-sync "attempt-%ALINA_ATTEMPT%-of-%ALINA_MAX_ATTEMPTS%" ""
 echo [TENTATIVE] Synchronisation code %ALINA_ATTEMPT%/%ALINA_MAX_ATTEMPTS%
 set "ALINA_ENGINE_RAN=1"
 "%HYPERSMART_PYTHON%" %PYARGS% "%ALINA_ENGINE%" --root "%ALINA_ROOT%." --git "%HYPERSMART_GIT%" %ALINA_CODE_ARGS%
 set "RC=%ERRORLEVEL%"
-call "%ALINA_ROOT%tools\launcher_log.cmd" "POUSSER-GITHUB-FORCE" RESULT git-code-sync "attempt-%ALINA_ATTEMPT%-of-%ALINA_MAX_ATTEMPTS%" "%RC%"
+call "%ALINA_ROOT%tools\launcher_log.cmd" "POUSSER-GITHUB" RESULT git-code-sync "attempt-%ALINA_ATTEMPT%-of-%ALINA_MAX_ATTEMPTS%" "%RC%"
 if "%RC%"=="0" goto :code_ok
 if %ALINA_ATTEMPT% GEQ %ALINA_MAX_ATTEMPTS% goto :finish
 "%HYPERSMART_PYTHON%" %PYARGS% "%ALINA_ROOT%tools\cmd_progress.py" retry-decision "%ALINA_ROOT%runtime\reports\git-sync\LAST_SYNC.json" "%RC%"
@@ -158,12 +158,12 @@ set "ALINA_ATTEMPT=0"
 :shards_attempt
 set /a ALINA_ATTEMPT+=1
 call :ensure_no_stale_lock
-call "%ALINA_ROOT%tools\launcher_log.cmd" "POUSSER-GITHUB-FORCE" STEP safe-data-sync "attempt-%ALINA_ATTEMPT%-of-%ALINA_MAX_ATTEMPTS%" ""
+call "%ALINA_ROOT%tools\launcher_log.cmd" "POUSSER-GITHUB" STEP safe-data-sync "attempt-%ALINA_ATTEMPT%-of-%ALINA_MAX_ATTEMPTS%" ""
 if /I "%ALINA_MODE%"=="all" "%HYPERSMART_PYTHON%" %PYARGS% "%ALINA_ROOT%tools\cmd_progress.py" percent 70 "Telechargement SAFE explicite"
 if /I "%ALINA_MODE%"=="shards" "%HYPERSMART_PYTHON%" %PYARGS% "%ALINA_ROOT%tools\cmd_progress.py" percent 35 "Operation SAFE en cours"
 "%HYPERSMART_PYTHON%" %PYARGS% "%ALINA_SHARDS_ENGINE%" %ALINA_SHARDS_ARGS%
 set "RC=%ERRORLEVEL%"
-call "%ALINA_ROOT%tools\launcher_log.cmd" "POUSSER-GITHUB-FORCE" RESULT safe-data-sync "attempt-%ALINA_ATTEMPT%-of-%ALINA_MAX_ATTEMPTS%" "%RC%"
+call "%ALINA_ROOT%tools\launcher_log.cmd" "POUSSER-GITHUB" RESULT safe-data-sync "attempt-%ALINA_ATTEMPT%-of-%ALINA_MAX_ATTEMPTS%" "%RC%"
 if "%RC%"=="0" goto :finish
 if %ALINA_ATTEMPT% GEQ %ALINA_MAX_ATTEMPTS% goto :finish
 echo [AUTO-REPAIR] Operation SAFE echouee ^(code %RC%^); nouvel essai borne dans 2s...
@@ -179,7 +179,7 @@ set "RC=0"
 goto :finish
 
 :help
-echo Usage : POUSSER-GITHUB-FORCE.cmd [options]
+echo Usage : POUSSER-GITHUB.cmd [options]
 echo.
 echo  (defaut)              code push rapide SEUL ^(pas de telechargement 153 Go^)
 echo  --dry-run             code en lecture seule, aucune publication
@@ -242,7 +242,7 @@ set "RC=37"
 goto :finish
 
 :finish
-call "%~dp0tools\launcher_log.cmd" "POUSSER-GITHUB-FORCE" EXIT completion "launcher-finished" "%RC%"
+call "%~dp0tools\launcher_log.cmd" "POUSSER-GITHUB" EXIT completion "launcher-finished" "%RC%"
 echo.
 if "%ALINA_ENGINE_RAN%"=="1" "%HYPERSMART_PYTHON%" %PYARGS% "%ALINA_ROOT%tools\cmd_progress.py" summary "%ALINA_ROOT%runtime\reports\git-sync\LAST_SYNC.json" "%RC%"
 if "%RC%"=="0" if /I not "%ALINA_MODE%"=="self-check" "%HYPERSMART_PYTHON%" %PYARGS% "%ALINA_ROOT%tools\cmd_progress.py" percent 100 "Lanceur termine et resultat verifie"

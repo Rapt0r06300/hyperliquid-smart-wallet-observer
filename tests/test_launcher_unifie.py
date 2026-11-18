@@ -83,7 +83,7 @@ def test_github_push_AUCUN_force_fast_forward_seulement():
     bloc = m.group(0)
     assert "git push" not in bloc.lower()
     assert "git status" not in bloc.lower()
-    assert "POUSSER-GITHUB-FORCE.cmd" in bloc
+    assert "POUSSER-GITHUB.cmd" in bloc
     assert 'set "RC=%ERRORLEVEL%"' in bloc
 
 
@@ -157,7 +157,7 @@ def test_la_racine_contient_uniquement_les_lanceurs_principaux_et_alinasync():
         "LANCER_COLLECTEURS_COPY_VAULT.cmd",
         "LANCER_HYPERSMART.cmd",
         "LANCER_LAB_QUANT_COPY_VAULT.cmd",
-        "POUSSER-GITHUB-FORCE.cmd",
+        "POUSSER-GITHUB.cmd",
         "Certificateur Coffre Fort.cmd",
         "SUIVI_COFFRE.cmd",
         "RAPPORT-COLLECTEURS.cmd",

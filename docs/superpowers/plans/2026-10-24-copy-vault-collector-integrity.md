@@ -59,7 +59,7 @@
 ### Task 3: Publishing and regression gate
 
 **Files:**
-- Verify: `POUSSER-GITHUB-FORCE.cmd`
+- Verify: `POUSSER-GITHUB.cmd`
 - Verify: `tools/push_github_safe.ps1`
 - Test: `tests/test_push_github_safe_contract.py`
 - Test: `tests/test_push_github_launcher.py`

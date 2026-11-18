@@ -48,7 +48,7 @@ REGISTRE: list[tuple[str, str, list[str], float, str]] = [
     # verrou en place. Categorie `long`, jamais dans la passe sure.
     ("CERTIFIER_EN_CONTINU",  "CERTIFIER_EN_CONTINU.cmd",          [],          1800,   "long"),
     # Dangereux : effets externes -> jamais en auto.
-    ("POUSSER_GITHUB",        "POUSSER-GITHUB-FORCE.cmd",          [],             0,   "danger"),
+    ("POUSSER_GITHUB",        "POUSSER-GITHUB.cmd",          [],             0,   "danger"),
     ("Installer_Noeud_HL",    "Installer Noeud HL.cmd",            [],             0,   "danger"),
     ("Noeud_HL",              "Noeud-HL.cmd",                      [],             0,   "danger"),
 ]

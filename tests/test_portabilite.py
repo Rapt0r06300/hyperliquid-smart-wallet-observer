@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 
 RACINE = Path(__file__).resolve().parents[1]
-MAITRES = ["LANCER_HYPERSMART.cmd", "LANCER_COLLECTEURS_COPY_VAULT.cmd", "LANCER_LAB_QUANT_COPY_VAULT.cmd", "POUSSER-GITHUB-FORCE.cmd", "ALINA_SYNC_COMPLETE.cmd", "tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd", "tools/portable_env.cmd"]
+MAITRES = ["LANCER_HYPERSMART.cmd", "LANCER_COLLECTEURS_COPY_VAULT.cmd", "LANCER_LAB_QUANT_COPY_VAULT.cmd", "POUSSER-GITHUB.cmd", "ALINA_SYNC_COMPLETE.cmd", "tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd", "tools/portable_env.cmd"]
 
 
 def _lignes_commandes(txt: str):

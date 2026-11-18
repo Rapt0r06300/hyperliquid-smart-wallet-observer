@@ -85,7 +85,7 @@ Audit déterministe, lecture seule. Une absence de reachability statique est une
 | `LANCER_COLLECTEURS_COPY_VAULT.cmd` | oui | 3 | `tools/watch_economic_collectors.py` |
 | `LANCER_HYPERSMART.cmd` | oui | 99 | `tools/audit_moissonneur.py`, `tools/audit_report.py`, `tools/backfill_candles_vaults.py`, `tools/backfill_vault_fills.py`, `tools/collecter_allmids.py`, `tools/collecter_bbo.py`, `tools/collecter_carnet.py`, `tools/collecter_dispersion_venues.py`, `tools/collecter_lab_microstructure.py`, `tools/collecter_liquidations.py`, `tools/collecter_overshoots.py`, `tools/collecter_userfills_vaults.py`, `tools/collecter_vaults.py`, `tools/ecrire_carry_spot_inputs.py`, `tools/ecrire_copy_whitelist.py`, `tools/ecrire_marks_tous_coins.py`, `tools/fermer_carry_historique.py`, `tools/geler_prelim_copie.py`, `tools/lancer_research_parallel.py`, `tools/lanceur_tout_tester.py`, `tools/moissonner_10h.py`, `tools/pipeline_copie_reel.py`, `tools/portable_runtime.py`, `tools/rapport_quotidien.py`, `tools/reset_paper.py`, `tools/scorer_vaults.py`, `tools/sonde_confirmation_vaults.py`, `tools/verif_checkpoint_oos_shadow.py`, `tools/verifier_tout.py` |
 | `LANCER_LAB_QUANT_COPY_VAULT.cmd` | oui | 6 | `tools/alina_quant_lab_console.py` |
-| `POUSSER-GITHUB-FORCE.cmd` | oui | 0 | `tools/alina_git_code_sync.py` |
+| `POUSSER-GITHUB.cmd` | oui | 0 | `tools/alina_git_code_sync.py` |
 | `config/acceptance_criteria.yaml` | non | 5 | — |
 | `config/settings.example.yaml` | non | 1 | — |
 | `tools/boucle_collecteur.cmd` | non | 1 | — |

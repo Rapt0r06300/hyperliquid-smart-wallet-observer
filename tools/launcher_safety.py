@@ -35,7 +35,7 @@ def audit_launcher_file(path: str | Path) -> dict[str, object]:
         required = ("HL_ENABLE_MAINNET_EXECUTION=0", "HL_ENABLE_TESTNET_EXECUTION=0", "PAPER / READ-ONLY")
     elif name == "LANCER_HYPERSMART.CMD":
         required = ("HL_ENABLE_MAINNET_EXECUTION=0", "HL_ENABLE_TESTNET_EXECUTION=0", "SIMULATION_ONLY_UNTIL_MANUAL_REVIEW")
-    elif name == "POUSSER-GITHUB-FORCE.CMD":
+    elif name == "POUSSER-GITHUB.CMD":
         required = ("AUCUN PUSH FORCE", "AUCUN TELECHARGEMENT DE SHARDS")
     elif name == "ALINA_SYNC_COMPLETE.CMD":
         required = ("DOWNLOAD_AND_UNPACK_ALL_SAFE", "SYNC_COMPLETE_CLONE.PY")

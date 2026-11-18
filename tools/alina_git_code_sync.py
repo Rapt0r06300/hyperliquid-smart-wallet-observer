@@ -483,7 +483,7 @@ def _commit_subject(paths: list[str], diff_text: str = "") -> str:
     if (
         len(normalized) <= 3
         and
-        any(path.endswith("POUSSER-GITHUB-FORCE.cmd") for path in normalized)
+        any(path.endswith("POUSSER-GITHUB.cmd") for path in normalized)
         and any(path.endswith("tools/alina_git_code_sync.py") for path in normalized)
     ):
         return _semantic_subject(
@@ -3161,7 +3161,7 @@ class Synchronizer:
             "   systematiquement --ours ou --theirs.",
             "3. Resoudre les intentions dans une serie de commits lineaire, sans",
             "   commit de fusion ni re-ecriture de main; lancer les tests locaux.",
-            "4. Relancer POUSSER-GITHUB-FORCE.cmd pour verifier la reconciliation.",
+            "4. Relancer POUSSER-GITHUB.cmd pour verifier la reconciliation.",
             "",
             "Ce kit ne restaure rien automatiquement. Les originaux et les",
             "commits sont preserves; le rebase incomplet est annule sans force.",

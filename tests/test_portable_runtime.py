@@ -30,7 +30,7 @@ def test_portability_files_exist_and_unified_launcher_bootstraps_first():
     assert (ROOT / "tools" / "preparer_python_portable.cmd").is_file()
     assert (ROOT / "tools/launchers/PREPARER_GIT_PORTABLE.cmd").is_file()
     assert (ROOT / "tools" / "install_portable_git.ps1").is_file()
-    assert (ROOT / "POUSSER-GITHUB-FORCE.cmd").is_file()
+    assert (ROOT / "POUSSER-GITHUB.cmd").is_file()
     assert (ROOT / "tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd").is_file()
 
     launcher = (ROOT / "LANCER_HYPERSMART.cmd").read_text(encoding="utf-8")
@@ -301,7 +301,7 @@ def test_new_portability_files_have_no_user_specific_absolute_path():
         ROOT / "docs" / "PORTABILITE_WINDOWS.md",
         ROOT / "tools" / "install_portable_git.ps1",
         ROOT / "tools/launchers/PREPARER_GIT_PORTABLE.cmd",
-        ROOT / "POUSSER-GITHUB-FORCE.cmd",
+        ROOT / "POUSSER-GITHUB.cmd",
         ROOT / "tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd",
     )
     for path in paths:

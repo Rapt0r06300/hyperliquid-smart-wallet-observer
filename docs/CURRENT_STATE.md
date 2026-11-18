@@ -163,7 +163,7 @@ périmés par ces modifications (124), sont revalidés par `tools/revalider_rece
 les tests de chaque reçu puis AJOUTE un reçu rafraîchi ou `REVALIDATION_FAILED`, sans réécrire le
 registre (l'ancien `tools/regenerer_receipts.py` rafraîchit les empreintes sans rejouer : à éviter).
 
-**Seconde séquence du 2026-11-11 (lectures ponctuelles autorisées) — commitée et poussée par `POUSSER-GITHUB-FORCE.cmd` à 17 h 34 : commit `bb41b323`, 90 chemins, `origin/main` aligné :**
+**Seconde séquence du 2026-11-11 (lectures ponctuelles autorisées) — commitée et poussée par `POUSSER-GITHUB.cmd` à 17 h 34 : commit `bb41b323`, 90 chemins, `origin/main` aligné :**
 
 - Faits vérifiés auprès de l'API officielle : identifiants sensibles à la casse (`xyz:XYZ100`, `kPEPE` ;
   `XYZ:XYZ100` et `KPEPE` refusés) ; `l2Book`, `bbo`, `trades` fonctionnent sur les dex HIP-3 ; **un seul
@@ -2634,7 +2634,7 @@ question comptable ouverte vaut infiniment mieux qu'un test vert qui la cache.**
 - **Frontière vérifiée** : le moteur de décision/preuve du labo est **SAFE-provenance-bound** ; le tier
   LOCAL nourrit la recherche exploratoire mais ne peut jamais être « prouvé » (pas de fausse certification).
   La rentabilité prouvée exige du SAFE-cloud frais (que les lanes alimentent).
-- **`POUSSER-GITHUB-FORCE.cmd` : défaut = code seul** (push rapide, plus de téléchargement SAFE de 153 Go) ;
+- **`POUSSER-GITHUB.cmd` : défaut = code seul** (push rapide, plus de téléchargement SAFE de 153 Go) ;
   `--full` pour l'ancien comportement complet.
 
 ## 1. Périmètre économique actif

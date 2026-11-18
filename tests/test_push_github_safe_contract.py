@@ -82,7 +82,7 @@ def test_powershell_compatibility_layer_delegates_to_single_python_engine() -> N
 
 
 def test_double_click_launcher_runs_canonical_engine_and_never_forces_git() -> None:
-    launcher = (ROOT / "POUSSER-GITHUB-FORCE.cmd").read_text(encoding="utf-8-sig")
+    launcher = (ROOT / "POUSSER-GITHUB.cmd").read_text(encoding="utf-8-sig")
     engine = (ROOT / "tools" / "alina_git_code_sync.py").read_text(encoding="utf-8")
     engine_build = re.search(
         r'^GIT_SYNC_ENGINE_BUILD = "([^"]+)"$', engine, re.MULTILINE
@@ -105,5 +105,5 @@ def test_double_click_launcher_runs_canonical_engine_and_never_forces_git() -> N
 def test_alias_launchers_call_the_single_canonical_cmd_and_propagate_status() -> None:
     for name in ("POUSSER_TOUT_LE_TRAVAIL.cmd", "REPARER_ET_POUSSER.cmd"):
         source = (ROOT / "tools" / "launchers" / name).read_text(encoding="utf-8-sig")
-        assert 'call "%ALINA_PROJECT_ROOT%\\POUSSER-GITHUB-FORCE.cmd"' in source
+        assert 'call "%ALINA_PROJECT_ROOT%\\POUSSER-GITHUB.cmd"' in source
         assert "endlocal & exit /b %RC%" in source
