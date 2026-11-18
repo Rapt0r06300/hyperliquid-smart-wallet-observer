@@ -8,6 +8,7 @@ from hl_observer.storage.models import Fill, FollowDecision, PositionDeltaModel,
 from hl_observer.ui.app import create_ui_app
 from hl_observer.ui.state import UiState
 from hl_observer.utils.time import now_ms
+from hl_observer.contrat_paper import PAPER_EQUITY_USD
 
 
 def _client_and_db(tmp_path: Path):
@@ -521,7 +522,7 @@ def test_ui_simulation_ignores_old_db_deltas_before_start_timestamp(tmp_path):
 
     payload = client.get("/api/simulation/overview").json()
 
-    assert payload["starting_equity_usdt"] == 350.0
+    assert payload["starting_equity_usdt"] == PAPER_EQUITY_USD
     assert payload["virtual_quote_asset"] == "USDT"
     assert payload["counts"]["deltas"] == 0
     assert payload["counts"]["live_simulation_deltas"] == 0

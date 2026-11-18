@@ -10,6 +10,7 @@ from hl_observer.copying.copy_vault_risk_controls import (
     vault_concentration_receipt,
     veto_order_receipt,
 )
+from hl_observer.contrat_paper import PAPER_EQUITY_USD
 
 
 def test_lch221_one_authoritative_risk_engine() -> None:
@@ -26,10 +27,20 @@ def test_lch222_veto_precedes_paper_order() -> None:
     assert veto_order_receipt([row])["status"] == "REJECTED"
 
 
-def test_lch223_leverage_cost_requires_canonical_350_usd_capital() -> None:
-    assert leverage_cost_receipt({"capital_usd": 350, "leverage": 2, "leverage_cost_usd": 1})["status"] == "PROVEN"
-    assert leverage_cost_receipt({"capital_usd": 200, "leverage": 2, "leverage_cost_usd": 1})["status"] == "UNMEASURABLE"
-    assert leverage_cost_receipt({"capital_usd": 100, "leverage": 2, "leverage_cost_usd": 1})["status"] == "UNMEASURABLE"
+def test_lch223_leverage_cost_requires_the_contract_capital() -> None:
+    # LE capital du contrat, pas 350 : la regle testee est « c'est le capital du contrat,
+    # et lui seul ». Le second appel garde un montant litteral -- c'est son cas NEGATIF.
+    assert leverage_cost_receipt(
+        {"capital_usd": PAPER_EQUITY_USD, "leverage": 2, "leverage_cost_usd": 1}
+    )["status"] == "PROVEN"
+    # LES CAS NEGATIFS SONT RELATIFS, donc toujours negatifs. Ils valaient 200 et 100, choisis
+    # parce qu'ils differaient de 350 ; au passage du contrat a 100 USD, le second est devenu
+    # le capital VALIDE et le test exigeait UNMEASURABLE sur un capital conforme. Un cas
+    # negatif ecrit en dur peut devenir positif quand la constante bouge sous lui.
+    for hors_contrat in (PAPER_EQUITY_USD * 2, PAPER_EQUITY_USD / 2):
+        assert leverage_cost_receipt(
+            {"capital_usd": hors_contrat, "leverage": 2, "leverage_cost_usd": 1}
+        )["status"] == "UNMEASURABLE", hors_contrat
 
 
 def test_lch224_vault_concentration_is_bounded() -> None:
