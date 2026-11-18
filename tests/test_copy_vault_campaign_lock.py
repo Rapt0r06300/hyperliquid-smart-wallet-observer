@@ -85,7 +85,7 @@ def _install_campaign_stubs(
 
     class Pipeline:
         @staticmethod
-        def charger_entrees_alpha_notional_fixe_avec_audit(_workspace):
+        def charger_entrees_alpha_notional_fixe_avec_audit(_workspace, **_kw):
             return [], {
                 "live_fill_rows": len(metaorders),
                 "causal_live_fill_rows": len(metaorders),
@@ -124,7 +124,7 @@ def _run_blocked_campaign(
 ) -> None:
     _install_campaign_stubs()
 
-    def wait_until_released(_repository_root, *, exclude_selection_digest):
+    def wait_until_released(_repository_root, **_kw):
         acquired.set()
         if not continue_run.wait(15):
             raise TimeoutError("campaign test owner timed out")
@@ -307,7 +307,7 @@ def test_run_local_campaign_releases_lock_after_unexpected_exception(tmp_path, m
     _campaign_inputs(workspace, repository_root)
     _install_campaign_stubs(monkeypatch)
 
-    def raise_unexpected_exception(_repository_root, *, exclude_selection_digest):
+    def raise_unexpected_exception(_repository_root, **_kw):
         raise AssertionError("injected campaign failure")
 
     monkeypatch.setattr(
