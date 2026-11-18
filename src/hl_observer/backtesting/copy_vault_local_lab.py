@@ -2646,8 +2646,18 @@ def run_local_campaign(
     leader_review_ledger_path: str | Path | None = None,
     tranche: tuple[int, int] | None = None,
     jours_du_corpus: int | None = None,
+    corpus_prepare: str | Path | None = None,
 ) -> dict[str, Any]:
     """``tranche`` borne la reconstruction a ``(depuis_ms, jusqu_a_ms)`` INCLUS.
+
+    ``corpus_prepare`` est la PHASE 2 du labo en deux phases : au lieu de reconstruire les cycles
+    du leader depuis le workspace, on relit des tranches deja preparees et allegees par la phase 1
+    (``copy_vault_labo_deux_phases``). C'est ce qui permet d'explorer les six journees d'un coup :
+    la phase 1 n'a garde que les carnets a portee causale d'un signal, donc le corpus fusionne tient
+    en memoire la ou le corpus brut demandait une cinquantaine de gigaoctets.
+
+    ``tranche`` et ``corpus_prepare`` s'excluent : la premiere borne une reconstruction, le second
+    lit un corpus deja borne. Les combiner laisserait croire a un filtrage qui n'aurait pas lieu.
 
     Ajoutee le 18/11/2026. Sans elle, l'etape 2 chargeait tout le corpus : 31,8 Go de fills
     (8 464 251 lignes a 3 754 octets) et 20,4 Go de carnets (7 527 878 a 2 713 octets), ce qui a
@@ -2721,16 +2731,29 @@ def run_local_campaign(
             "economically_proven": False, "paper_read_only": True,
             "real_execution": False,
         }
-    pipeline = _load_pipeline()
-    say("Reconstruction des cycles leader OPEN/ADD/REDUCE/CLOSE")
-    entries, entries_audit = pipeline.charger_entrees_alpha_notional_fixe_avec_audit(
-        workspace, fenetre=tranche)
-    metaorders, meta_audit = cv.cluster_metaorders(entries)
-    entries = len(entries)            # seul le décompte sert encore : la liste (1,2 Go) est libérée
-    books, books_audit = cv.load_observed_books(
-        workspace, coins={str(row["coin"]) for row in metaorders},
-        depuis_ms=tranche[0] if tranche else None,
-        as_of_ms=tranche[1] if tranche else None)
+    if corpus_prepare is not None:
+        # PHASE 2 : relire des tranches deja preparees et allegees, au lieu de reconstruire. La
+        # logique vit dans `copy_vault_labo_deux_phases` : ce fichier est au plafond de lignes que
+        # son invariant d'architecture lui accorde. Les audits de reconstruction annoncent
+        # NOT_RECONSTRUCTED_PHASE_2 plutot que des compteurs a zero, qu'on lirait comme « rien
+        # trouve » au lieu de « pas reconstruit ».
+        from hl_observer.backtesting.copy_vault_labo_deux_phases import entrees_de_phase_2
+        metaorders, books, corpus_audit = entrees_de_phase_2(
+            corpus_prepare, tranche=tranche, dire=say)
+        entries_audit = {"status": "NOT_RECONSTRUCTED_PHASE_2", "corpus_prepare": corpus_audit}
+        meta_audit = books_audit = {"status": "NOT_RECONSTRUCTED_PHASE_2"}
+        entries = len(metaorders)
+    else:
+        pipeline = _load_pipeline()
+        say("Reconstruction des cycles leader OPEN/ADD/REDUCE/CLOSE")
+        entries, entries_audit = pipeline.charger_entrees_alpha_notional_fixe_avec_audit(
+            workspace, fenetre=tranche)
+        metaorders, meta_audit = cv.cluster_metaorders(entries)
+        entries = len(entries)        # seul le décompte sert encore : la liste (1,2 Go) est libérée
+        books, books_audit = cv.load_observed_books(
+            workspace, coins={str(row["coin"]) for row in metaorders},
+            depuis_ms=tranche[0] if tranche else None,
+            as_of_ms=tranche[1] if tranche else None)
     leader_review_persistence: dict[str, Any] = {"status": "NOT_REQUESTED"}
     leader_quality_train: dict[str, Any] = {}
     if leader_review_ledger_path is not None:
