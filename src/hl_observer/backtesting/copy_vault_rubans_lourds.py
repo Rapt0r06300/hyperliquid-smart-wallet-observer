@@ -153,7 +153,7 @@ def lignes_safe(assets: Sequence[tuple[Path, Mapping[str, Any]]], *, familles: M
     """
     compteurs = compteurs if compteurs is not None else {}
     for cle in ("raw_frames", "historical_snapshot_shards", "historical_fill_observations",
-                "wrapper_rejections"):
+                "wrapper_rejections", "lignes_rendues"):
         compteurs.setdefault(cle, 0)
     for chemin, asset in assets:
         famille = str(asset.get("family") or "")
@@ -172,11 +172,13 @@ def lignes_safe(assets: Sequence[tuple[Path, Mapping[str, Any]]], *, familles: M
                             and isinstance(brut, list)):
                         compteurs["historical_fill_observations"] += len(brut)
                 if rend_une_liste:
-                    produit = transformer(enveloppe, family=famille, audit=payload_audit, **meta)
-                    yield from produit
+                    for ligne in transformer(enveloppe, family=famille, audit=payload_audit, **meta):
+                        compteurs["lignes_rendues"] += 1
+                        yield ligne
                 else:
                     ligne = transformer(enveloppe, **meta)
                     if ligne:
+                        compteurs["lignes_rendues"] += 1
                         yield ligne
                     elif payload_audit is not None:
                         payload_audit["INVALID_OR_NONCAUSAL_L2_REJECTED"] += 1
@@ -249,7 +251,7 @@ def ecrire_rubans_lourds(dossier: str | Path, *, fabrique_fills: Callable[[], It
     dossier = Path(dossier)
     temporaire = Path(dossier_temporaire) if dossier_temporaire is not None else dossier / ".tri"
     selection_fills = RT.gagnants(fabrique_fills, cle_identite=identite_fill,
-                                  rang_preference=preference_fill)
+                                  rang_preference=preference_fill, cle_tri=tri_fill)
     bilans: dict[str, Any] = {"schema_version": SCHEMA, "fills": {}, "carnets": {}}
     # Les deux rubans de fills s'écrivent en UNE passe : relire onze millions de lignes pour
     # chacun coûtait 709 s de plus à la mesure du 18/11/2026.
@@ -263,12 +265,22 @@ def ecrire_rubans_lourds(dossier: str | Path, *, fabrique_fills: Callable[[], It
         dossier_temporaire=temporaire, lignes_par_morceau=lignes_par_morceau)
     for chemin, _garder in cibles:
         bilans["fills"][chemin.name] = par_chemin[str(chemin)]
+    selection_carnets = RT.gagnants(fabrique_carnets, cle_identite=identite_carnet,
+                                    rang_preference=preference_carnet, cle_tri=tri_carnet)
     bilans["carnets"][RUBAN_CARNETS] = RT.ecrire_ruban_trie(
         dossier / RUBAN_CARNETS, fabrique_carnets, cle_tri=tri_carnet,
         cle_identite=identite_carnet, rang_preference=preference_carnet,
-        dossier_temporaire=temporaire, lignes_par_morceau=lignes_par_morceau)
+        selection=selection_carnets, dossier_temporaire=temporaire,
+        lignes_par_morceau=lignes_par_morceau)
     bilans["identites_fills"] = selection_fills["identites"]
     bilans["doublons_fills"] = selection_fills["doublons"]
+    bilans["identites_carnets"] = selection_carnets["identites"]
+    bilans["doublons_carnets"] = selection_carnets["doublons"]
+    # Bornes sur l'ENSEMBLE dedoublonne, y compris les lignes qui n'entrent dans aucun ruban.
+    bilans["fill_debut_ms"] = selection_fills["cle_min"][0] if selection_fills["cle_min"] else None
+    bilans["fill_fin_ms"] = selection_fills["cle_max"][0] if selection_fills["cle_max"] else None
+    bilans["carnet_debut_ms"] = selection_carnets["cle_min"][0] if selection_carnets["cle_min"] else None
+    bilans["carnet_fin_ms"] = selection_carnets["cle_max"][0] if selection_carnets["cle_max"] else None
     return bilans
 
 

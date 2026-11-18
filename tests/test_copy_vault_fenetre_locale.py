@@ -227,8 +227,10 @@ def test_lecture_INTERROMPUE_le_verdict_doit_le_dire():
 def test_le_labo_demande_la_fenetre_et_la_publie():
     source = inspect.getsource(LAB)
     assert "fenetre_locale = _FENETRE_LOCALE.choisir_la_fenetre(repository_root)" in source
-    assert 'depuis_ms=fenetre_locale["depuis_ms"])' in source
+    assert 'depuis_ms=fenetre_locale["depuis_ms"]' in source
     assert 'coffre_local_resume["fenetre_choisie"] = fenetre_locale' in source
+    # 18/11 : le pont ne materialise plus les familles lourdes, le labo les lit en flux
+    assert "garder_replay=False" in source
 
 
 def test_la_console_ajoute_la_mention_au_verdict():

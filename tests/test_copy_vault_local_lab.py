@@ -289,7 +289,7 @@ def test_local_campaign_resume_preserves_reserved_attempt_without_reusing_candid
 
     class Pipeline:
         @staticmethod
-        def charger_entrees_alpha_notional_fixe_avec_audit(_workspace):
+        def charger_entrees_alpha_notional_fixe_avec_audit(_workspace, **_kw):
             return [], {
                 "live_fill_rows": 10,
                 "causal_live_fill_rows": 10,
@@ -1262,7 +1262,7 @@ def test_local_campaign_explains_insufficient_signal_days_before_search(
 
     class Pipeline:
         @staticmethod
-        def charger_entrees_alpha_notional_fixe_avec_audit(_workspace):
+        def charger_entrees_alpha_notional_fixe_avec_audit(_workspace, **_kw):
             return [], {}
 
         @staticmethod
@@ -1380,7 +1380,7 @@ def test_local_campaign_identifies_absent_live_forward_fills(tmp_path: Path, mon
 
     class Pipeline:
         @staticmethod
-        def charger_entrees_alpha_notional_fixe_avec_audit(_workspace):
+        def charger_entrees_alpha_notional_fixe_avec_audit(_workspace, **_kw):
             return [], {"live_fill_rows": 0, "causal_live_fill_rows": 0, "historical_fill_rows": 1}
 
     monkeypatch.setattr(local_lab, "_load_pipeline", lambda: Pipeline())

@@ -530,14 +530,27 @@ def test_les_DECOMPTES_sont_identiques_que_les_lignes_soient_gardees_ou_non(tmp_
     assert garde["fills_backfill"] == 1 and garde["carnets"] == 2
 
 
-def test_SANS_materialisation_aucune_ligne_n_est_tenue_en_memoire(tmp_path):
+def test_SANS_materialisation_les_fills_et_carnets_ne_sont_pas_tenus(tmp_path):
     _coffre_de_replay(tmp_path)
     compte = _charger_tier_local(tmp_path, garder_replay=False)
-    assert compte["_fills"] == [] and compte["_books"] == [] and compte["_bbo"] == []
+    assert compte["_fills"] == [] and compte["_books"] == []
     assert compte["replay_garde_en_memoire"] is False
     garde = _charger_tier_local(tmp_path)
     assert len(garde["_fills"]) == 3 and len(garde["_books"]) == 2
     assert garde["replay_garde_en_memoire"] is True
+
+
+def test_les_COTATIONS_restent_materialisees_meme_sans_le_reste(tmp_path):
+    """REGRESSION du 18/11 : coupees avec les autres, elles vidaient le ruban du cout de spread
+    (481,2 Mo -> 0,0 Mo sur les rubans reellement produits)."""
+    base = 1_799_000_000_000
+    cotations = [{"coin": "ETH", "received_at_ms": base + i, "exchange_ts_ms": base + i - 1,
+                  "bid_px": 1.0, "ask_px": 2.0} for i in range(3)]
+    rel = _ecrire_shard(tmp_path, "bbo", cotations, nom="cot")
+    _index(tmp_path, [{"famille": "bbo", "shard": rel, "sha256": _sha(tmp_path, rel), "deposes": 3}])
+    compte = _charger_tier_local(tmp_path, garder_replay=False)
+    assert len(compte["_bbo"]) == 3, "le ruban du cout de spread serait vide"
+    assert compte["bbo"] == 3 and compte["bbo_toujours_materialise"] is True
 
 
 def test_le_PLAFOND_de_lignes_compte_ce_qui_est_LU_et_non_ce_qui_est_garde(tmp_path):
