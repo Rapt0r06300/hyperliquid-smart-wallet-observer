@@ -183,12 +183,19 @@ def _charger_tier_local(
     famille sans etre gardes en memoire. Le labo principal ne lit que leur decompte ; les garder
     occupait plusieurs gigaoctets pour rien.
 
-    ``garder_replay=False`` : MEME TRAITEMENT POUR LES FAMILLES DE REPLAY (fills, carnets, BBO).
+    ``garder_replay=False`` : MEME TRAITEMENT POUR LES FILLS ET LES CARNETS.
     18/11/2026 — mesure sur la fenetre du 13/11 : 11 698 999 fills et 7 509 693 carnets, soit
     ~60,5 Go de dictionnaires Python pour 32 Go de machine. Le labo les lit desormais en flux
     (``copy_vault_rubans_lourds``) et n'a plus besoin que des DECOMPTES : les garder ici ferait
     payer deux fois la meme memoire, et c'est elle qui arretait le chargement a 452 shards sur
     5 570 en annoncant ``MEMOIRE_CRITIQUE``.
+
+    LES COTATIONS BBO RESTENT MATERIALISEES, et ce n'est pas un oubli. Leur deduplication est a
+    ETAT (une cotation par coin et par seconde, avec adaptation des lignes du collecteur) : la
+    porter en flux demande plus qu'un changement de boucle. Elles pesent 481 Mo sur disque, loin
+    des 60 Go des deux autres familles. Le 18/11, les avoir coupees avec elles a vide le ruban
+    ``copy_vault_bbo_tape.jsonl`` dont le labo tire le cout de spread — regression mesuree sur les
+    rubans produits, puis corrigee ici.
     """
     import gzip as _gzip
 
@@ -384,8 +391,7 @@ def _charger_tier_local(
                                 and row.get("coin") and row.get("bid_px") is not None
                                 and row.get("ask_px") is not None):
                             comptes_replay["bbo"] += 1
-                            if garder_replay:
-                                _bbo.append(row)
+                            _bbo.append(row)      # cotations TOUJOURS materialisees : voir la docstring
                         else:
                             adaptee = _cotation_collecteur_vers_labo(row)
                             if adaptee is not None:
@@ -395,8 +401,7 @@ def _charger_tier_local(
                                 else:
                                     _bbo_secondes.add(seconde)
                                     comptes_replay["bbo"] += 1
-                                    if garder_replay:
-                                        _bbo.append(adaptee)
+                                    _bbo.append(adaptee)
                                     bbo_adaptees += 1
                     elif est_signal:
                         # Signal de contexte LOCAL : tout enregistrement certifié avec
@@ -445,6 +450,8 @@ def _charger_tier_local(
         "carnets": comptes_replay["carnets"], "bbo": comptes_replay["bbo"],
         # Les lignes sont-elles REELLEMENT en memoire, ou seulement comptees ?
         "replay_garde_en_memoire": garder_replay,
+        # Les cotations ne sont jamais coupees : le ruban du cout de spread en depend.
+        "bbo_toujours_materialise": True,
         "bbo_adaptees": bbo_adaptees, "bbo_denses_non_retenues": bbo_denses_non_retenues,
         "signaux_par_famille": dict(sorted(signaux_comptes.items())),
         "signaux_total": sum(signaux_comptes.values()),

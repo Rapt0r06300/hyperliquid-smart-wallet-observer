@@ -59,19 +59,33 @@ def load_observed_books(
     *,
     coins: Iterable[str] | None = None,
     as_of_ms: int | None = None,
+    depuis_ms: int | None = None,
     relative_path: str = "runtime/data/carnet_venues.jsonl",
     causal_relative_path: str = "runtime/data/copy_vault_l2_tape.jsonl",
     bbo_relative_path: str = "runtime/data/copy_vault_bbo_tape.jsonl",
 ) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any]]:
-    """Load books visible no later than ``as_of_ms``.
+    """Load books visible no later than ``as_of_ms``, and no earlier than ``depuis_ms``.
 
     ``as_of_ms`` is an optional causal cutoff applied before rows enter the
     returned collection.  It is deliberately enforced at the source boundary
     so callers cannot accidentally use a future book when they forget a later
     filter.  For causal L2 rows the cutoff is the reception timestamp.
+
+    ``depuis_ms`` est la borne BASSE, symetrique, ajoutee le 18/11/2026. Mesure sur le ruban L2
+    reellement produit : 7 527 878 carnets sur douze jours, dont SIX denses (13 au 18/11, 1,3 a
+    1,8 million chacun) -- exactement le nombre de jours que le labo exige pour conclure. Un jour
+    tient en memoire, les six ensemble non (~28 Go), et c'est ce chargement global qui a fait
+    couper le rejeu a l'etape 2. Sans borne basse, on pouvait demander « avant tel instant »,
+    jamais « entre deux instants » : conduire le replay jour par jour etait impossible.
+
+    Les deux bornes sont INCLUSIVES et appliquees au meme endroit, a la frontiere de la source.
     """
     if as_of_ms is not None:
         as_of_ms = _required_epoch_ms(as_of_ms, "as_of_ms")
+    if depuis_ms is not None:
+        depuis_ms = _required_epoch_ms(depuis_ms, "depuis_ms")
+    if as_of_ms is not None and depuis_ms is not None and depuis_ms > as_of_ms:
+        raise ValueError("fenetre de carnets vide : depuis_ms est posterieur a as_of_ms")
     oublier_les_index()   # nouveau chargement : aucun index (ni carnet) du corpus précédent ne reste en mémoire
 
     resolved_root = Path(root).resolve()
@@ -139,6 +153,7 @@ def load_observed_books(
     by_coin: dict[str, list[dict[str, Any]]] = {}
     invalid = 0
     future_rows_rejected = 0
+    past_rows_rejected = 0
     rows_read = 0
     duplicate_rows = 0
     checkpoint_protocol_mismatches = 0
@@ -184,7 +199,7 @@ def load_observed_books(
         source_manifest_verified: bool | None = None,
         source_replay_compatible: bool | None = None,
     ) -> None:
-        nonlocal invalid, duplicate_rows, future_rows_rejected
+        nonlocal invalid, duplicate_rows, future_rows_rejected, past_rows_rejected
         if (
             not coin
             or ts_ms <= 0
@@ -197,6 +212,9 @@ def load_observed_books(
             return
         if as_of_ms is not None and ts_ms > as_of_ms:
             future_rows_rejected += 1
+            return
+        if depuis_ms is not None and ts_ms < depuis_ms:
+            past_rows_rejected += 1
             return
         identity = (
             ("checkpoint", checkpoint_id)
@@ -704,6 +722,8 @@ def load_observed_books(
         "rows_read": rows_read,
         "bbo_rows_read": bbo_rows_read,
         "as_of_ms": as_of_ms,
+        "depuis_ms": depuis_ms,
+        "past_rows_rejected": past_rows_rejected,
         "future_rows_rejected": future_rows_rejected,
         "valid_rows": valid,
         "invalid_rows": invalid,

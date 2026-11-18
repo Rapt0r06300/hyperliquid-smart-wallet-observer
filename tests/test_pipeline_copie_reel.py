@@ -238,7 +238,9 @@ def test_les_cycles_ne_sont_reconstruits_qu_une_fois_tant_que_les_entrees_ne_cha
     (data / "vault_fills_live.jsonl").write_text(json.dumps(fill), encoding="utf-8")
     appels = []
     reel = PR._reconstruire_episodes_canoniques
-    monkeypatch.setattr(PR, "_reconstruire_episodes_canoniques", lambda root: appels.append(1) or reel(root))
+    monkeypatch.setattr(
+        PR, "_reconstruire_episodes_canoniques",
+        lambda root, **kw: appels.append(1) or reel(root, **kw))
 
     entrees, _ = PR.charger_entrees_alpha_notional_fixe_avec_audit(tmp_path)
     cycles, audit = PR.charger_evenements_lifecycle_avec_audit(tmp_path)

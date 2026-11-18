@@ -13,19 +13,54 @@ profit.
 
 | # | Chantier | État sur le HEAD actuel | Preuve |
 |---|---|---|---|
-| 1 | Tunnel causal signal → trade | **FAIT, et re-mesuré sur le coffre** | 87 844 / 88 131 = 99,7 % (13→17/11), 31 leaders sur 31 |
+| 1 | Tunnel causal signal → trade | **FAIT, re-mesuré le 18/11 sur le HEAD** | 87 844 / 88 131 = 99,7 % (13→17/11), 31 leaders sur 31 ; **re-joué le 18/11 sur les rubans du jour (plafonds × 7, 715 581 carnets sur 0,6 j) : 9 366 / 10 422 = 89,9 % jusqu'à la sortie observée**, 12 leaders sur 12 à chaîne complète, chaque refus avec son motif unique (`PAS_UNE_OUVERTURE` 11 754, `HORS_FENETRE` 944, `AUCUN_CARNET` 66, `ENTRY_BOOK_ABSENT` 40, `EXIT_CENSURE` 6), 0 saut d'horloge |
 | 2 | Référence L2 pré-signal + trous | **FAIT, durci le 17/11** | liaison pré-signal + `copy_vault_gap_windows` (37 tests) : un incident = un intervalle (302 fenêtres → 1, le journal ne déborde plus), arrêt de l'écrivain déclaré comme trou, sauts d'horloge détectés et gardés dans le tunnel |
 | 3 | Collecteurs / orchestration | **corrigé le 17/11, effet à mesurer** | 10 slots `userFills` aux signaux copiables ; recul sur refus unifié sur 3 sites ; **le direct ratait 61,0 % des fills des rafales** (début jamais vu) → attribution des emplacements par l'alerte du poll, dans l'ordre du labo (`slots_userfills`, 48 tests dont le vrai superviseur exécuté hors ligne) ; prend effet au prochain démarrage du collecteur |
 | 4 | Coffre / scelleur / certificateur | **FAIT** | réindexage 370/370 shards, 22 familles COMPLETE |
-| 5 | Audit du labo | **rejoué le 17/11 ; limite mémoire identifiée** | réplication 350 USD rejouée avec prix observés, placebo, marge de bruit et capacité ; persistance rejouée ; détention mesurée ; 23 lois au registre. Reste : ≥ 20 jours indépendants (observation), preuve SAFE (externe) |
+| 5 | Audit du labo | **LIMITE MÉMOIRE LEVÉE le 18/11, aux deux étapes** | étape 1 : 8 754 210 fills et 7 527 878 carnets matérialisés avec **1,0 Go** de pic (× 7,2 et × 9,8) ; étape 2 : n'importe quelle tranche de temps lisible à coût borné (**1,54 Go** de fills + **1,27 Go** de carnets pour le 18/11, contre ~52 Go pour le corpus). Réplication 350 USD rejouée avec prix observés, placebo, marge de bruit et capacité ; persistance rejouée ; détention mesurée ; 23 lois au registre. Reste : ≥ 20 jours indépendants (observation), preuve SAFE (externe) |
 | 6 | Edge post-observation | **MESURÉ, NÉGATIF** | copie rapide : +0,2 bps (borne haute) contre 9,0 bps de frais ; miroir d'épisode : −12,2 bps net. Détention réelle des leaders mesurée (médiane 46,6 min) — elle ne rouvre aucune de ces deux lois, déjà testées à 1 h, 4 h, 24 h et à la clôture |
 | 7 | Moteur paper | **revalidé** | suites moteur / ledger / positions / simulation / UI vertes dans la suite complète (18 940) ; frais incorporés au prix de fill (pas de double compte) ; gel v21 **correctement rejeté** (600 USD de notionnel pour 350 USD sans levier) : aucun gel admissible, le moteur ne s'en fabrique pas |
 | 8 | Preuve / certificateur / scoreboard | **CLOS le 18/11 : 3 120/3 120 preuves valides** | contrat de l'instantané aligné sur le capital réel (il exigeait 200 USD) ; alerte de fraîcheur lue dans les faits ; reçu `AUD-044` lié à l'arbre de travail : commit puis rejeu de la tâche auditée |
-| 9 | Matrice de consommation exhaustive | **FAIT, complété** | `tools/matrice_coffre.py` (9 tests) : familles, réconciliation LOCAL → SAFE, mode `--roles` |
+| 9 | Matrice de consommation exhaustive | **FAIT, re-jouée le 18/11 sur le HEAD** | `tools/matrice_coffre.py` (9 tests) ; **run du 18/11 : 22 familles, `NON_CHARGEE` = 0, tous les shards indexés présents sur le disque**, réconciliation LOCAL → SAFE publiée avec son écart (premier jour liable 13/11), mode `--roles` |
 | 10 | Consommation intelligente du coffre | **FAIT, clos** | `coffre_tranches` + `plan_de_fouille` + recensement ; **22 familles : consommées, exclues avec motif, ou à rôle mesuré — plus aucun état d'attente** |
 | 11 | Audit exclusions / densité | **FAIT** | exclusions mesurées avec dénominateur |
 | 12 | Réconciliation LOCAL → SAFE | **mesuré ; bloqué par une action externe** | SAFE : 15 456 shards, dernier tag du 18/10, **5 shards de fills** ; la fenêtre causalement complète (13/11+) n'existe qu'en LOCAL ; catalogue local en retard de 13 420 fichiers |
 | 13 | Parité et fraîcheur bout en bout | **FAIT, durci** | `ops/fraicheur_preuve.py` lit les faits (12 tests) : labo −118,9 h, SAFE −734,3 h |
+
+## Combien de journées le labo doit-il lire ? Six, et non onze
+
+`choisir_la_fenetre` sonde **11 jours** (07 → 17/11, la fenêtre à carnets) mais part du
+**premier jour liable, le 13/11** : avant cette date, les carnets n'ont pas l'identité de connexion
+qui permet de lier une référence pré-signal à la même session d'observation. Les cinq premiers jours
+sont donc écartés **volontairement** — mesurables peut-être, prouvables non.
+
+Le corpus à lire est donc de **six journées**, et c'est exactement ce que portent les rubans
+(8 464 251 fills, 7 527 878 carnets). Depuis l'itération 23, ces six journées sont lisibles en
+**19 tranches de ~2,5 Go**. Attendre onze journées du labo serait attendre qu'il lise des données
+dont il a lui-même établi qu'elles ne peuvent pas servir de preuve.
+
+## Réconciliation bout en bout, re-jouée le 18/11 sur le HEAD final
+
+Les deux instruments ont été exécutés après les corrections du jour, pour que leur verdict porte
+sur le code en place et non sur celui d'hier.
+
+**Matrice coffre → labo** — 22 familles, **aucune `NON_CHARGEE`** : 3 en `REPLAY_PNL`, 2 en
+`CARNETS`, 8 en `CONTEXTE`, 6 à `ROLE_MESURE`, 3 exclues avec motif. Tous les shards indexés sont
+présents sur le disque. La réconciliation LOCAL → SAFE est publiée avec son écart : SAFE porte
+15 456 shards mais son dernier tag est du 18/10, LOCAL est en avance de 31,4 jours, et le premier
+jour où une référence pré-signal est liable est le **13/11**. L'outil déclare lui-même que rien de
+ce que le labo mesure dans cette fenêtre n'est prouvable — c'est l'écart externe, pas un défaut.
+
+**Tunnel signal → trade → sortie** — re-joué avec des plafonds sept fois plus larges (715 581
+carnets, 180 coins, 0,6 jour) : **9 366 des 10 422 signaux d'ouverture vont jusqu'à la sortie
+observée, soit 89,9 %**, et les 12 leaders ont tous une chaîne complète. Chaque refus est compté
+une seule fois, au premier étage qui le rejette. Aucun saut d'horloge, ni en avant ni en arrière.
+L'âge médian du carnet de référence est de 6 354 ms. La fraîcheur est déclarée **périmée** (le
+dernier rapport du labo a 119,9 h de retard) : un rapport vert sur des données antérieures ne
+qualifie pas l'état présent, et l'outil le dit au lieu de le taire.
+
+À comparer au point de départ : le 12/11, le labo annonçait **0 trade exécutable sur 98 138
+signaux**, sans pouvoir dire où le tunnel se fermait.
 
 ## Itérations
 
@@ -53,6 +88,16 @@ profit.
 | 16 quater | **Le « blocage externe » du catalogue n'était pas externe** : 157 manifestes de campagne absents du disque et 61 amputés (historique = sous-ensemble strict de Git, 0 entrée locale, rien écrit depuis 110,9 h) | sauvegarde hors dépôt, puis restauration de `catalog/campaigns` depuis le commit : 4 947 fichiers, 0 absent, 0 différent | `test_sync_complete_clone.py` 78 verts ; les 8 derniers reçus rafraîchis | **3 120 / 3 120 preuves valides sur le HEAD (100 %)**, 0 périmé, 0 en échec |
 | 17 | **Le labo tient 3,2 M de lignes en mémoire seulement pour les trier et les écrire**, alors que la phase suivante relit les rubans depuis le disque — d'où `MEMOIRE_CRITIQUE` à 452 shards sur 5 570 et « trop peu de jours » | `rubans_tri_externe.py` : deux passes, morceaux triés fusionnés en flux, **octets identiques** à l'approche en mémoire ; refuse d'écrire si la source bouge | 21 tests dont 300 tirages aléatoires comparant les SHA des deux chemins ; 2 pièges trouvés avant branchement (ordre d'insertion après remplacement, `1 == 1.0` comme clé de dict) | **mesure rendue : 32,2 Go → 1,65 Go, gain 19,5 ×** (11,7 M lignes, 9,3 M identités, 3 458 o par ligne en mémoire). Le labo tentait de tenir 32 Go sur une machine de 32 : branchement justifié |
 | 17 bis | Le branchement exigeait des briques au comportement **identique au détail près** à celui du labo | `copy_vault_rubans_lourds.py` (générateurs des deux tiers, trois rubans lourds) + pont LOCAL qui **compte sans matérialiser** (`garder_replay=False`) | 59 tests ; **5 pièges trouvés par les tests avant branchement** : ordre d'insertion après remplacement, `1 == 1.0`, LOCAL ne déloge pas SAFE, fill non causal dans aucun ruban, `isSnapshot` absent | reste la substitution dans `materialize_safe_workspace`, puis le rejeu du labo |
+| 18 | Substitution faite dans `materialize_safe_workspace` | les fills et carnets sont lus en flux, plus de dictionnaire | 123 verts (labo, pont, rubans, invariants) ; **rejeu réel : 1 210 121 → 8 754 210 fills (× 7,2) et 766 876 → 7 527 878 carnets (× 9,8), étape 1 VERTE avec 1,0 Go au lieu de 60** | **le goulot s'est déplacé à l'étape 2** : la reconstruction des épisodes charge à son tour 13,9 Go — même nature, même remède |
+| 18 bis | **Régression introduite par moi** : `garder_replay=False` coupait aussi les cotations BBO, dont le labo tire le coût de spread — ruban passé de 481,2 Mo à **0,0 Mo** | les cotations restent matérialisées (déduplication à état, 481 Mo seulement) ; test de verrouillage | 97 verts | trouvée en comparant la TAILLE DES FICHIERS produits, pas les compteurs ni le verdict |
+| 19 | **`load_observed_books` n'avait que la borne haute** : « avant tel instant », jamais « entre deux ». Conduire le replay jour par jour était impossible, et les six jours denses demandent ~28 Go ensemble | borne `depuis_ms` à la frontière de la source, carnets écartés comptés, fenêtre publiée, fenêtre vide refusée. Approche « liste paresseuse » écartée : `liste_des_carnets` copie tout ce qui n'est pas une vraie `list`, sur le chemin chaud | 8 tests + 247 verts avec les consommateurs ; **vérifié sur le corpus réel : un jour = 1,27 Go** (468 073 carnets retenus, 7 059 804 écartés) | le labo peut maintenant être conduit jour par jour : reste l'agrégation sans moyenne de moyennes |
+| 20 | **L'étape 2 demandait ~60 Go** : 31,8 Go de fills (8 464 251 × 3 754 o) + 28,6 Go de carnets, et `_episodes_canoniques` mémorisait le tout | fenêtre `(depuis_ms, jusqu_a_ms)` sur les fills, appliquée aux DEUX sources à la frontière ; **la fenêtre entre dans la signature de mémorisation** (sinon la 2ᵉ journée recevrait les épisodes de la 1ʳᵉ : faux et vert) ; `decoupe_sure` publié | 10 tests + 28 verts ; **mesuré : 100,00 % des 8 464 251 fills portent `startPosition`** (0 des 4 396 paires sans) donc la découpe est licite ; **un jour = 1,54 Go**, soit **2,8 Go/jour avec les carnets** contre 60 Go | reste à faire boucler le labo sur les 6 journées et à agréger sans moyenne de moyennes |
+| 21 | **De quelle taille doit être la tranche ?** Je partais sur « un jour » | mesure de la répartition réelle : le 13/11 porte 2 172 496 fills (4,6 × le 18/11) → ~7,03 Go, plus 4,8 Go de carnets = **~11,8 Go pour cette seule journée**. Une découpe calendaire serait morte sur la 1ʳᵉ journée | les fenêtres livrées étant en millisecondes, la granularité est libre : la tranche doit se régler sur `budget_ram`, comme `plafond_listes` | **rectification** : mes « 28,6 Go » de carnets étaient une estimation par analogie avec les fills ; la mesure donne 2 713 o/carnet, soit 20,4 Go |
+| 21 bis | Que doit-il survivre à une tranche ? | 56 516 métaordres par journée = 0,93 Go, soit ~5,6 Go pour six journées : accumuler puis explorer une fois ne tient pas non plus | **l'exploration doit avoir lieu DANS la tranche**, seuls les résultats agrégés survivent | poids d'un métaordre : 88 % `member_events`, 11 % `member_event_ids` (dérivable mais **consommé** par 3 modules et 5 tests — non touché, à traiter avec la boucle) |
+| 22 | Le labo ne savait pas lire une tranche : les deux chargeurs de l'étape 2 prenaient tout | `run_local_campaign(..., tranche=(depuis_ms, jusqu_a_ms))`, descendue aux DEUX chargeurs ; sans tranche, les deux bornes valent `None` | 5 tests dont **2 fonctionnels** (doubles capturant les arguments reçus) + 1 de non-régression ; 55 verts | le labo ne boucle PAS lui-même : l'agrégation des tranches appartient à un conducteur séparé, pour ne pas enfouir une moyenne de moyennes dans le chemin économique |
+| 23 | Il manquait de quoi lire les 6 journées : le labo savait traiter une tranche, personne ne les enchaînait | `agregation_tranches` (module pur, 283 l.) + `tools/conduire_labo_par_tranches.py` : densité mesurée en flux, découpage sous budget, conduite tranche par tranche, agrégat qui refuse les 4 mensonges (moyenne de moyennes, trou→zéro, verdict optimiste, total sans périmètre) | 50 verts ; **plan réel : 19 tranches, couverture continue sur 129,0 h, la plus chargée à 498 039 fills, 0 trou, 0 recouvrement** | **le corpus entier est lisible en 19 passes de ~2,5 Go** au lieu d'une de ~52 Go |
+| 23 bis | **Défaut dans MON module**, trouvé par le test de la conduite : un total était déclaré complet alors qu'une tranche entière manquait | `_marquer_incomplet` dans `combiner` — seul lui connaît le nombre de tranches ATTENDUES ; le total reste lisible mais déclaré incomplet | 2 tests dédiés, dont la non-régression sans tranche manquante | 3ᵉ fois ce jour que le piège prend la même forme : **une mesure calculée sur ce qui est présent ignore ce qui est absent** |
+| 24 | La découpe était prouvée sur fixtures, pas sur le corpus | comparaison des deux dernières tranches du plan réel, séparées puis en union | **T18 (472 389) + T19 (167 469) = 639 858 ; le même intervalle d'un coup = 639 858 ; intersection 0 ; 0 perdu, 0 inventé** | lire le corpus en 19 passes donne exactement le même ensemble qu'en une — ce qu'aucun test sur fixtures ne pouvait établir |
 
 ## Réconciliation de bout en bout : signal → trade → ledger → preuve
 
@@ -91,7 +136,7 @@ carnets, 8 en contexte, 6 à rôle mesuré, 3 exclues avec motif (Cross-Venue pa
 | Stabilité de la page `userFills` | **corrigé, second redémarrage à décider** | en production : 11 cycles reconduits sur 23. Cause principale trouvée et corrigée (deux candidats hors poll alternaient sur un emplacement) ; reste l'alternance du 2ᵉ leader « retenu » du classement, antérieure à ce travail |
 | Faux verts parmi les 1 441 tests exécutés derrière la fuite | **borné et vérifié** | seuls 30 fichiers (129 tests) atteignent du code qui lance un sous-processus : rejoués, 140 verts, 0 rouge. Critère statique : la suite complète reste la seule preuve totale |
 | ~~Confirmation d'ensemble de la suite~~ | **FAITE le 18/11 : 19 086 verts, 0 ROUGE** | 19 lots sur 19 ; le lot portant `rig_020` rejoué après la remise en état des reçus (1 008 verts) |
-| Le labo ne tenait pas le corpus en mémoire (32,2 Go mesurés) | **brique livrée, branchement à faire** | `rubans_tri_externe.py` prouvé (21 tests, 300 tirages byte-à-byte) et gain mesuré **19,5 ×** : 32,2 Go → 1,65 Go. Reste à brancher dans `materialize_safe_workspace` : plan détaillé et 4 pièges au journal, critère = comparer les SHA des deux chemins sur un coffre synthétique. Demande la machine libre, pas une intervention externe |
+| ~~Le labo ne tenait pas le corpus en mémoire~~ | **BRANCHÉ le 18/11** | `rubans_tri_externe.py` prouvé (21 tests, 300 tirages byte-à-byte) et gain mesuré **19,5 ×** : 32,2 Go → 1,65 Go. Branché et vérifié par rejeu réel : × 7,2 fills, × 9,8 carnets, 1,0 Go au lieu de 60. **Borne basse livrée le 18/11** : un jour = 1,27 Go mesuré sur le ruban réel. Reste à faire évaluer le labo jour par jour et à agréger les six jours sans moyenne de moyennes |
 | Correctif du collecteur d'overshoots | **redémarrage** | prend effet au prochain démarrage du collecteur ; non redémarré pour ne pas interrompre la collecte |
 | `AGENTS.md` : « 5 lanceurs à la racine » contre 12 enregistrés dans le code | **arbitrage** | à l'opérateur de dire lequel fait foi |
 

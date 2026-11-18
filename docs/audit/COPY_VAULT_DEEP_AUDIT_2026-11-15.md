@@ -2453,3 +2453,464 @@ réessayer. Corrigé, puis repris : les douze ont tourné.
 C'est la première fois de cette mission que la suite complète passe **sans aucun rouge**, et elle
 le fait sur un HEAD où les 3 120 preuves de la roadmap sont valides.
 
+---
+
+## 18/11/2026 — ITÉRATION 18 : le labo lit enfin le coffre, et le goulot se déplace
+
+Substitution faite dans `materialize_safe_workspace` : les fills et les carnets ne passent plus par
+un dictionnaire, ils sont lus deux fois en flux et écrits par `copy_vault_rubans_lourds`. Les cinq
+familles légères gardent leur chemin. Rejeu réel du labo sur le coffre, fenêtre du 13/11.
+
+### Avant / après, sur le même coffre
+
+| | avant (17/11) | après (18/11) |
+|---|---|---|
+| fills matérialisés | 1 210 121 | **8 754 210** (× 7,2) |
+| carnets L2 matérialisés | 766 876 | **7 527 878** (× 9,8) |
+| mémoire du processus à l'étape 1 | arrêt en `MEMOIRE_CRITIQUE` | **1,0 Go**, étape 1 **VERTE** |
+| shards LOCAL lus | 452 sur 5 570 | toute la fenêtre |
+
+L'étape 1 — l'audit SAFE, la lecture des deux tiers et la production des rubans — passe désormais
+en entier, avec **un gigaoctet** là où l'ancien chemin en demandait soixante. Le labo a enchaîné
+sur l'étape 2.
+
+### Le goulot s'est déplacé, et c'est à lire tel quel
+
+Pendant l'étape 2 (« reconstruction des épisodes et des signaux leader »), l'arbre Python est monté
+à **13,9 Go** et le harnais a coupé l'enveloppe du rejeu pour mémoire système critique. J'ai arrêté
+mes propres processus pour rendre la machine.
+
+Ce n'est pas un échec de la correction : c'est la conséquence directe de son succès. Le labo reçoit
+maintenant **sept fois plus de signaux**, et l'étape qui les reconstruit les charge à son tour en
+mémoire — `charger_entrees_alpha_notional_fixe_avec_audit(workspace)` et la reconstruction des
+cycles relisent les rubans intégralement.
+
+**Le prochain goulot est donc identifié, localisé et de même nature que celui qu'on vient de
+lever** : la reconstruction des épisodes doit, elle aussi, travailler par fenêtres ou en flux. La
+brique existe désormais (`rubans_tri_externe`, `plan_de_fouille`) et le contrat de vérification est
+le même : comparer les sorties avant/après sur un corpus réduit.
+
+### Un piège de méthode, pour mémoire
+
+Pour arrêter le labo, mon script cherchait les processus dont la ligne de commande contient
+`alina_quant_lab_console` — or **sa propre ligne de commande la contenait** : il s'est tué lui-même,
+deux fois (code 15), avant que je comprenne. Un filtre de processus doit exclure son propre arbre et
+viser le SCRIPT (premier argument), pas une sous-chaîne de la commande.
+
+**Tests** : 123 verts sur les suites du labo, du pont, des rubans et des invariants du dépôt — dont
+celui qui a refusé un `except: pass` silencieux que j'avais introduit dans le nettoyage des
+fichiers temporaires (corrigé en journalisant l'échec).
+
+### Ce que les rubans PRODUITS disent, et la régression qu'ils ont dénoncée
+
+Les rubans du workspace du labo, avant et après la substitution :
+
+| ruban | 17/11 | 18/11 |
+|---|---|---|
+| `vault_fills_live.jsonl` | 796,1 Mo | **7 120,6 Mo** (× 8,9) |
+| `copy_vault_l2_tape.jsonl` | 620,3 Mo | **6 010,9 Mo** (× 9,7) |
+| `copy_vault_bbo_tape.jsonl` | 481,2 Mo | **0,0 Mo** ← régression |
+
+Les deux premiers confirment le gain : **13,1 Go de corpus** produit contre 1,4 Go, à mémoire
+quasi constante. Le troisième est une **régression que j'ai introduite** : `garder_replay=False`
+coupait aussi les cotations BBO, dont le labo tire le **coût de spread**. Un rejeu dans cet état
+aurait calculé des coûts d'exécution sur un ruban vide.
+
+Corrigé : les cotations restent matérialisées, et ce n'est pas un compromis par paresse — leur
+déduplication est **à état** (une cotation par coin et par seconde, avec adaptation des lignes du
+collecteur), ce qui demande plus qu'un changement de boucle. Elles pèsent 481 Mo sur disque, loin
+des 60 Go des deux autres familles. Un test verrouille désormais ce point précis.
+
+Leçon de méthode : ce défaut ne se voyait ni dans les tests (ils vérifiaient que les listes étaient
+vides — c'était justement le bug), ni dans le verdict du labo. Il s'est vu en comparant la
+**taille des fichiers réellement produits** avant et après. Un avant/après sur les artefacts, pas
+seulement sur les compteurs.
+
+### Le goulot de l'étape 2, localisé
+
+`load_observed_books` rend `dict[coin -> list[carnets]]` : **tous** les carnets en mémoire, sans
+aucun plafond. Avec 6 Go de ruban L2, cela demande plusieurs dizaines de gigaoctets — exactement le
+raisonnement qu'on vient de corriger à l'étape 1, au même endroit : « charger tout pour indexer ».
+
+Le remède est connu et de même nature, mais il diffère sur un point : ici les carnets ne sont pas
+un ruban à écrire, c'est un **index à interroger** (trouver le dernier carnet reçu avant un
+signal). La forme juste est donc un index d'horodatages et de positions dans le fichier — deux
+entiers par ligne, ~130 Mo pour huit millions de carnets — puis la lecture de la ligne à la
+demande. Le module `copy_vault_book_index.py` et son plafond adaptatif sont le point de départ.
+
+---
+
+## 18/11/2026 — ITÉRATION 19 : la borne qui manquait pour conduire le labo jour par jour
+
+### Ce que porte vraiment le ruban L2 (mesure en flux, 31 s)
+
+| jour | carnets |
+|---|---|
+| 01 → 18/10 (six jours résiduels) | 50 170 au total |
+| **13/11** | 1 766 925 |
+| **14/11** | 1 312 208 |
+| **15/11** | 1 329 576 |
+| **16/11** | 1 300 253 |
+| **17/11** | 1 300 672 |
+| **18/11** | 468 074 |
+| total | **7 527 878** sur 270 coins |
+
+**Six jours denses** — précisément le seuil que le labo exige pour conclure. Un jour pèse ~2,4 Go
+en mémoire Python (6,7 Go pour le plus dense), les six ensemble ~28 Go. C'est ce chargement global
+qui a coupé le rejeu à l'étape 2.
+
+### Une approche écartée avant d'être écrite
+
+La solution élégante semblait être une **liste paresseuse** : garder par coin un index
+d'horodatages et de positions dans le fichier (deux entiers par ligne, ~130 Mo pour huit millions
+de carnets) et lire la ligne à la demande. Les consommateurs n'auraient rien eu à changer.
+
+Elle est condamnée par une ligne du dépôt :
+
+```python
+def liste_des_carnets(valeur):
+    return valeur if type(valeur) is list else list(valeur)
+```
+
+Tout ce qui n'est pas une **vraie** `list` est copié intégralement — et cette fonction est sur le
+chemin chaud, appelée à chaque décision rejouée. Une séquence paresseuse serait donc matérialisée
+en silence, à chaque appel : plus lent qu'avant, pour la même mémoire. Trouvé en lisant les
+consommateurs avant d'écrire la classe.
+
+### Ce qui a été fait : la borne basse
+
+`load_observed_books` n'avait que `as_of_ms` : on pouvait demander « avant tel instant », jamais
+« entre deux instants ». Conduire le replay jour par jour était donc impossible. La borne
+`depuis_ms` est ajoutée, **au même endroit que la borne haute** — à la frontière de la source, pour
+qu'un appelant qui l'oublierait plus loin ne puisse pas faire entrer un carnet hors fenêtre. Les
+carnets écartés sont **comptés** (`past_rows_rejected`) et la fenêtre est **publiée** dans l'audit :
+une mesure sans dénominateur n'en est pas une. Une fenêtre vide est **refusée**, pas rendue vide —
+rendre zéro carnet ferait lire « aucune donnée » au lieu d'une erreur d'appel.
+
+### Vérification sur le corpus réel
+
+Chargement du **seul 18/11** depuis le ruban de 6,01 Go :
+
+```
+carnets retenus       :   468 073  sur 196 coins
+écartés par la borne  : 7 059 804
+mémoire du processus  :      1,27 Go
+durée                 :       247 s      RAM libre 35 %, aucune tension
+```
+
+Un jour tient donc dans 1,27 Go, et six jours chargés l'un après l'autre ne se rencontrent jamais
+en mémoire. Le chantier suivant — faire évaluer le labo jour par jour et agréger sans moyenne de
+moyennes — est désormais **possible**, ce qu'il n'était pas ce matin.
+
+**Tests** : 8 nouveaux (inclusivité des deux bornes, découpe d'une journée, fenêtre vide refusée,
+bornes égales, borne invalide, application à la frontière, publication dans l'audit) ; 247 verts
+avec les suites de l'exécuteur, du labo, des trous et de l'état d'exécutabilité.
+
+---
+
+## 18/11/2026 — ITÉRATION 20 : les 60 Go de l'étape 2, ramenés à 2,8 Go par jour
+
+### D'où venaient les 60 Go (mesure, pas estimation)
+
+| | lignes | octets/ligne | pour tout charger |
+|---|---|---|---|
+| fills (`vault_fills_live.jsonl`, 7,12 Go) | 8 464 251 | 3 754 | **31,8 Go** |
+| carnets (`copy_vault_l2_tape.jsonl`, 6,01 Go) | 7 527 878 | **2 713 (mesuré)** | **20,4 Go** |
+
+L'étape 2 chargeait les deux. La borne basse des carnets (itération 19) réglait la moitié du
+problème ; il manquait la même chose côté fills, où `_episodes_canoniques` chargeait tout **et
+mémorisait le résultat**.
+
+### Pourquoi découper les fills est légitime — et pourquoi il fallait le vérifier
+
+Découper les carnets est sans conséquence : un carnet est indépendant du précédent. Découper les
+**fills** ne l'est pas : la position se construit fill après fill, et couper au milieu ferait
+passer une position déjà ouverte pour une ouverture.
+
+Sauf que `reconstruire_episodes` **recale chaque fill sur son `startPosition` natif** — sa
+docstring le dit : « un trou de backfill ne contamine donc pas tous les événements suivants ».
+Reste à savoir si le champ est là. Mesure sur les deux rubans :
+
+```
+vault_fills_live.jsonl : 8 464 251 / 8 464 251 avec startPosition  (100,00 %)
+vault_fills.jsonl      :    14 285 /    14 285 avec startPosition  (100,00 %)
+paires (vault, coin)   : 4 396 — dont le PREMIER fill sans le champ : 0
+```
+
+La découpe est donc légitime **sur ce corpus**. Et c'est précisément pour cela que le code ne le
+suppose pas : il compte les fills retenus sans position de départ et publie `decoupe_sure`. Un
+corpus futur où le champ manquerait inventerait des ouvertures en silence ; là, il le dira.
+
+### Le piège qu'il fallait verrouiller d'abord
+
+`_episodes_canoniques` mémorise sa reconstruction tant que les fichiers d'entrée ne bougent pas.
+La fenêtre ne faisait pas partie de la signature : la deuxième journée aurait reçu les épisodes de
+la première — **un résultat faux, et vert**. C'est la même forme que « une grandeur, deux
+valeurs ». La fenêtre est désormais dans la signature, et un test l'exige en demandant deux
+journées à la suite puis en revenant à la première.
+
+### Vérification sur le corpus réel
+
+Un seul jour (18/11) depuis le ruban de 7,12 Go :
+
+```
+fills lus             : 8 464 251
+écartés par la fenêtre: 8 002 458
+retenus               :   476 078  →  471 389 après déduplication
+sans position départ  :         0        DÉCOUPE SÛRE : True
+entrées alpha         :   228 388
+mémoire du processus  :      1,54 Go     (contre 31,8 Go pour tout)
+durée                 :        75 s      RAM libre 33 %
+```
+
+**Avec les carnets, l'étape 2 tient maintenant dans 2,8 Go par journée** (1,54 + 1,27) au lieu de
+60 Go pour le corpus entier.
+
+**Tests** : 10 nouveaux — inclusivité des deux bornes, application aux deux sources de fills,
+fill sans position de départ compté et découpe déclarée non sûre, même corpus sans fenêtre
+redevenu sûr, fenêtre vide et mal formée refusées, **mémorisation qui ne confond pas deux
+fenêtres**, traversée jusqu'à l'entrée publique, et le contrôle qui compte : *la somme des
+fenêtres rend exactement les mêmes fills que sans fenêtre, sans perte ni doublon*. Un test
+existant a été adapté (son double de la fonction gardait l'ancienne signature) et **un de mes
+propres tests était faux** : deux fills d'empreintes différentes au même instant font deux lignes,
+pas une.
+
+> **Rectification du même jour.** Le tableau ci-dessus annonçait d'abord « ~3 795 octets » et
+> « 28,6 Go » pour les carnets. C'était les octets par ligne **des fills**, appliqués aux carnets
+> par analogie — une estimation habillée de trois chiffres significatifs. La mesure directe donne
+> **2 713 octets par carnet** (1,27 Go pour 468 073 carnets chargés depuis le ruban réel), soit
+> **20,4 Go** pour le corpus. Un carnet est plus léger parce qu'il est déjà réduit à l'entrée :
+> `coin`, `ts_ms`, `bid`, `ask`, `capacity_usd`, provenance — ni `bids5` ni `asks5`.
+
+---
+
+## 18/11/2026 — ITÉRATION 21 : la découpe doit se régler sur la mémoire, pas sur le calendrier
+
+Les deux fenêtres livrées rendent la découpe possible. Restait à savoir **de quelle taille**. Trois
+mesures, sur le corpus réel, répondent — et la réponse n'est pas celle que j'allais coder.
+
+### Les fills ne sont pas répartis également sur les six journées
+
+| journée | fills | pic estimé pour la journée |
+|---|---|---|
+| **13/11** | **2 172 496** | **7,03 Go** |
+| 14/11 | 1 564 853 | 5,06 Go |
+| 15/11 | 1 406 245 | 4,55 Go |
+| 16/11 | 1 471 806 | 4,76 Go |
+| 17/11 | 1 372 773 | 4,44 Go |
+| 18/11 | 476 078 | 1,54 Go |
+
+Le 13/11 porte **4,6 fois** plus de fills que le 18/11. Avec ses 1 766 925 carnets (4,8 Go), cette
+seule journée demanderait **~11,8 Go** — plus que la marge disponible quand le reste de la machine
+travaille. **Une découpe « un jour à la fois » serait donc morte sur la première journée du
+corpus.** Les deux fenêtres livrées étant en millisecondes, la granularité n'est pas imposée : la
+tranche doit être choisie d'après la mémoire disponible, comme `plafond_listes` règle déjà le cache
+des carnets sur la pression mesurée par `budget_ram`.
+
+### Ce qui doit survivre à une tranche
+
+| | |
+|---|---|
+| entrées alpha d'une journée (18/11) | 228 388 — pic 1,54 Go |
+| métaordres obtenus | **56 516** sur 298 coins |
+| mémoire après libération des fills | **0,93 Go** |
+| extrapolée aux six journées | **~5,6 Go** |
+
+Donc accumuler les métaordres de tout le corpus puis explorer une seule fois ne tient pas non
+plus : 5,6 Go de métaordres **plus** 20,4 Go de carnets. **L'exploration doit se faire dans la
+tranche**, et seuls ses résultats agrégés doivent survivre — c'est le point de conception que la
+mesure tranche, et il reste à câbler.
+
+### Où va le poids d'un métaordre
+
+Le plus gros métaordre d'une heure pèse 244 543 octets en JSON :
+
+```
+member_events        216 232 o   (88 %)  les événements membres eux-mêmes
+member_event_ids      27 540 o   (11 %)  la liste de LEURS identifiants
+les 19 autres champs     771 o   ( 0 %)
+```
+
+`member_event_ids` est entièrement dérivable de `member_events` : 11 % de la mémoire des
+métaordres est une redondance. **Je ne l'ai pas retirée**, et c'est une décision, pas un oubli :
+ce champ est lu par `copy_vault_v7_exit_flow_train`, par l'exécuteur et par cinq tests. Le gain
+(~0,6 Go sur six journées) ne justifie pas de toucher au chemin économique pour l'obtenir à la
+hâte ; la bonne forme serait une vue calculée, et elle appartient au même chantier que la boucle.
+
+### Ce que cette itération établit
+
+Les deux verrous mémoire du labo sont **levés et mesurés** : l'étape 1 produit 13,1 Go de rubans
+avec 1,0 Go de pic, et l'étape 2 peut lire n'importe quelle tranche de temps à coût borné
+(1,54 Go + 1,27 Go pour la journée du 18/11). Ce qui reste n'est plus un blocage de mémoire mais
+un travail de **structure** : faire boucler la campagne sur des tranches dimensionnées par
+`budget_ram`, explorer dans la tranche, et agréger les six journées sans moyenne de moyennes —
+avec le même refus qu'ailleurs de transformer une tranche non évaluable en zéro.
+
+---
+
+## 18/11/2026 — ITÉRATION 22 : le labo sait tourner sur une tranche
+
+`run_local_campaign` accepte une tranche `(depuis_ms, jusqu_a_ms)` et la fait descendre aux **deux**
+chargeurs de l'étape 2. Sans tranche, rien ne change : les deux bornes valent `None`, et un test de
+non-régression l'exige.
+
+### Pourquoi le labo ne boucle pas lui-même
+
+Faire boucler la campagne demanderait de découper son corps — une dizaine d'explorations — et
+d'**écrire une règle d'agrégation pour chacune**. C'est le cœur économique : une agrégation faite
+à la hâte y produirait une moyenne de moyennes, précisément ce que l'objectif interdit, et le
+résultat serait un nombre d'apparence normale.
+
+La forme retenue est plus sobre : le labo traite **une** tranche, rend un rapport complet et
+auditable pour elle, et publie laquelle. La combinaison de plusieurs tranches appartient à un
+conducteur séparé — ainsi l'agrégation devient un objet qu'on peut lire, tester et refuser, au lieu
+d'être enfouie dans le chemin qui calcule l'argent.
+
+### Ce qui a été testé, et comment
+
+Deux tests lisent le code (les bornes sont bien passées aux deux appels, et les signatures appelées
+les portent vraiment). Mais **une inspection reste verte sur un appel mort**, donc deux tests
+font tourner la campagne avec des doubles qui capturent ce qu'ils reçoivent :
+
+* avec `tranche=(t, t + 86 399 999)`, les deux chargeurs reçoivent exactement ces bornes ;
+* **sans tranche, les deux reçoivent `None`** — un labo appelé comme avant lit comme avant.
+
+### Trois doubles de test étaient restés à l'ancienne signature
+
+Mon changement a fait rougir trois tests existants dont la classe `Pipeline` déclarait
+`charger_entrees_alpha_notional_fixe_avec_audit(_workspace)`. C'est la deuxième fois aujourd'hui
+(le premier cas était un `lambda root:` pour la reconstruction des épisodes) : **un double figé sur
+une signature est un test qui ne vérifie plus ce qu'il croit vérifier**. Ils acceptent désormais
+`**_kw`, ce qui les rend indifférents aux paramètres qu'ils n'examinent pas.
+
+Et une dernière fois, le heredoc : `b"{}
+"` est arrivé coupé en deux lignes dans le fichier écrit,
+donnant un `SyntaxError` sur une chaîne non terminée. Réparé en écrivant l'octet explicitement.
+
+**Tests** : 5 nouveaux (`tests/test_labo_tranche_de_temps.py`), 55 verts avec la suite du labo.
+
+---
+
+## 18/11/2026 — ITÉRATION 23 : le corpus entier devient lisible, en 19 passes
+
+Deux pièces livrées : `agregation_tranches` (module pur, 283 lignes, 29 tests) et
+`tools/conduire_labo_par_tranches.py` (21 tests).
+
+### Le découpage suit la densité, pas le calendrier
+
+Mesure de la densité du ruban de fills par heure (12 s en flux), puis découpage sous un budget de
+500 000 fills par tranche. Résultat sur le corpus réel :
+
+```
+8 464 251 fills sur 129 pas d'une heure  →  19 tranches
+   la plus chargée : 498 039 fills        (budget respecté partout)
+   la plus courte  : 4 h   (13/11 matin, dense)
+   la plus longue  : 11 h  (14/11 02:00 → 12:59, calme)
+   couverture : continue=True, étendue 129,0 h, 0 trou, 0 recouvrement
+```
+
+Les tranches s'allongent quand l'activité baisse et se resserrent quand elle monte. Un découpage
+par journée aurait donné une tranche de 2 172 496 fills (~7 Go) et une de 476 078 (~1,5 Go).
+À ~470 000 fills la tranche, chacune tient dans **~1,5 Go de fills plus ses carnets**, soit
+**~2,5 Go** : **le corpus entier est lisible en 19 passes**, là où une seule demandait ~52 Go.
+
+### Les quatre façons de mentir en agrégeant
+
+Le danger n'était pas la découpe, c'était la recombinaison. Le module la refuse quatre fois :
+
+1. **La moyenne de moyennes.** Un taux se recompose en sommant le numérateur et le dénominateur,
+   jamais en moyennant des taux : une journée de 40 signaux pèserait autant qu'une de 40 000. Le
+   test le montre sur un cas où la moyenne des taux donnerait 50 % et la vérité 0,1 %.
+2. **Le trou qui devient un zéro.** Une tranche sans rapport n'a pas une contribution nulle, elle
+   est inconnue : l'agrégat est déclaré non exploitable, avec sa raison.
+3. **Le verdict optimiste.** Cinq `MORE_DATA` et une `UNMEASURABLE` ne font pas un `MORE_DATA` :
+   l'état retenu est toujours le plus faible présent, et la tranche responsable est nommée. Un état
+   hors nomenclature est traité comme le plus faible, jamais ignoré.
+4. **Le total sans périmètre.** Chaque sortie porte le nombre de tranches, l'étendue réelle en
+   millisecondes et l'union des jours UTC — union, car *sommer* les jours permettrait de franchir le
+   seuil des six journées distinctes par simple découpage.
+
+### Un défaut de mon propre module, trouvé par un test écrit pour ce piège
+
+Le test de la conduite — une tranche qui lève `MemoryError` — a révélé que `sommer` déclarait son
+total **complet** alors qu'un sixième du corpus manquait. La raison est instructive : `sommer` ne
+voit que les rapports qu'on lui donne, donc il annonce « complet » en toute bonne foi. **Seul
+`combiner` sait combien de tranches étaient attendues**, et c'est donc à lui d'invalider. Corrigé
+par `_marquer_incomplet`, qui laisse le total lisible mais le déclare incomplet, avec deux tests
+dédiés — dont un qui vérifie qu'en l'absence de tranche manquante, rien n'est touché.
+
+C'est la troisième fois aujourd'hui qu'un piège prend la même forme : **une mesure calculée sur ce
+qui est présent ignore ce qui est absent**. Le ruban BBO vidé, le `n=0` sans motif, et maintenant un
+total « complet » amputé d'une tranche.
+
+**Tests** : 50 verts sur les deux nouvelles suites.
+
+### Une précision de vocabulaire qui évite une fausse attente : 11 jours sondés, 6 exploitables
+
+On parle parfois des « onze jours exploitables ». Le chiffre vient de la chaîne causale mesurée du
+07 au 17/11 — 121 900 chaînes complètes, 93,5 %, onze jours sur onze évaluables. Mais ce n'est pas
+ce que le labo lit, et ce n'est pas un défaut technique :
+
+```
+choisir_la_fenetre(.) :
+   jours_sondes        = 11
+   premier_jour_liable = 2026-11-13
+   depuis_ms           = 2026-11-13 00:00 UTC
+   motif               = A_PARTIR_DU_PREMIER_JOUR_LIABLE
+```
+
+Les cinq premiers jours sont **écartés volontairement** : avant le 13/11, les carnets n'ont pas
+l'identité de connexion (`connection_id`, `l2_gap_epoch`) qui permet de lier une référence
+pré-signal à la même session d'observation. Un signal y est peut-être mesurable, mais pas
+**prouvable**, et le labo refuse de mélanger les deux.
+
+Le corpus que le labo doit pouvoir lire est donc de **six journées** — 13 au 18/11 — et c'est
+exactement ce que les rubans portent (8 464 251 fills, 7 527 878 carnets). Après les itérations 18
+à 23, ces six journées sont lisibles en **19 tranches de ~2,5 Go**. Attendre « onze jours » du labo
+serait attendre qu'il lise des données dont il a lui-même établi qu'elles ne peuvent pas servir de
+preuve.
+
+---
+
+## 18/11/2026 — ITÉRATION 24 : la découpe est prouvée sans perte, sur les données réelles
+
+Un test sur fixtures montrait déjà que la somme des fenêtres rend les mêmes fills que l'absence de
+fenêtre. Restait à le vérifier là où ça compte : sur le corpus. Les deux dernières tranches du plan
+réel, chargées séparément, puis leur union chargée d'un seul coup.
+
+```
+T18  (17/11 22:00 → 18/11 04:59)   472 389 fills ·  472 389 identités · sûre · 0,94 Go · 68 s
+T19  (18/11 05:00 → 18/11 08:59)   167 469 fills ·  167 469 identités · sûre · 0,12 Go · 58 s
+T18 ∪ T19  en une seule passe      639 858 fills ·  639 858 identités · sûre · 1,12 Go · 63 s
+
+T18 ∩ T19                          : 0          (aucun recouvrement)
+(T18 ∪ T19) calculé par morceaux   : 639 858
+le même intervalle d'un seul coup  : 639 858
+perdus par la découpe              : 0
+inventés par la découpe            : 0
+```
+
+**Identiques.** Lire le corpus en dix-neuf passes donne donc exactement le même ensemble de fills
+que de le lire en une — ce qui était l'enjeu de tout ce chantier, et ce qu'aucun test sur fixtures
+ne pouvait établir. À noter au passage : le nombre de fills égale le nombre d'identités distinctes
+dans les trois cas, donc la découpe ne crée pas non plus de doublon interne.
+
+### Ce que les itérations 18 à 24 ont changé, en une ligne chacune
+
+| | avant | après |
+|---|---|---|
+| étape 1 — fills matérialisés | 1 210 121 | **8 754 210** |
+| étape 1 — carnets matérialisés | 766 876 | **7 527 878** |
+| étape 1 — pic mémoire | arrêt en `MEMOIRE_CRITIQUE` | **1,0 Go** |
+| étape 2 — demande mémoire | ~52 Go (31,8 + 20,4) | **~2,5 Go par tranche** |
+| lecture du corpus | impossible | **19 tranches, couverture continue sur 129,0 h** |
+| perte due à la découpe | — | **0 fill perdu, 0 inventé (mesuré)** |
+| tunnel signal → sortie | 0 sur 98 138 (12/11) | **9 366 / 10 422 = 89,9 %** |
+| familles du coffre sans rôle | — | **0 sur 22** |
+
+Ce qui reste n'est plus un blocage technique : c'est **faire tourner la conduite sur les dix-neuf
+tranches**, ce qui demande du temps machine et non une correction. Je ne la lance pas de ma propre
+initiative : le dernier rejeu complet a été coupé pour mémoire critique et la consigne était de ne
+pas le relancer sans demande — même si c'est précisément ce régime-là que ce chantier a rendu
+inoffensif.
+

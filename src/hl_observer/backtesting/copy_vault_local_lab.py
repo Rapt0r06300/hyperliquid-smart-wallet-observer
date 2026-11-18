@@ -39,7 +39,6 @@ from hl_observer.backtesting.train_statistics import (
     lcb_rank_is_numerically_resolved,
     summarize_daily_values,
 )
-from hl_observer.collection.forward_poll_fills import is_causal_live_source
 from hl_observer.collection.userfills_live import userfill_required_fields_reason
 from hl_observer.backtesting.copy_vault_train_executability import resume_lisible, sonder_train
 from hl_observer.datasets.v2_pipeline import copy_vault_heartbeat_reason
@@ -53,8 +52,12 @@ from hl_observer.economics.numeric import (
 from hl_observer.normalization.l2_book import normalize_l2_levels
 from hl_observer.simulation.economic_freeze_registry import parameter_hash
 from tools.copy_vault_continuity import load_release_history_audits
-from hl_observer.backtesting.copy_vault_tier_local import _charger_tier_local
+from hl_observer.backtesting.copy_vault_tier_local import (
+    _charger_tier_local,
+    adresses_archivees,
+)
 from hl_observer.backtesting import copy_vault_fenetre_locale as _FENETRE_LOCALE
+from hl_observer.backtesting import copy_vault_rubans_lourds as _LOURDS
 from hl_observer.backtesting.copy_vault_contexte_tranchable import publier_le_contexte_tranchable
 from hl_observer.backtesting.copy_vault_chargeurs_safe import (
     charger_asset_ctx_safe as _charger_asset_ctx_safe,
@@ -1399,6 +1402,78 @@ def _accounting_context_row(
     }
 
 
+def _ecrire_les_rubans_lourds(
+    data_dir: Path, assets, repository_root: Path, *, audit: Mapping[str, Any],
+    payload_audit: Counter[str], depuis_ms: int | None,
+    progress: Callable[[str], None] | None = None,
+) -> tuple[dict[str, Any], dict[str, int]]:
+    """Ecrit les trois rubans LOURDS en flux, depuis les deux tiers du coffre.
+
+    18/11/2026 — les fills et les carnets ne passent plus par un dictionnaire : ~60,5 Go mesures
+    sur la fenetre du 13/11, pour 32 Go de machine. Chaque famille est lue DEUX fois (les gagnants,
+    puis l'ecriture) et les compteurs d'audit ne sont alimentes qu'a la PREMIERE passe : les
+    compter deux fois doublerait chaque enveloppe rejetee.
+    """
+    import itertools
+
+    try:
+        index_local = json.loads(
+            (repository_root / _FENETRE_LOCALE.INDEX_LOCAL).read_text(encoding="utf-8"))
+        shards_locaux = index_local.get("shards") or []
+    except (OSError, ValueError, AttributeError):
+        shards_locaux = []
+    archivees = adresses_archivees(repository_root)
+    index_sha = str(audit.get("source_index_sha256") or "")
+    compteurs = {"raw_frames": 0, "historical_snapshot_shards": 0,
+                 "historical_fill_observations": 0, "wrapper_rejections": 0,
+                 "lignes_safe_fills": 0, "lignes_safe_carnets": 0, "lignes_locales": 0}
+    passes: Counter[str] = Counter()
+
+    def _fabrique(quoi: str):
+        def fabrique():
+            passes[quoi] += 1
+            premiere = passes[quoi] == 1
+            # Seconde passe : compteurs et audit JETABLES, sinon tout serait compte deux fois.
+            cpt: dict[str, int] = {}
+            aud = payload_audit if premiere else Counter()
+            if quoi == "fills":
+                safe = _LOURDS.lignes_safe(
+                    assets, familles=_LOURDS.FAMILLES_SAFE_FILLS, index_sha=index_sha,
+                    transformer=_fill_rows, charger_enveloppes=_load_wrappers,
+                    payload_audit=aud, compteurs=cpt, rend_une_liste=True)
+                locales = itertools.chain.from_iterable(
+                    _LOURDS.lignes_locales(repository_root, shards_locaux, famille=famille,
+                                           depuis_ms=depuis_ms, archivees=archivees,
+                                           compteurs=cpt)
+                    for famille in _LOURDS.FAMILLES_LOCALES_FILLS)
+            else:
+                safe = _LOURDS.lignes_safe(
+                    assets, familles=[_LOURDS.FAMILLE_SAFE_CARNETS], index_sha=index_sha,
+                    transformer=_book_row, charger_enveloppes=_load_wrappers,
+                    payload_audit=aud, compteurs=cpt, rend_une_liste=False)
+                locales = _LOURDS.lignes_locales(
+                    repository_root, shards_locaux, famille=_LOURDS.FAMILLE_LOCALE_CARNETS,
+                    depuis_ms=depuis_ms, compteurs=cpt)
+            lues = 0
+            for ligne in itertools.chain(safe, locales):
+                lues += 1
+                if progress is not None and lues % 500_000 == 0:
+                    progress(f"Rubans en flux · {quoi} · passe {passes[quoi]} · {lues:,} lignes")
+                yield ligne
+            if premiere:
+                for cle in ("raw_frames", "historical_snapshot_shards",
+                            "historical_fill_observations", "wrapper_rejections"):
+                    compteurs[cle] += int(cpt.get(cle) or 0)
+                compteurs[f"lignes_safe_{quoi}"] = int(cpt.get("lignes_rendues") or 0)
+                compteurs["lignes_locales"] += int(cpt.get("lignes_lues") or 0)
+        return fabrique
+
+    bilans = _LOURDS.ecrire_rubans_lourds(
+        data_dir, fabrique_fills=_fabrique("fills"), fabrique_carnets=_fabrique("carnets"),
+        dossier_temporaire=data_dir / ".tri")
+    return bilans, compteurs
+
+
 def materialize_safe_workspace(
     recovery_root: str | Path,
     workspace: str | Path,
@@ -1416,8 +1491,12 @@ def materialize_safe_workspace(
     if any(part.is_symlink() for part in (workspace, workspace / "runtime", data_dir)):
         raise OSError("refusing symlinked Copy-Vault replay workspace")
     data_dir.mkdir(parents=True, exist_ok=True)
-    fills: dict[tuple[Any, ...], dict[str, Any]] = {}
-    books: dict[tuple[Any, ...], dict[str, Any]] = {}
+    # 18/11/2026 — LES DEUX FAMILLES LOURDES NE SONT PLUS TENUES EN MEMOIRE. Mesure sur la
+    # fenetre du 13/11 : 11 698 999 fills et 7 509 693 carnets, soit ~60,5 Go de dictionnaires
+    # Python pour 32 Go de machine. Le chargement s'arretait en MEMOIRE_CRITIQUE a 452 shards sur
+    # 5 570, et le labo concluait « trop peu de jours » alors que le coffre en porte onze
+    # exploitables. Elles sont lues DEUX FOIS en flux et ecrites par `copy_vault_rubans_lourds`,
+    # qui garantit des OCTETS IDENTIQUES a l'ancien chemin (300 tirages aleatoires).
     bbo_rows: dict[tuple[Any, ...], dict[str, Any]] = {}
     market_trade_rows: dict[tuple[Any, ...], dict[str, Any]] = {}
     active_context_rows: dict[tuple[Any, ...], dict[str, Any]] = {}
@@ -1431,95 +1510,13 @@ def materialize_safe_workspace(
     for asset_number, (path, asset) in enumerate(assets, 1):
         try:
             family = str(asset.get("family") or "")
-            source_continuity_proven = not bool(
-                asset.get("_heartbeat_evidence_missing")
-            )
-            manifest = asset.get("manifest")
-            synchronization = (
-                manifest.get("synchronization")
-                if isinstance(manifest, Mapping)
-                else None
-            )
-            connection_ids = (
-                synchronization.get("connection_ids")
-                if isinstance(synchronization, Mapping)
-                else None
-            )
-            expected_connection_id = (
-                connection_ids[0]
-                if isinstance(connection_ids, list)
-                and len(connection_ids) == 1
-                and isinstance(connection_ids[0], str)
-                else None
-            )
-            if family == "copy_vault_snapshot":
-                historical_snapshot_shards += 1
+            # La provenance detaillee (continuite, identite de connexion) n'est exigee que par les
+            # familles LOURDES, desormais lues en flux : `copy_vault_rubans_lourds` la calcule.
+            if family in _LOURDS.FAMILLES_SAFE_FILLS or family == _LOURDS.FAMILLE_SAFE_CARNETS:
+                continue                      # lues en flux, plus bas
             for wrapper in _load_wrappers(path):
                 raw_frames += 1
-                if family in {"copy_vault_fills", "copy_vault_snapshot"}:
-                    if family == "copy_vault_snapshot":
-                        data = wrapper["_raw"].get("data")
-                        raw_fill_list = data.get("fills") if isinstance(data, Mapping) else None
-                        if (
-                            isinstance(data, Mapping)
-                            and data.get("isSnapshot") is True
-                            and isinstance(raw_fill_list, list)
-                        ):
-                            historical_fill_observations += len(raw_fill_list)
-                    for row in _fill_rows(
-                        wrapper,
-                        family=family,
-                        audit=payload_audit,
-                        source_dataset_id=str(asset.get("dataset_id") or ""),
-                        source_shard_sha256=str(asset.get("sha256") or ""),
-                        source_catalog_sha256=str(audit.get("source_index_sha256") or ""),
-                        source_continuity_proven=(
-                            source_continuity_proven
-                            if family == "copy_vault_fills"
-                            else None
-                        ),
-                        expected_connection_id=(
-                            expected_connection_id
-                            if family == "copy_vault_fills"
-                            else None
-                        ),
-                    ):
-                        identity = (
-                            row["vault"], row["coin"], row["ts_ms"], row.get("tid"),
-                            row.get("hash"), row.get("oid"), row["px"], row["sz"], row["signe"],
-                        )
-                        prior = fills.get(identity)
-                        if prior is None or (
-                            bool(prior.get("isSnapshot"))
-                            and not bool(row.get("isSnapshot"))
-                        ):
-                            fills[identity] = row
-                elif asset.get("family") == "copy_vault_l2":
-                    dataset_id = asset.get("dataset_id")
-                    shard_sha256 = asset.get("sha256")
-                    row = _book_row(
-                        wrapper,
-                        source_dataset_id=(
-                            str(dataset_id) if isinstance(dataset_id, str) and dataset_id else None
-                        ),
-                        source_shard_sha256=(
-                            str(shard_sha256) if isinstance(shard_sha256, str) and shard_sha256 else None
-                        ),
-                        source_catalog_sha256=str(audit.get("source_index_sha256") or ""),
-                        source_continuity_proven=source_continuity_proven,
-                        expected_connection_id=expected_connection_id,
-                    )
-                    if row:
-                        identity = (
-                            row["coin"], row["received_at_ms"], row["exchange_ts_ms"],
-                            row["bid"], row["ask"],
-                            tuple(tuple(level) for level in row["bids5"]),
-                            tuple(tuple(level) for level in row["asks5"]),
-                        )
-                        books[identity] = row
-                    else:
-                        payload_audit["INVALID_OR_NONCAUSAL_L2_REJECTED"] += 1
-                elif family in {
+                if family in {
                     "copy_vault_bbo", "copy_vault_trades",
                     "copy_vault_active_asset_ctx",
                 }:
@@ -1577,16 +1574,15 @@ def materialize_safe_workspace(
                 if progress is not None and raw_frames % 2_000 == 0:
                     progress(
                         f"Reconstruction SAFE {asset_number:,}/{len(assets):,} · "
-                        f"{raw_frames:,} enveloppes · {len(fills):,} fills · {len(books):,} carnets"
+                        f"{raw_frames:,} enveloppes de contexte"
                     )
         except (OSError, EOFError, ValueError, TypeError, json.JSONDecodeError):
             wrapper_rejections += 1
         if progress is not None:
             progress(
                 f"Reconstruction SAFE {asset_number:,}/{len(assets):,} · "
-                f"{raw_frames:,} enveloppes · {len(fills):,} fills · {len(books):,} carnets"
+                f"{raw_frames:,} enveloppes de contexte"
             )
-    safe_replay_inputs_available = bool(fills and books)
     # --- Tier LOCAL du coffre-fort (certifie, replayable/backtestable) injecte AVANT le
     # tri : ses fills causaux deviennent des SIGNAUX pour la recherche EXPLORATOIRE. Les
     # rangees sont etiquetees provenance_tier=LOCAL et N'ONT PAS quality=SAFE -> elles
@@ -1596,20 +1592,18 @@ def materialize_safe_workspace(
     # la chaine causale complete n'existe qu'a partir du premier jour liable (voir le module).
     fenetre_locale = _FENETRE_LOCALE.choisir_la_fenetre(repository_root)
     coffre_local_resume = _charger_tier_local(repository_root, progress=progress, garder_signaux=False,
-                                              depuis_ms=fenetre_locale["depuis_ms"])
+                                              depuis_ms=fenetre_locale["depuis_ms"],
+                                              garder_replay=False)
     coffre_local_resume["fenetre_choisie"] = fenetre_locale
-    for _row in coffre_local_resume.pop("_fills", ()):
-        _id = (_row.get("vault"), _row.get("coin"), _row.get("ts_ms"), _row.get("tid"),
-               _row.get("hash"), _row.get("oid"), _row.get("px"), _row.get("sz"), _row.get("signe"))
-        fills.setdefault(_id, _row)
-    for _row in coffre_local_resume.pop("_books", ()):
-        try:
-            _id = (_row["coin"], _row["received_at_ms"], _row["exchange_ts_ms"], _row["bid"],
-                   _row["ask"], tuple(tuple(l) for l in _row["bids5"]),
-                   tuple(tuple(l) for l in _row["asks5"]))
-        except (KeyError, TypeError):
-            continue
-        books.setdefault(_id, _row)
+    bilans_lourds, compteurs_lourds = _ecrire_les_rubans_lourds(
+        data_dir, assets, repository_root, audit=audit, payload_audit=payload_audit,
+        depuis_ms=fenetre_locale["depuis_ms"], progress=progress)
+    raw_frames += compteurs_lourds["raw_frames"]
+    historical_snapshot_shards += compteurs_lourds["historical_snapshot_shards"]
+    historical_fill_observations += compteurs_lourds["historical_fill_observations"]
+    wrapper_rejections += compteurs_lourds["wrapper_rejections"]
+    safe_replay_inputs_available = bool(compteurs_lourds["lignes_safe_fills"]
+                                        and compteurs_lourds["lignes_safe_carnets"])
     for _row in coffre_local_resume.pop("_bbo", ()):
         try:
             _id = (_row["coin"], _row["received_at_ms"], _row["exchange_ts_ms"],
@@ -1618,8 +1612,6 @@ def materialize_safe_workspace(
             continue
         bbo_rows.setdefault(_id, _row)
     publier_le_contexte_tranchable(coffre_local_resume, repository_root)
-    fill_rows = sorted(fills.values(), key=lambda row: (row["ts_ms"], row["vault"], str(row.get("tid"))))
-    book_rows = sorted(books.values(), key=lambda row: (row["received_at_ms"], row["coin"]))
     bbo_tape_rows = sorted(
         bbo_rows.values(), key=lambda row: (row["received_at_ms"], row["coin"])
     )
@@ -1639,12 +1631,11 @@ def materialize_safe_workspace(
         ledger_rows.values(),
         key=lambda row: (row.get("exchange_ts_ms") or row["received_at_ms"], row["vault"]),
     )
-    historical_fill_rows = [row for row in fill_rows if row.get("isSnapshot") is True]
-    live_fill_rows = [
-        row for row in fill_rows
-        if row.get("isSnapshot") is False and is_causal_live_source(row.get("source"))
-    ]
-    historical_unique_fills = len(historical_fill_rows)
+    ruban_historique = bilans_lourds["fills"][_LOURDS.RUBAN_FILLS_HISTORIQUES]
+    ruban_direct = bilans_lourds["fills"][_LOURDS.RUBAN_FILLS_DIRECTS]
+    ruban_carnets = bilans_lourds["carnets"][_LOURDS.RUBAN_CARNETS]
+    unique_fills = bilans_lourds["identites_fills"]
+    historical_unique_fills = ruban_historique["lignes_ecrites"]
     verified_source_assets = [
         {
             "dataset_id": asset.get("dataset_id"),
@@ -1683,10 +1674,11 @@ def materialize_safe_workspace(
         "selection_digest": audit.get("selection_digest"),
     })
     materialized_tapes: dict[str, dict[str, Any]] = {}
+    for name in (_LOURDS.RUBAN_FILLS_HISTORIQUES, _LOURDS.RUBAN_FILLS_DIRECTS,
+                 _LOURDS.RUBAN_CARNETS):
+        cible = data_dir / name
+        materialized_tapes[name] = {"bytes": cible.stat().st_size, "sha256": _sha256(cible)}
     for name, rows in (
-        ("vault_fills.jsonl", historical_fill_rows),
-        ("vault_fills_live.jsonl", live_fill_rows),
-        ("copy_vault_l2_tape.jsonl", book_rows),
         ("copy_vault_bbo_tape.jsonl", bbo_tape_rows),
         ("copy_vault_trades_tape.jsonl", market_trade_tape_rows),
         ("copy_vault_active_asset_ctx_tape.jsonl", active_context_tape_rows),
@@ -1712,7 +1704,7 @@ def materialize_safe_workspace(
         and not payload_audit
         and not audit.get("heartbeat_evidence_missing_dataset_ids")
     )
-    replay_inputs_available = bool(fill_rows and book_rows)
+    replay_inputs_available = bool(unique_fills and ruban_carnets["lignes_ecrites"])
     status = (
         "READY" if safe_replay_inputs_available and data_complete
         else "MORE_DATA" if replay_inputs_available
@@ -1746,17 +1738,17 @@ def materialize_safe_workspace(
         "payload_audit": dict(sorted(payload_audit.items())),
         "payload_rejected_records": sum(payload_audit.values()),
         "raw_frames": raw_frames,
-        "unique_fills": len(fill_rows),
-        "materialized_historical_fill_rows": len(historical_fill_rows),
-        "materialized_live_fill_rows": len(live_fill_rows),
+        "unique_fills": unique_fills,
+        "materialized_historical_fill_rows": ruban_historique["lignes_ecrites"],
+        "materialized_live_fill_rows": ruban_direct["lignes_ecrites"],
         "historical_snapshot_shards": historical_snapshot_shards,
         "historical_fill_observations": historical_fill_observations,
         "historical_unique_fills": historical_unique_fills,
         "historical_coverage_audit": history_audit,
-        "incremental_unique_fills": len(fill_rows) - historical_unique_fills,
+        "incremental_unique_fills": unique_fills - historical_unique_fills,
         "historical_fills_train_only": True,
         "snapshots_forward_evidence_allowed": False,
-        "unique_books": len(book_rows),
+        "unique_books": ruban_carnets["lignes_ecrites"],
         "unique_bbo_observations": len(bbo_tape_rows),
         "unique_market_trades": len(market_trade_tape_rows),
         "unique_active_asset_contexts": len(active_context_tape_rows),
@@ -1764,10 +1756,11 @@ def materialize_safe_workspace(
         "unique_leader_ledger_events": len(ledger_tape_rows),
         "leader_accounting_tapes_are_follower_pnl_inputs": False,
         "market_context_tapes_are_pnl_inputs": False,
-        "fill_start_ms": fill_rows[0]["ts_ms"] if fill_rows else None,
-        "fill_end_ms": fill_rows[-1]["ts_ms"] if fill_rows else None,
-        "book_start_ms": book_rows[0]["received_at_ms"] if book_rows else None,
-        "book_end_ms": book_rows[-1]["received_at_ms"] if book_rows else None,
+        "fill_start_ms": bilans_lourds["fill_debut_ms"],
+        "fill_end_ms": bilans_lourds["fill_fin_ms"],
+        "book_start_ms": bilans_lourds["carnet_debut_ms"],
+        "book_end_ms": bilans_lourds["carnet_fin_ms"],
+        "rubans_en_flux": bilans_lourds,
         "data_complete": data_complete,
         "continuity_evidence_status": (
             "UNPROVEN"
@@ -2689,7 +2682,19 @@ def run_local_campaign(
     on_update: Callable[[Mapping[str, Any]], None] | None = None,
     input_change_check: Callable[[], bool] | None = None,
     leader_review_ledger_path: str | Path | None = None,
+    tranche: tuple[int, int] | None = None,
 ) -> dict[str, Any]:
+    """``tranche`` borne la reconstruction a ``(depuis_ms, jusqu_a_ms)`` INCLUS.
+
+    Ajoutee le 18/11/2026. Sans elle, l'etape 2 chargeait tout le corpus : 31,8 Go de fills
+    (8 464 251 lignes a 3 754 octets) et 20,4 Go de carnets (7 527 878 a 2 713 octets), ce qui a
+    fait couper l'enveloppe du rejeu. Avec elle, la journee du 18/11 se lit en 1,54 + 1,27 Go.
+
+    Le labo ne boucle PAS lui-meme sur les tranches : il en traite une et publie laquelle. La
+    combinaison de plusieurs tranches appartient a un conducteur separe, pour qu'elle soit un objet
+    qu'on peut lire et refuser -- une agregation ecrite a la hate dans le chemin economique y
+    ferait une moyenne de moyennes.
+    """
     workspace = Path(workspace)
     say = progress or (lambda _message: None)
     manifest_path = workspace / "SAFE_INPUT_MANIFEST.json"
@@ -2744,10 +2749,14 @@ def run_local_campaign(
         }
     pipeline = _load_pipeline()
     say("Reconstruction des cycles leader OPEN/ADD/REDUCE/CLOSE")
-    entries, entries_audit = pipeline.charger_entrees_alpha_notional_fixe_avec_audit(workspace)
+    entries, entries_audit = pipeline.charger_entrees_alpha_notional_fixe_avec_audit(
+        workspace, fenetre=tranche)
     metaorders, meta_audit = cv.cluster_metaorders(entries)
     entries = len(entries)            # seul le décompte sert encore : la liste (1,2 Go) est libérée
-    books, books_audit = cv.load_observed_books(workspace, coins={str(row["coin"]) for row in metaorders})
+    books, books_audit = cv.load_observed_books(
+        workspace, coins={str(row["coin"]) for row in metaorders},
+        depuis_ms=tranche[0] if tranche else None,
+        as_of_ms=tranche[1] if tranche else None)
     leader_review_persistence: dict[str, Any] = {"status": "NOT_REQUESTED"}
     leader_quality_train: dict[str, Any] = {}
     if leader_review_ledger_path is not None:

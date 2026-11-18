@@ -170,8 +170,36 @@ def _iter_jsonl(path: Path):
                 yield row
 
 
-def _fills_canoniques(root: Path) -> tuple[list[dict], dict[str, Any]]:
+def _normaliser_fenetre(fenetre: object) -> tuple[int, int] | None:
+    """Valide une fenetre ``(depuis_ms, jusqu_a_ms)`` INCLUSIVE, ou rend ``None``.
+
+    Une fenetre vide est REFUSEE, jamais rendue vide : zero fill ferait lire « aucune donnee »
+    la ou il faut lire « mauvais appel ».
+    """
+    if fenetre is None:
+        return None
+    try:
+        debut, fin = fenetre
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"fenetre de fills illisible : {fenetre!r}") from exc
+    if type(debut) is not int or type(fin) is not int or debut <= 0 or fin <= 0:
+        raise ValueError(f"fenetre de fills non entiere ou non positive : {fenetre!r}")
+    if fin < debut:
+        raise ValueError(f"fenetre de fills vide : {debut} > {fin}")
+    return debut, fin
+
+
+def _fills_canoniques(
+    root: Path, *, fenetre: tuple[int, int] | None = None
+) -> tuple[list[dict], dict[str, Any]]:
     """Merge backfill and causal live increments (WS or disciplined poll) without snapshots.
+
+    ``fenetre`` est une borne ``(depuis_ms, jusqu_a_ms)`` INCLUSIVE sur ``ts_ms``, ajoutee le
+    18/11/2026 : le ruban reel porte 8 464 251 fills, soit 31,8 Go a tout charger, et c'est ce
+    chargement qui a fait couper l'etape 2 du labo. La decoupe est legitime parce que
+    ``reconstruire_episodes`` recale CHAQUE fill sur son ``startPosition`` natif -- mais le
+    resultat COMPTE les fills retenus qui n'en ont pas et publie ``decoupe_sure``, car un corpus
+    ou le champ manquerait inventerait des ouvertures en silence.
 
     La provenance causale suit le point unique de vérité ``is_causal_live_source`` : un fill
     ``LIVE_POLL`` (poll forward discipliné, horodaté à NOTRE réception) est causal au même titre
@@ -179,13 +207,39 @@ def _fills_canoniques(root: Path) -> tuple[list[dict], dict[str, Any]]:
     avancé à l'heure du fill.
     """
 
-    historical = _charger_jsonl(root / FILLS)
+    bornes = _normaliser_fenetre(fenetre)
+    hors_fenetre = 0
+    sans_position_de_depart = 0
+
+    def _dans_la_fenetre(row: dict) -> bool:
+        """Borne sur ``ts_ms``, appliquee A LA FRONTIERE : un appelant qui l'oublierait plus loin
+        ne doit pas pouvoir faire entrer un fill hors fenetre."""
+        nonlocal hors_fenetre, sans_position_de_depart
+        if bornes is None:
+            return True
+        try:
+            instant = int(row.get("ts_ms") or 0)
+        except (TypeError, ValueError, OverflowError):
+            hors_fenetre += 1
+            return False
+        if instant < bornes[0] or instant > bornes[1]:
+            hors_fenetre += 1
+            return False
+        if row.get("start_position", row.get("startPosition")) is None:
+            # Retenu quand meme (le rejeter changerait la position), mais COMPTE : sans ce champ,
+            # le premier fill d'une position deja ouverte passerait pour une ouverture.
+            sans_position_de_depart += 1
+        return True
+
+    historical = [r for r in _charger_jsonl(root / FILLS) if _dans_la_fenetre(r)]
     causal_live: list[dict] = []
     unclocked_live: list[dict] = []
     live_rows = live_incremental = snapshots = unprovenanced = 0
     causal_by_source: dict[str, int] = {}
     for row in _iter_jsonl(root / FILLS_LIVE):
         live_rows += 1
+        if not _dans_la_fenetre(row):
+            continue
         source = row.get("source")
         if row.get("isSnapshot") is True:
             snapshots += 1
@@ -225,6 +279,12 @@ def _fills_canoniques(root: Path) -> tuple[list[dict], dict[str, Any]]:
         "cross_source_or_internal_duplicates_rejected": len(merged) - len(deduped),
         "causal_rows_preferred_on_duplicate": True,
         "live_policy": "CAUSAL_LIVE_SOURCE_WS_OR_POLL_AND_NOT_SNAPSHOT_AND_VALID_LOCAL_RECEIVE_TIME",
+        "fenetre_fills": list(bornes) if bornes is not None else None,
+        "fills_hors_fenetre": hors_fenetre,
+        "fills_retenus_sans_position_de_depart": sans_position_de_depart,
+        # La decoupe ne vaut que si chaque fill retenu porte sa position de depart : sinon une
+        # position deja ouverte serait prise pour une ouverture. Sans fenetre, rien n'est decoupe.
+        "decoupe_sure": bornes is None or sans_position_de_depart == 0,
     }
 
 
@@ -235,8 +295,14 @@ def _fills_canoniques(root: Path) -> tuple[list[dict], dict[str, Any]]:
 _CYCLES_MEMORISES: dict[tuple, tuple[list[dict], dict[str, Any]]] = {}
 
 
-def _signature_entrees(root: Path) -> tuple:
-    signature: list[tuple[str, int, int]] = []
+def _signature_entrees(root: Path, fenetre: tuple[int, int] | None = None) -> tuple:
+    """La FENETRE fait partie de la signature.
+
+    Sans elle, deux fenetres differentes se repondraient le meme corpus memorise : le piege de la
+    grandeur qui change et survit dans un cache. Le 18/11, c'est la premiere chose a verrouiller
+    en rendant la reconstruction fenetrable.
+    """
+    signature: list[tuple[str, int, int]] = [("fenetre", *(fenetre or (0, 0)))]
     for relatif in (FILLS, FILLS_LIVE, LEDGER, EPISODES):
         chemin = Path(root) / relatif
         try:
@@ -253,19 +319,24 @@ def oublier_les_cycles() -> None:
     _CYCLES_MEMORISES.clear()
 
 
-def _episodes_canoniques(root: Path) -> tuple[list[dict], dict[str, Any]]:
-    signature = _signature_entrees(root)
+def _episodes_canoniques(
+    root: Path, *, fenetre: tuple[int, int] | None = None
+) -> tuple[list[dict], dict[str, Any]]:
+    bornes = _normaliser_fenetre(fenetre)
+    signature = _signature_entrees(root, bornes)
     memorise = _CYCLES_MEMORISES.get(signature)
     if memorise is not None:
         return list(memorise[0]), dict(memorise[1])
-    episodes, audit = _reconstruire_episodes_canoniques(root)
+    episodes, audit = _reconstruire_episodes_canoniques(root, fenetre=bornes)
     _CYCLES_MEMORISES.clear()
     _CYCLES_MEMORISES[signature] = (episodes, audit)
     return list(episodes), dict(audit)
 
 
-def _reconstruire_episodes_canoniques(root: Path) -> tuple[list[dict], dict[str, Any]]:
-    fills, source_audit = _fills_canoniques(root)
+def _reconstruire_episodes_canoniques(
+    root: Path, *, fenetre: tuple[int, int] | None = None
+) -> tuple[list[dict], dict[str, Any]]:
+    fills, source_audit = _fills_canoniques(root, fenetre=fenetre)
     raw_fill_count = source_audit["merged_fill_rows"]
     if fills:
         episodes = VB.reconstruire_episodes(fills)
@@ -376,7 +447,7 @@ def charger_entrees_alpha_avec_audit(root: Path) -> tuple[list[dict], dict[str, 
 
 
 def charger_entrees_alpha_notional_fixe_avec_audit(
-    root: Path,
+    root: Path, *, fenetre: tuple[int, int] | None = None
 ) -> tuple[list[dict], dict[str, Any]]:
     """Charge les entrées causales sans inventer un NAV pour le sizing fixe.
 
@@ -386,7 +457,7 @@ def charger_entrees_alpha_notional_fixe_avec_audit(
     devenir zéro, ni supprimer une observation autrement causale.
     """
 
-    episodes, audit = _episodes_canoniques(root)
+    episodes, audit = _episodes_canoniques(root, fenetre=fenetre)
     alpha = VB.entrees_alpha(episodes)
     out: list[dict[str, Any]] = []
     for episode in alpha:

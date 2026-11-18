@@ -46,6 +46,8 @@ from hashlib import blake2b
 from pathlib import Path
 from typing import Any
 
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
+
 SCHEMA = "hypersmart.rubans_tri_externe.v1"
 
 #: Taille de l'empreinte d'identité. 16 octets (128 bits) : pour deux millions de lignes, la
@@ -104,6 +106,7 @@ def empreinte(identite: Sequence[Any]) -> bytes:
 def gagnants(fabrique: Callable[[], Iterable[Mapping[str, Any]]], *,
              cle_identite: Callable[[Mapping[str, Any]], Sequence[Any]],
              rang_preference: Callable[[Mapping[str, Any]], int] | None = None,
+             cle_tri: Callable[[Mapping[str, Any]], Sequence[Any]] | None = None,
              ) -> dict[str, Any]:
     """Première passe : l'index de la ligne qui survit pour chaque identité.
 
@@ -120,8 +123,16 @@ def gagnants(fabrique: Callable[[], Iterable[Mapping[str, Any]]], *,
     """
     retenus: dict[bytes, tuple[int, int, int]] = {}
     lignes = 0
+    borne_min = borne_max = None
     for index, ligne in enumerate(fabrique()):
         lignes += 1
+        if cle_tri is not None:
+            # Les bornes portent sur TOUTES les lignes lues, pas seulement sur celles qui
+            # finiront dans un ruban : le labo publie `fill_start_ms` sur l'ensemble dedoublonne,
+            # et un doublon partage par construction la cle de tri de son identite.
+            valeur = tuple(cle_tri(ligne))
+            borne_min = valeur if borne_min is None else min(borne_min, valeur)
+            borne_max = valeur if borne_max is None else max(borne_max, valeur)
         cle = empreinte(cle_identite(ligne))
         rang = 0 if rang_preference is None else int(rang_preference(ligne))
         ancien = retenus.get(cle)
@@ -136,6 +147,8 @@ def gagnants(fabrique: Callable[[], Iterable[Mapping[str, Any]]], *,
         "lignes_lues": lignes,
         "identites": len(retenus),
         "doublons": lignes - len(retenus),
+        "cle_min": borne_min,
+        "cle_max": borne_max,
     }
 
 
@@ -251,11 +264,13 @@ def ecrire_rubans_tries(cibles: Sequence[tuple[Any, Callable[[Mapping[str, Any]]
             }
         return bilans
     finally:
+        # Un morceau temporaire qu'on ne peut pas supprimer n'arrete rien, mais il ne doit pas
+        # disparaitre du journal : un dossier qui se remplit en silence finit par saturer.
         for m in tous:
             try:
                 m.unlink()
-            except OSError:
-                pass
+            except OSError as exc:
+                _noter_echec("backtesting/rubans_tri_externe.py:nettoyage_morceau", exc)
 
 
 def ecrire_ruban_trie(chemin: str | Path, fabrique: Callable[[], Iterable[Mapping[str, Any]]], *,

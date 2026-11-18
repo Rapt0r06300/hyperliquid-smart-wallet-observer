@@ -361,3 +361,22 @@ def test_les_predicats_sont_exclusifs_et_explicites():
     assert RL.est_un_fill_direct_causal(_fill(1, source="LIVE_POLL"))
     assert not RL.est_un_fill_direct_causal(_fill(1, source="SNAPSHOT"))
     assert not RL.est_un_fill_direct_causal(_fill(1, snapshot=True))
+
+
+def test_les_BORNES_portent_sur_tout_le_corpus_pas_sur_les_rubans(tmp_path):
+    """`fill_start_ms` couvre aussi les fills non causaux, qui n'entrent dans aucun ruban."""
+    lignes = [_fill(50, source="EXPLORER_INFERRED"), _fill(100), _fill(900, source="EXPLORER_INFERRED")]
+    bilan = RL.ecrire_rubans_lourds(tmp_path, fabrique_fills=lambda: iter(lignes),
+                                    fabrique_carnets=lambda: iter([_carnet(7), _carnet(3)]),
+                                    dossier_temporaire=tmp_path / "t")
+    assert bilan["fill_debut_ms"] == 50 and bilan["fill_fin_ms"] == 900
+    assert [l["ts_ms"] for l in _lignes(tmp_path / RL.RUBAN_FILLS_DIRECTS)] == [100]
+    assert bilan["carnet_debut_ms"] == 3 and bilan["carnet_fin_ms"] == 7
+    assert bilan["identites_carnets"] == 2 and bilan["doublons_carnets"] == 0
+
+
+def test_les_bornes_d_un_corpus_vide_sont_INCONNUES(tmp_path):
+    bilan = RL.ecrire_rubans_lourds(tmp_path, fabrique_fills=lambda: iter(()),
+                                    fabrique_carnets=lambda: iter(()), dossier_temporaire=tmp_path / "t")
+    for champ in ("fill_debut_ms", "fill_fin_ms", "carnet_debut_ms", "carnet_fin_ms"):
+        assert bilan[champ] is None, champ
