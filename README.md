@@ -23,7 +23,7 @@ Le fonctionnement attendu est organisé autour de trois blocs et de la synchroni
 | Collecteurs | `LANCER_COLLECTEURS_COPY_VAULT.cmd` | Collecter les observations utiles à Copy-Vault, en préserver la provenance et les rendre admissibles SAFE avant leur usage économique. |
 | Laboratoire | `LANCER_LAB_QUANT_COPY_VAULT.cmd` | Exploiter les shards SAFE importés par AlinaSync, chercher des améliorations par replay/backtest et conserver chaque essai/candidat de façon traçable et non écrasable. |
 | Moteur simulé | `LANCER_HYPERSMART.cmd` | Afficher la simulation paper du bot ; son scope économique doit rester Copy-Vault seul. |
-| Synchronisation du code | `POUSSER-GITHUB-FORCE.cmd` | Réconcilier le code local et `main` puis pousser sans force, reset ni effacement. Ce lanceur ne transfère pas les shards. |
+| Synchronisation du code | `POUSSER-GITHUB.cmd` | Réconcilier le code local et `main` puis pousser sans force, reset ni effacement. Ce lanceur ne transfère pas les shards. |
 | Shards SAFE | AlinaSync / `ALINA_SYNC_COMPLETE.cmd` | Récupérer/restaurer les assets SAFE publiés sur GitHub, puis vérifier tailles, SHA-256 et reçus. |
 
 À la racine, seuls ces quatre lanceurs principaux et AlinaSync restent visibles. Les outils de support et de restauration sont rangés dans [`tools/launchers/README.md`](tools/launchers/README.md). « Portable » signifie qu'un clone fonctionne depuis son propre chemin local ; aucune archive séparée n'est requise pour utiliser le dépôt.
@@ -60,7 +60,7 @@ gzip SHA-256 sous `runtime/coffre_certifie/` (tier **LOCAL**), et référence le
 économique reste SAFE-only par conception** : le tier LOCAL nourrit la recherche exploratoire mais ne
 peut jamais être estampillé « prouvé » (aucune fausse certification).
 
-**Push rapide par défaut.** `POUSSER-GITHUB-FORCE.cmd` (double-clic, sans argument) pousse désormais
+**Push rapide par défaut.** `POUSSER-GITHUB.cmd` (double-clic, sans argument) pousse désormais
 **le code seul**, en quelques minutes, sans re-télécharger le corpus SAFE. L'ancien comportement
 (push du code *puis* téléchargement SAFE complet) reste accessible via `--full`.
 
@@ -114,7 +114,7 @@ Ces noms fixent le rôle opérateur attendu, pas la preuve que le code actuel es
 
 ## Travail sur PC avec Codex : sauvegarder puis resynchroniser
 
-Depuis le dépôt local, utiliser **`POUSSER-GITHUB-FORCE.cmd`** lorsque les changements de code doivent être réconciliés avec GitHub et publiés. Ce lanceur ne télécharge ni ne pousse les shards : leur récupération reste réservée à AlinaSync. Le nom historique FORCE est trompeur : le bouton
+Depuis le dépôt local, utiliser **`POUSSER-GITHUB.cmd`** lorsque les changements de code doivent être réconciliés avec GitHub et publiés. Ce lanceur ne télécharge ni ne pousse les shards : leur récupération reste réservée à AlinaSync. Le nom historique FORCE est trompeur : le bouton
 contrôle que `origin` désigne le dépôt Alina principal, ajoute les fichiers
 de code/docs/config admissibles, crée un commit non vide si nécessaire,
 intègre les nouveaux commits distants et exécute un `git push origin

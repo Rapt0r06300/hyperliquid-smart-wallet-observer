@@ -5,7 +5,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/alina-git-code-sync-tests.yml'
-      - 'POUSSER-GITHUB-FORCE.cmd'
+      - 'POUSSER-GITHUB.cmd'
       - 'tools/push_github_safe.ps1'
       - 'tools/alina_git_code_sync.py'
       - 'tests/test_alina_git_code_sync.py'
@@ -49,7 +49,7 @@ jobs:
           filter: blob:none
           sparse-checkout: |
             ALINA_SYNC_COMPLETE.cmd
-            POUSSER-GITHUB-FORCE.cmd
+            POUSSER-GITHUB.cmd
             tools
             tests/test_alina_git_code_sync.py
             tests/test_push_github_launcher.py
@@ -70,4 +70,4 @@ jobs:
         shell: cmd
         run: |
           set HYPERSMART_PUSH_NO_PAUSE=1
-          call POUSSER-GITHUB-FORCE.cmd --portable-self-check
+          call POUSSER-GITHUB.cmd --portable-self-check

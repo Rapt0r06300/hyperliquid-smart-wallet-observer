@@ -100,6 +100,16 @@ if "%RC%"=="0" (
   echo [OK] Coffre-fort a jour.
   echo   Index   : runtime\coffre_certifie\COFFRE_INDEX.json
   echo   Journal : runtime\coffre_certifie\CERTIF_JOURNAL.jsonl
+  echo.
+  rem --- ETAPE 3 (18/11/2026) : annoncer le decoupage que le prochain rejeu du labo fera.
+  rem     Lu dans l'INDEX du coffre, sans ouvrir un shard (0,4 s). Ne lance PAS le labo :
+  rem     un rejeu dure des heures et demande de la memoire ; le plan dit ce qui sera fait.
+  rem     N'echoue JAMAIS la certification : un coffre bien scelle ne doit pas etre declare
+  rem     en echec parce qu'un affichage a manque.
+  echo === PLAN DU PROCHAIN REJEU DU LABO ===
+  "%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\conduire_labo_par_tranches.py" "%CV_ROOT%." --depuis-le-coffre --sortie "%CV_ROOT%runtime\reports\plan_tranches.json"
+  if errorlevel 1 echo   [INFO] Plan indisponible pour l instant : la certification reste valide.
+  call "%CV_ROOT%tools\launcher_log.cmd" "Certificateur Coffre Fort" RESULT plan-tranches "conduire_labo_par_tranches.py" "0"
 ) else (
   echo [ERREUR] Certification interrompue ^(code %RC%^). Voir le log runtime\logs\coffre_certifie\.
 )

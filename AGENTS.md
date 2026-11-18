@@ -45,7 +45,7 @@ Capital paper opérationnel : **350 USD** ; repère de recherche : au moins **+5
 ## Repères opérateur permanents
 
 - Pour le travail local de l'opérateur, utiliser directement `C:\Users\flo\Desktop\Projet invest`. Ne jamais créer, attacher ou utiliser un worktree.
-- Rôles retenus : `LANCER_COLLECTEURS_COPY_VAULT.cmd` = collecte ; `LANCER_LAB_QUANT_COPY_VAULT.cmd` = cerveau replay/backtest et registre durable des améliorations ; `LANCER_HYPERSMART.cmd` = moteur avec simulation visible ; `POUSSER-GITHUB-FORCE.cmd` = synchronisation prudente du code Git.
+- Rôles retenus : `LANCER_COLLECTEURS_COPY_VAULT.cmd` = collecte ; `LANCER_LAB_QUANT_COPY_VAULT.cmd` = cerveau replay/backtest et registre durable des améliorations ; `LANCER_HYPERSMART.cmd` = moteur avec simulation visible ; `POUSSER-GITHUB.cmd` = synchronisation prudente du code Git.
 - AlinaSync, appelé localement via `ALINA_SYNC_COMPLETE.cmd`, gère les shards SAFE. Le lanceur Git ne les transfère pas.
 - À la racine ne restent que ces quatre lanceurs principaux et `ALINA_SYNC_COMPLETE.cmd`; `ALINA_SYNC_COMPLETE.sh` y reste pour les clones Unix. Les commandes de support sont dans `tools/launchers/` et leur index est `tools/launchers/README.md`.
 - « Portable » signifie qu'un clone du dépôt fonctionne depuis son chemin local ; ne pas confondre cela avec la création d'une archive autonome.

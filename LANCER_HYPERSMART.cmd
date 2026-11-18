@@ -1290,7 +1290,7 @@ goto :fin
 
 REM -------- GITHUB-PUSH : un seul chemin securise, Git embarque uniquement --------
 :cmd_github
-call "%~dp0POUSSER-GITHUB-FORCE.cmd" %2 %3 %4 %5 %6 %7 %8 %9
+call "%~dp0POUSSER-GITHUB.cmd" %2 %3 %4 %5 %6 %7 %8 %9
 set "RC=%ERRORLEVEL%"
 echo.
 goto :fin

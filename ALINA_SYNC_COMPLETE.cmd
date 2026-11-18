@@ -14,7 +14,7 @@ rem   --unpack-safe             : decompresse les conteneurs SAFE deja presents.
 rem   --prune-only              : purge le cache sans telecharger.
 rem ============================================================================
 set "ALINA_ROOT=%~dp0"
-set "UNIFIED=%ALINA_ROOT%POUSSER-GITHUB-FORCE.cmd"
+set "UNIFIED=%ALINA_ROOT%POUSSER-GITHUB.cmd"
 set "GIT_LFS_SKIP_SMUDGE=1"
 set "ALINA_LAUNCH_RUN_ID=%DATE%_%TIME%_%RANDOM%_%RANDOM%"
 set "ALINA_SYNC_PYTHON="
@@ -39,7 +39,7 @@ if not defined ALINA_SYNC_PYTHON goto :missing_python
 
 if "%~1"=="" (
     rem The explicit operator launch requests every selected SAFE asset, SHA-verified.
-    rem Never invoke POUSSER-GITHUB-FORCE here; this entrypoint is data-only.
+    rem Never invoke POUSSER-GITHUB here; this entrypoint is data-only.
     set "DEFAULT_SAFE_ARGS=--download-safe --all-safe --unpack-safe"
     goto :run
 )
