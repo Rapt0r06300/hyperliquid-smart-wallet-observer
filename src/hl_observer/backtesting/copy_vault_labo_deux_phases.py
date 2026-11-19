@@ -35,7 +35,7 @@ import bisect
 import hashlib
 import json
 import os
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -82,8 +82,24 @@ def _ecrire_jsonl(chemin: Path, lignes: Iterable[Mapping[str, Any]]) -> int:
 
 
 def _lire_jsonl(chemin: Path) -> list[dict[str, Any]]:
+    """Tout le fichier en memoire. Reserve aux PETITS fichiers (un manifeste)."""
     with open(chemin, "rb") as flux:
         return [json.loads(ligne) for ligne in flux if ligne.strip()]
+
+
+def _flux_jsonl(chemin: Path) -> Iterator[dict[str, Any]]:
+    """Les lignes UNE PAR UNE, sans jamais les accumuler.
+
+    C'est la difference entre filtrer et proteger. `_lire_jsonl` materialise la liste entiere
+    AVANT qu'un filtre puisse s'exercer : sur le corpus du 18/11/2026 (4 618 095 metaordres,
+    15,4 Go), un comptage qui ne retenait rien a quand meme fait tomber la RAM libre de 17 a
+    0,8 Go en 90 secondes -- parce que la liste intermediaire, elle, etait bien construite.
+    Un filtre place apres un chargement complet ne protege rien.
+    """
+    with open(chemin, "rb") as flux:
+        for ligne in flux:
+            if ligne.strip():
+                yield json.loads(ligne)
 
 
 def carnets_utiles(
@@ -289,11 +305,288 @@ def carnets_du_coffre(
     return gardes, audit
 
 
+#: Le statut de provenance d'un corpus LOCAL certifie. IL NE SE DEGUISE PAS EN SAFE.
+#:
+#: Le labo exigeait `safe_catalog_status` parmi `SAFE_COMPLETE` / `SAFE_PARTIAL`, c'est-a-dire une
+#: provenance venue de la chaine SAFE cloud. Le corpus local est reellement certifie -- le
+#: certificateur a scelle 153 fichiers sur 153, code 0, le 18/11/2026 -- mais il n'est PAS SAFE : le
+#: LOCAL a 31,7 jours d'avance, et la chaine cloud ne l'a pas encore repris.
+#:
+#: Ecrire `SAFE_PARTIAL` pour ouvrir la porte serait mentir sur l'origine des donnees, et un PnL
+#: obtenu en falsifiant sa propre tracabilite vaut moins que pas de PnL : on y croirait. Ce statut
+#: dit donc la verite, et il OUVRE LA MESURE en FERMANT LA CERTIFICATION -- exactement ce que
+#: `FREEZE_EXPLORATORY != preuve` signifie.
+PROVENANCE_LOCALE = "LOCAL_CERTIFIED"
+
+
+#: Les familles du coffre qui portent des fills du leader.
+#:
+#: `fills_forward` compte 21 591 873 lignes sur 23 journees (13 avril -> 18 novembre), dont 1,4 a
+#: 2,3 millions par jour depuis le 13/11 -- TOUTES marquees `causal_forward_eligible`. Le ruban
+#: local `runtime/data/vault_fills_live.jsonl` ne couvre que 17/11 19:10 -> 18/11 22:06, parce
+#: qu'il ne retient que la source `LIVE_WS`. Le coffre porte en plus `LIVE_POLL`, une collecte par
+#: interrogation active depuis le 13/11 et tout aussi causale : le labo ignorait une source
+#: entiere de signaux valides. Mesure du 18/11/2026 : 2 journees exploitables par le ruban local,
+#: 6 par le coffre.
+FAMILLES_DE_FILLS = ("fills_forward",)
+
+#: Le libelle Hyperliquid -> l'action du protocole. Seules OPEN et ADD sont copiables.
+_ACTION_PAR_LIBELLE = {
+    "open long": "OPEN",
+    "open short": "OPEN",
+    "close long": "CLOSE",
+    "close short": "CLOSE",
+}
+
+
+def fills_du_coffre(
+    racine: str | Path,
+    *,
+    debut_ms: int,
+    fin_ms: int,
+    familles: Sequence[str] = FAMILLES_DE_FILLS,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Lit les fills du COFFRE et les met au format que `cluster_metaorders` attend.
+
+    LE MAPPING EST DERIVE, JAMAIS INVENTE. Un fill du coffre porte deja `ts_ms`, `coin`, `vault`,
+    `px`, `sz`, `observed_at_ms`, `received_at_ms`, `connection_id` et `causal_forward_eligible`.
+    Trois champs manquent, et chacun se CALCULE a partir de ce qui est la :
+
+      * `direction` <- `signe` (±1), l'orientation du fill telle que la plateforme l'a publiee ;
+      * `action` <- `dir` (« Open Long », « Close Short »...), traduit par un tableau explicite.
+        Un libelle inconnu donne `None`, donc l'evenement est ECARTE au lieu d'etre devine ;
+      * `taille_usd` <- `px * sz`, le notionnel du fill.
+
+    Rien n'est suppose : un fill sans prix, sans taille ou sans libelle reconnu est compte dans
+    l'audit et laisse de cote. Inventer une direction ou une action reviendrait a fabriquer des
+    signaux, c'est-a-dire a fabriquer le PnL qu'on cherche a mesurer.
+    """
+    from hl_observer.backtesting import coffre_tranches
+
+    racine = Path(racine)
+    index = racine / "runtime/coffre_certifie/LOCAL_INDEX.json"
+    if not index.exists():
+        return [], {"status": "COFFRE_ABSENT", "chemin": str(index)}
+
+    brut = json.loads(index.read_text(encoding="utf-8"))
+    tous = brut.get("shards") or []
+    if isinstance(tous, dict):
+        tous = list(tous.values())
+
+    entrees: list[dict[str, Any]] = []
+    audit: dict[str, Any] = {
+        "status": "LU_DEPUIS_LE_COFFRE", "lignes_lues": 0, "entrees_rendues": 0,
+        "ecartes_libelle_inconnu": 0, "ecartes_champ_manquant": 0, "familles": {},
+        "actions": {},
+    }
+    for famille in familles:
+        choix = coffre_tranches.selectionner(
+            tous, famille=famille, debut_ms=debut_ms, fin_ms=fin_ms)
+        # `selectionner` rend ses shards sous la cle `retenus`.
+        shards = choix.get("retenus") or choix.get("shards") or []
+        lus = rendus = 0
+        for ligne in coffre_tranches.flux(
+            racine, shards, famille=famille,
+            debut_ms=debut_ms, fin_ms=fin_ms, verifier_sha=False,
+        ):
+            lus += 1
+            action = _ACTION_PAR_LIBELLE.get(str(ligne.get("dir") or "").strip().lower())
+            if action is None:
+                audit["ecartes_libelle_inconnu"] += 1
+                continue
+            if action == "OPEN":
+                # OPEN ou ADD : la distinction NE SE LIT PAS dans `dir`, qui dit « Open Long »
+                # aussi bien pour une ouverture que pour un renforcement. Elle se CALCULE sur
+                # `start_position`, la position du leader AVANT ce fill : non nulle, le fill
+                # renforce une position existante, donc c'est un ADD.
+                #
+                # Sans cette distinction, tous les metaordres sortaient en OPEN -- 514 544 sur
+                # six tranches, zero ADD -- et l'alignement, qui compte les ADD evaluables,
+                # rendait `NO_CAUSAL_L2_AT_OR_BEFORE_SIGNAL_WITHIN_30_SECONDS` alors que 99,4 %
+                # des signaux avaient bien un carnet a portee. Le refus accusait les carnets ; la
+                # cause etait une action manquante.
+                try:
+                    position_avant = float(ligne.get("start_position") or 0.0)
+                except (TypeError, ValueError):
+                    position_avant = 0.0
+                if position_avant != 0.0:
+                    action = "ADD"
+            try:
+                signe = int(ligne["signe"])
+                prix = float(ligne["px"])
+                taille = float(ligne["sz"])
+            except (KeyError, TypeError, ValueError):
+                audit["ecartes_champ_manquant"] += 1
+                continue
+            if signe not in (-1, 1) or prix <= 0 or taille <= 0:
+                audit["ecartes_champ_manquant"] += 1
+                continue
+            entree = dict(ligne)
+            entree["direction"] = signe
+            entree["action"] = action
+            entree["taille_usd"] = prix * taille
+            entrees.append(entree)
+            audit["actions"][action] = audit["actions"].get(action, 0) + 1
+            rendus += 1
+        audit["familles"][famille] = {"shards": len(shards), "lus": lus, "rendus": rendus}
+        audit["lignes_lues"] += lus
+        audit["entrees_rendues"] += rendus
+    entrees.sort(key=lambda e: int(e["ts_ms"]))
+    return entrees, audit
+
+
+def manifeste_de_provenance_locale(
+    racine: str | Path,
+    *,
+    corpus: Path,
+    sortie: Path | None = None,
+    jours_minimum: int | None = None,
+    max_leaders: int | None = None,
+    min_notionnel_leader: float | None = None,
+) -> dict[str, Any]:
+    """Ecrit un `SAFE_INPUT_MANIFEST.json` qui DIT LA VERITE sur un corpus local.
+
+    Chaque champ est MESURE sur le corpus reellement prepare, jamais suppose :
+
+      * `selection_digest` : l'empreinte des manifestes de toutes les tranches, dans l'ordre. Deux
+        corpus differents ne peuvent pas la partager, et la meme preparation la redonne a
+        l'identique -- c'est ce qui rend un resultat rejouable ;
+      * `source_index_sha256` : l'empreinte de l'index du coffre consomme ;
+      * `unique_fills` / `unique_books` : les comptes reels, relus sur disque ;
+      * `safe_catalog_status` : `LOCAL_CERTIFIED`, jamais `SAFE_*`.
+
+    Le manifeste porte aussi `exploratory_only: True` et `champion_eligible: False`. Ce ne sont pas
+    des decorations : le labo les lit pour refuser d'ecrire un champion depuis cette provenance.
+    """
+    racine = Path(racine)
+    corpus = Path(corpus)
+    index = racine / "runtime/coffre_certifie/LOCAL_INDEX.json"
+
+    empreintes: list[str] = []
+    fills = livres = 0
+    tranches = 0
+    for dossier in sorted(p for p in corpus.iterdir() if p.is_dir()):
+        chemin = dossier / MANIFESTE
+        if not chemin.exists():
+            continue
+        manifeste = _lire_jsonl(chemin)[0]
+        empreintes.append(str(manifeste.get("sha256_metaordres", "")))
+        empreintes.append(str(manifeste.get("sha256_carnets", "")))
+        fills += int(manifeste.get("metaordres") or 0)
+        livres += int(manifeste.get("audit_carnets", {}).get("carnets_gardes") or 0)
+        tranches += 1
+
+    # L'INVENTAIRE DES ACTIFS, declare sur ce qui existe VRAIMENT. La porte du labo exige, par
+    # actif : un `dataset_id` unique, une `family` connue, une taille en octets, une empreinte
+    # SHA-256, une `release_tag`, une `release_asset` et un `manifest_path`.
+    #
+    # `release_tag` et `release_asset` designent normalement une release GitHub de la chaine SAFE.
+    # Un corpus local n'en a pas. Plutot que d'inventer un numero de release -- ce qui ferait
+    # passer du LOCAL pour du SAFE -- l'etiquette DIT ce qu'elle est : `LOCAL-COFFRE-SCELLE`.
+    # Tout le reste est mesure sur le fichier : taille reelle, empreinte reelle, chemin reel.
+    actifs: list[dict[str, Any]] = []
+    vides: list[str] = []
+    for dossier in sorted(p for p in corpus.iterdir() if p.is_dir()):
+        chemin_manifeste = dossier / MANIFESTE
+        if not chemin_manifeste.exists():
+            continue
+        m = _lire_jsonl(chemin_manifeste)[0]
+        for fichier, famille, cle in (
+            (FICHIER_METAORDRES, "copy_vault_fills", "sha256_metaordres"),
+            (FICHIER_CARNETS, "copy_vault_l2", "sha256_carnets"),
+        ):
+            chemin = dossier / fichier
+            if not chemin.exists():
+                continue
+            if chemin.stat().st_size == 0:
+                # UN FICHIER VIDE N'EST PAS UN ACTIF. Une tranche sans aucun signal produit un
+                # ruban de zero octet -- c'est legitime, mais le declarer comme un actif de
+                # donnees serait faux, et la porte du labo le refuse a juste titre (`bytes > 0`).
+                # On le compte pour que son absence se VOIE dans le manifeste.
+                vides.append(f"{dossier.name}/{fichier}")
+                continue
+            actifs.append({
+                "dataset_id": f"{dossier.name}/{fichier}",
+                "family": famille,
+                "bytes": chemin.stat().st_size,
+                "sha256": str(m.get(cle, "")),
+                "release_tag": "LOCAL-COFFRE-SCELLE",
+                "release_asset": f"{dossier.name}-{fichier}",
+                "manifest_path": str(chemin_manifeste.relative_to(racine))
+                if chemin_manifeste.is_relative_to(racine) else str(chemin_manifeste),
+            })
+
+    # LES DEUX DIGESTS SONT CALCULES PAR LE LABO LUI-MEME, jamais recopies : il les recalcule a la
+    # lecture et refuse s'ils ne concordent pas. Les emprunter a leur source unique est la seule
+    # façon d'etre sur qu'ils lient bien l'inventaire a la selection.
+    from hl_observer.backtesting.copy_vault_local_lab import (
+        _source_asset_inventory_sha256,
+        _source_selection_digest,
+    )
+
+    index_sha = _empreinte(index) if index.exists() else "0" * 64
+    inventaire_sha = _source_asset_inventory_sha256(actifs)
+    digest = _source_selection_digest(index_sha, actifs)
+    manifeste = {
+        "selection_digest": digest,
+        "source_index_sha256": index_sha,
+        "source_asset_inventory_sha256": inventaire_sha,
+        "source_asset_inventory_complete": True,
+        "source_asset_inventory_count": len(actifs),
+        "verified_source_assets": actifs,
+        "paper_read_only": True,
+        "real_execution": False,
+        "status": "MORE_DATA",
+        "safe_catalog_status": PROVENANCE_LOCALE,
+        "replay_inputs_available": True,
+        "unique_fills": fills,
+        "unique_books": livres,
+        # LES DEUX CHAMPS QUI FERMENT LA CERTIFICATION. Le labo les lit.
+        "exploratory_only": True,
+        "champion_eligible": False,
+        # UN SEUIL DE JOURNEES DECLARE est une limite assumee, pas un contournement : le labo
+        # exige 6 journees distinctes, et seules 2 portent des signaux observes en direct
+        # (17/11 : 470, 18/11 : 1 431 ; la collecte WS a demarre le 17/11 a 19:11). Un corpus qui
+        # abaisse ce seuil le DIT ici, et reste `champion_eligible: False` -- donc mesurable,
+        # jamais promouvable. Omettre ce champ laisse le defaut de 6 s'appliquer.
+        **({"minimum_signal_utc_days": int(jours_minimum)} if jours_minimum else {}),
+        # LA SELECTION DE LEADERS EST DECLAREE, donc lisible et refusable. Le corpus complet
+        # (4 618 095 metaordres, 228 leaders, 15,4 Go) ne tient pas en memoire ; on garde les N
+        # plus actifs, ce qui conserve des cycles ENTIERS sur les six journees entieres -- alors
+        # qu'un echantillonnage fabriquerait des positions qui ne se ferment jamais.
+        **({"max_leaders": int(max_leaders)} if max_leaders else {}),
+        # Le seuil de notionnel du leader est DECLARE : il dit quelle part du corpus est exploree
+        # et pourquoi, donc il est lisible et refusable.
+        **({"min_notionnel_leader_usd": float(min_notionnel_leader)}
+           if min_notionnel_leader else {}),
+        "provenance_note": (
+            "Corpus LOCAL certifie (coffre scelle 153/153, code 0, 18/11/2026), prepare en deux "
+            "phases. PAS passe par la chaine SAFE cloud : tout resultat est EXPLORATOIRE et ne "
+            "peut pas devenir champion."
+        ),
+        "tranches": tranches,
+        # Les rubans VIDES, nommes : une tranche sans signal est un fait du corpus,
+        # pas une anomalie a cacher. Les taire ferait croire a un corpus plus riche.
+        "rubans_vides_ecartes": len(vides),
+        "rubans_vides": vides[:20],
+        "corpus": str(corpus),
+    }
+    cible = sortie or (racine / "SAFE_INPUT_MANIFEST.json")
+    cible.write_text(
+        json.dumps(manifeste, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    return manifeste
+
+
 def entrees_de_phase_2(
     chemin: str | Path,
     *,
     tranche: tuple[int, int] | None = None,
     dire: Any = None,
+    causaux_seulement: bool = True,
+    max_leaders: int | None = None,
+    min_notionnel_leader: float | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]], dict[str, Any]]:
     """Ce que le labo appelle pour sa PHASE 2 : relire au lieu de reconstruire.
 
@@ -313,11 +606,82 @@ def entrees_de_phase_2(
         )
     parler = dire if callable(dire) else (lambda _message: None)
     parler("Phase 2 : relecture des tranches preparees (aucune reconstruction)")
-    metaordres, carnets, audit = charger_tranches_preparees(Path(chemin))
-    parler(
-        f"Phase 2 : {audit['tranches_chargees']} tranche(s), {audit['metaordres']} metaordres, "
-        f"{audit['carnets']} carnets sur {audit['coins']} coin(s)"
-    )
+
+    filtres: list[Any] = []
+    if causaux_seulement:
+        filtres.append(lambda o: o.get("causal_forward_eligible") is True)
+    if min_notionnel_leader:
+        # UN PLAFOND ECONOMIQUEMENT FONDE, pas un echantillonnage. Le corpus complet porte
+        # 4 618 095 metaordres : hors d'echelle pour le labo, qui en traitait 8 176. Plutot que de
+        # tirer au hasard -- ce qui briserait les cycles d'un leader et fabriquerait des positions
+        # qui ne se ferment jamais -- on applique le critere que le protocole porte deja : un
+        # notionnel minimum du leader. Avec 100 USD de capital, on copie des mouvements
+        # significatifs, pas des micro-ajustements.
+        #
+        # Mesure du 18/11/2026 sur les 6 journees, par seuil de notionnel leader :
+        #     >=     100 USD : 3 010 753 metaordres        >=  20 000 USD :  74 345
+        #     >=   1 000 USD : 1 140 771                    >= 100 000 USD :   8 027
+        # Chaque seuil conserve les SIX journees : la couverture temporelle n'est pas sacrifiee.
+        seuil = float(min_notionnel_leader)
+
+        def _assez_gros(ordre: Mapping[str, Any]) -> bool:
+            valeur = ordre.get("leader_notional_usd")
+            try:
+                return valeur is not None and float(valeur) >= seuil
+            except (TypeError, ValueError):
+                return False
+
+        filtres.append(_assez_gros)
+    leaders_gardes: set[str] | None = None
+    if filtres or max_leaders:
+        # DEUX PASSAGES, parce qu'on ne peut pas choisir les leaders les plus actifs avant de les
+        # avoir comptes, et qu'on ne veut pas tout charger pour les compter. Le premier passage ne
+        # retient RIEN : il lit les metaordres un par un et ne garde que des compteurs.
+        parler("Phase 2 : comptage des leaders (aucun metaordre retenu)")
+        compte: dict[str, int] = {}
+
+        coins_par_leader: dict[str, set[str]] = {}
+        instants_vus: dict[str, list[int]] = {}
+
+        def _compter(ordre: Mapping[str, Any]) -> bool:
+            if all(f(ordre) for f in filtres):
+                cle = str(ordre.get("vault") or "")
+                compte[cle] = compte.get(cle, 0) + 1
+                coin_ordre = str(ordre.get("coin") or "")
+                coins_par_leader.setdefault(cle, set()).add(coin_ordre)
+                instants_vus.setdefault(coin_ordre, []).append(int(ordre["signal_ts_ms"]))
+            return False        # jamais retenu : la memoire reste plate
+
+        charger_tranches_preparees(Path(chemin), garder=_compter, sans_carnets=True)
+        leaders_gardes = (
+            {v for v, _ in sorted(compte.items(), key=lambda kv: -kv[1])[:int(max_leaders)]}
+            if max_leaders else set(compte)
+        )
+        total = sum(compte.values())
+        retenu = sum(compte[v] for v in leaders_gardes)
+        parler(
+            f"Phase 2 : {len(leaders_gardes)} leader(s) les plus actifs sur {len(compte)} "
+            f"-> {retenu} metaordres sur {total} ({100 * retenu / total:.1f}%)"
+            if total else "Phase 2 : aucun metaordre a compter"
+        )
+        if max_leaders:
+            filtres.append(lambda o: str(o.get("vault") or "") in leaders_gardes)
+        coins_utiles = {c for v in leaders_gardes for c in coins_par_leader.get(v, ())}
+        parler(f"Phase 2 : {len(coins_utiles)} coin(s) utile(s) -> les autres carnets sont ecartes")
+    else:
+        coins_utiles = None
+
+    instants_utiles = None
+    if coins_utiles is not None:
+        instants_utiles = {c: sorted(instants_vus.get(c, ())) for c in coins_utiles}
+        total_instants = sum(len(v) for v in instants_utiles.values())
+        parler(f"Phase 2 : {total_instants} instant(s) de signal -> les carnets hors fenetre "
+               f"causale ne sont pas charges")
+    metaordres, carnets, audit = charger_tranches_preparees(
+        Path(chemin), garder=(lambda o: all(f(o) for f in filtres)) if filtres else None,
+        coins_utiles=coins_utiles, instants_par_coin=instants_utiles)
+    audit["leaders_retenus"] = len(leaders_gardes) if leaders_gardes is not None else None
+
     return metaordres, carnets, audit
 
 
@@ -325,7 +689,15 @@ class TranchePreparéeInvalide(RuntimeError):
     """Une tranche preparee manque, est incomplete, ou ne correspond plus a son empreinte."""
 
 
-def charger_tranches_preparees(racine: Path) -> tuple[
+def charger_tranches_preparees(
+    racine: Path,
+    *,
+    garder: Any = None,
+    coins_utiles: set[str] | None = None,
+    sans_carnets: bool = False,
+    instants_par_coin: Mapping[str, Sequence[int]] | None = None,
+    fenetre_ms: int = MAX_BOOK_AGE_MS,
+) -> tuple[
     list[dict[str, Any]], dict[str, list[dict[str, Any]]], dict[str, Any]
 ]:
     """PHASE 2 : relit toutes les tranches preparees et les fusionne.
@@ -371,7 +743,14 @@ def charger_tranches_preparees(racine: Path) -> tuple[
                     f"({reel[:12]} au lieu de {str(manifeste.get(cle))[:12]})"
                 )
 
-        for ordre in _lire_jsonl(chemin_meta):
+        for ordre in _flux_jsonl(chemin_meta):
+            # LE FILTRE S'APPLIQUE ICI, PAS APRES. Filtrer une fois tout charge ne protege rien :
+            # le corpus complet (4 618 095 metaordres, 15,4 Go) passe alors entierement en memoire
+            # avant d'etre reduit, et la machine tombe -- mesure du 18/11/2026 : la RAM libre est
+            # descendue de 14 a 4,7 Go avant que j'arrete le processus. Un filtre de reduction qui
+            # s'applique trop tard est un filtre qui ne sert a rien.
+            if garder is not None and not garder(ordre):
+                continue
             cle_ordre = (
                 str(ordre.get("coin")),
                 int(ordre.get("signal_ts_ms", -1)),
@@ -384,9 +763,36 @@ def charger_tranches_preparees(racine: Path) -> tuple[
             vus.add(cle_ordre)
             metaordres.append(ordre)
 
-        for bloc in _lire_jsonl(chemin_carnets):
+        for bloc in (() if sans_carnets else _flux_jsonl(chemin_carnets)):
+            # `sans_carnets` existe pour le passage de COMPTAGE. Sans lui, ce passage ne retenait
+            # aucun metaordre mais chargeait quand meme les 19 137 904 carnets : la RAM libre est
+            # tombee de 20 a 1,4 Go en 100 secondes, pendant une passe censee ne rien garder.
+            # Un passage « qui ne retient rien » doit aussi ne RIEN LIRE d'inutile.
             coin = str(bloc["coin"])
-            carnets.setdefault(coin, []).extend(bloc["carnets"])
+            # LES CARNETS SUIVENT LA SELECTION. Filtrer les metaordres sans filtrer les carnets ne
+            # protege qu'a moitie : le corpus du 18/11/2026 porte 19 137 904 carnets, soit bien
+            # plus de memoire que ses 4,6 M de metaordres. Un carnet d'un coin que plus aucun
+            # metaordre retenu ne touche ne sera jamais lu par l'alignement.
+            if coins_utiles is not None and coin not in coins_utiles:
+                continue
+            instants = None if instants_par_coin is None else instants_par_coin.get(coin)
+            if instants_par_coin is not None and not instants:
+                continue
+            if instants is None:
+                carnets.setdefault(coin, []).extend(bloc["carnets"])
+                continue
+            # LA FENETRE CAUSALE AU CHARGEMENT. Meme reduits a 52 coins, les carnets de ces coins
+            # pesaient 17,24 Go en memoire. Or l'alignement ne lit qu'un carnet dans les
+            # `fenetre_ms` qui PRECEDENT un signal : tout le reste est transporte pour rien. C'est
+            # le raisonnement de la phase 1, applique un niveau plus bas -- et c'est la quatrieme
+            # fois cette nuit que la lecon est la meme : un filtre qui s'applique trop tard ne
+            # protege rien.
+            retenus = carnets.setdefault(coin, [])
+            for carnet in bloc["carnets"]:
+                ts = int(carnet["ts_ms"])
+                i = bisect.bisect_left(instants, ts)
+                if i < len(instants) and instants[i] - ts <= fenetre_ms:
+                    retenus.append(carnet)
 
         manifestes.append(manifeste)
 
