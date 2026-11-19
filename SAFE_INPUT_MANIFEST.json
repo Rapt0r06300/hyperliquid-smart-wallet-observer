@@ -1,0 +1,617 @@
+{
+  "champion_eligible": false,
+  "corpus": "runtime\\labo_phase1",
+  "exploratory_only": true,
+  "paper_read_only": true,
+  "provenance_note": "Corpus LOCAL certifie (coffre scelle 153/153, code 0, 18/11/2026), prepare en deux phases. PAS passe par la chaine SAFE cloud : tout resultat est EXPLORATOIRE et ne peut pas devenir champion.",
+  "real_execution": false,
+  "replay_inputs_available": true,
+  "rubans_vides": [],
+  "rubans_vides_ecartes": 0,
+  "safe_catalog_status": "LOCAL_CERTIFIED",
+  "selection_digest": "c7d71dd718d2f1ce520a39d25bebd7fca2bcc1fad599e882bad0ada56f5aa515",
+  "source_asset_inventory_complete": true,
+  "source_asset_inventory_count": 66,
+  "source_asset_inventory_sha256": "1d89c5f3e2d0c6f39dd6d1abe73608623c3d9e77270d1906151492a6293a595f",
+  "source_index_sha256": "2b5c78c24a196c2b64cabdf6388c06f4ce1710eb5c9ab74c1c332dce672a92e6",
+  "status": "MORE_DATA",
+  "tranches": 33,
+  "unique_books": 513204,
+  "unique_fills": 8708,
+  "verified_source_assets": [
+    {
+      "bytes": 157091,
+      "dataset_id": "t001_1794528000000_1794535199999/metaordres.jsonl",
+      "family": "copy_vault_fills",
+      "manifest_path": "runtime\\labo_phase1\\t001_1794528000000_1794535199999\\MANIFESTE.json",
+      "release_asset": "t001_1794528000000_1794535199999-metaordres.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "b0a376f77847ec41c20cf9d83815b213bf9b9c5dcce6b80c19c37ce154b72b3a"
+    },
+    {
+      "bytes": 3567370,
+      "dataset_id": "t001_1794528000000_1794535199999/carnets.jsonl",
+      "family": "copy_vault_l2",
+      "manifest_path": "runtime\\labo_phase1\\t001_1794528000000_1794535199999\\MANIFESTE.json",
+      "release_asset": "t001_1794528000000_1794535199999-carnets.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "04759d6a3f29e7b97c410d62c4f866f11abd14ca78f74880f38f518042aa1029"
+    },
+    {
+      "bytes": 595859,
+      "dataset_id": "t002_1794535200000_1794542399999/metaordres.jsonl",
+      "family": "copy_vault_fills",
+      "manifest_path": "runtime\\labo_phase1\\t002_1794535200000_1794542399999\\MANIFESTE.json",
+      "release_asset": "t002_1794535200000_1794542399999-metaordres.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "21c4dc3aac47334a4133e60f6fc6f1857da4a6423fd4454657d33dd18eeeba7f"
+    },
+    {
+      "bytes": 5277547,
+      "dataset_id": "t002_1794535200000_1794542399999/carnets.jsonl",
+      "family": "copy_vault_l2",
+      "manifest_path": "runtime\\labo_phase1\\t002_1794535200000_1794542399999\\MANIFESTE.json",
+      "release_asset": "t002_1794535200000_1794542399999-carnets.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "a78113c74e0b58cb6969efcd1e5e289e5c6dbe001d1d66e7c26917033e1095e3"
+    },
+    {
+      "bytes": 306455,
+      "dataset_id": "t003_1794542400000_1794549599999/metaordres.jsonl",
+      "family": "copy_vault_fills",
+      "manifest_path": "runtime\\labo_phase1\\t003_1794542400000_1794549599999\\MANIFESTE.json",
+      "release_asset": "t003_1794542400000_1794549599999-metaordres.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "a3e591d4ba8091ea603fe1673db9b6d39586e0de4e2a24d2e5f795a02cdf0b66"
+    },
+    {
+      "bytes": 5797541,
+      "dataset_id": "t003_1794542400000_1794549599999/carnets.jsonl",
+      "family": "copy_vault_l2",
+      "manifest_path": "runtime\\labo_phase1\\t003_1794542400000_1794549599999\\MANIFESTE.json",
+      "release_asset": "t003_1794542400000_1794549599999-carnets.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "94a119df95404463331b5de4e6e6f756fd61a1d21390a9ff579db4d7a2d36926"
+    },
+    {
+      "bytes": 122015,
+      "dataset_id": "t004_1794549600000_1794556799999/metaordres.jsonl",
+      "family": "copy_vault_fills",
+      "manifest_path": "runtime\\labo_phase1\\t004_1794549600000_1794556799999\\MANIFESTE.json",
+      "release_asset": "t004_1794549600000_1794556799999-metaordres.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "ff9238a5a68cd33c4e2026cb1cb5103685275e2411066816ad8de40a89a4d5b7"
+    },
+    {
+      "bytes": 4400213,
+      "dataset_id": "t004_1794549600000_1794556799999/carnets.jsonl",
+      "family": "copy_vault_l2",
+      "manifest_path": "runtime\\labo_phase1\\t004_1794549600000_1794556799999\\MANIFESTE.json",
+      "release_asset": "t004_1794549600000_1794556799999-carnets.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "369ff08331dcc9daa4f1f0b4107407ae8f1ba7da16b1ad95d5b9f4597c1f4ab0"
+    },
+    {
+      "bytes": 84354,
+      "dataset_id": "t005_1794556800000_1794563999999/metaordres.jsonl",
+      "family": "copy_vault_fills",
+      "manifest_path": "runtime\\labo_phase1\\t005_1794556800000_1794563999999\\MANIFESTE.json",
+      "release_asset": "t005_1794556800000_1794563999999-metaordres.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "e907e6adfa2f846c55874171997778df201dadd4d3bc39b0ec5840017c0a46ef"
+    },
+    {
+      "bytes": 2746975,
+      "dataset_id": "t005_1794556800000_1794563999999/carnets.jsonl",
+      "family": "copy_vault_l2",
+      "manifest_path": "runtime\\labo_phase1\\t005_1794556800000_1794563999999\\MANIFESTE.json",
+      "release_asset": "t005_1794556800000_1794563999999-carnets.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "81c1397bc35c06723c11e1b1cecb4e2eaa715cf84710e0163b607e6ca1b205a2"
+    },
+    {
+      "bytes": 41595,
+      "dataset_id": "t006_1794564000000_1794571199999/metaordres.jsonl",
+      "family": "copy_vault_fills",
+      "manifest_path": "runtime\\labo_phase1\\t006_1794564000000_1794571199999\\MANIFESTE.json",
+      "release_asset": "t006_1794564000000_1794571199999-metaordres.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "cff7ec028d4af6b9ac15b3ca0b78153255a8b4f4dcf9a0fa2ecfbc967f078b53"
+    },
+    {
+      "bytes": 3270659,
+      "dataset_id": "t006_1794564000000_1794571199999/carnets.jsonl",
+      "family": "copy_vault_l2",
+      "manifest_path": "runtime\\labo_phase1\\t006_1794564000000_1794571199999\\MANIFESTE.json",
+      "release_asset": "t006_1794564000000_1794571199999-carnets.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "e27bdca5ecfe0bb816667c1ee9afd41841b7c999c1b4e6a2c6ac14fc23d43bf1"
+    },
+    {
+      "bytes": 295273,
+      "dataset_id": "t007_1794571200000_1794578399999/metaordres.jsonl",
+      "family": "copy_vault_fills",
+      "manifest_path": "runtime\\labo_phase1\\t007_1794571200000_1794578399999\\MANIFESTE.json",
+      "release_asset": "t007_1794571200000_1794578399999-metaordres.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "6a136ccfc6ddb6f19d7e378ca93e491bec9881328b717ef1bba4b220a8289cc1"
+    },
+    {
+      "bytes": 4091900,
+      "dataset_id": "t007_1794571200000_1794578399999/carnets.jsonl",
+      "family": "copy_vault_l2",
+      "manifest_path": "runtime\\labo_phase1\\t007_1794571200000_1794578399999\\MANIFESTE.json",
+      "release_asset": "t007_1794571200000_1794578399999-carnets.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "fdc1fad26b5e364c274eaefc3ca79d6a7f37b6eba509d9996474d49c5575bc95"
+    },
+    {
+      "bytes": 94951,
+      "dataset_id": "t008_1794578400000_1794581999999/metaordres.jsonl",
+      "family": "copy_vault_fills",
+      "manifest_path": "runtime\\labo_phase1\\t008_1794578400000_1794581999999\\MANIFESTE.json",
+      "release_asset": "t008_1794578400000_1794581999999-metaordres.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "b091984589f47b31ee7cd959077fb7eea66b1edf4626cbfd44ca88982c766cc7"
+    },
+    {
+      "bytes": 3640393,
+      "dataset_id": "t008_1794578400000_1794581999999/carnets.jsonl",
+      "family": "copy_vault_l2",
+      "manifest_path": "runtime\\labo_phase1\\t008_1794578400000_1794581999999\\MANIFESTE.json",
+      "release_asset": "t008_1794578400000_1794581999999-carnets.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "ea3631f1e3ca23906602e73740df2ce5f7d5df4114df368144f6e63991a067fe"
+    },
+    {
+      "bytes": 278272,
+      "dataset_id": "t009_1794582000000_1794585599999/metaordres.jsonl",
+      "family": "copy_vault_fills",
+      "manifest_path": "runtime\\labo_phase1\\t009_1794582000000_1794585599999\\MANIFESTE.json",
+      "release_asset": "t009_1794582000000_1794585599999-metaordres.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "141ba812d0509f8f49d32f0790aee34aeefc31c973a8216d6cb1d798a19dfa9c"
+    },
+    {
+      "bytes": 5150307,
+      "dataset_id": "t009_1794582000000_1794585599999/carnets.jsonl",
+      "family": "copy_vault_l2",
+      "manifest_path": "runtime\\labo_phase1\\t009_1794582000000_1794585599999\\MANIFESTE.json",
+      "release_asset": "t009_1794582000000_1794585599999-carnets.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "96c2aca012d0a9c2f4f1a3cc84744a2f5b929755e649a212bd3ca28cee638f2a"
+    },
+    {
+      "bytes": 143925,
+      "dataset_id": "t010_1794585600000_1794592799999/metaordres.jsonl",
+      "family": "copy_vault_fills",
+      "manifest_path": "runtime\\labo_phase1\\t010_1794585600000_1794592799999\\MANIFESTE.json",
+      "release_asset": "t010_1794585600000_1794592799999-metaordres.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "394efe3918a3ac21ee62f99e55c6b7b200c381d665eb44053278cf661a1ae4df"
+    },
+    {
+      "bytes": 3181950,
+      "dataset_id": "t010_1794585600000_1794592799999/carnets.jsonl",
+      "family": "copy_vault_l2",
+      "manifest_path": "runtime\\labo_phase1\\t010_1794585600000_1794592799999\\MANIFESTE.json",
+      "release_asset": "t010_1794585600000_1794592799999-carnets.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "e5d2064dabced2a8d88edf3626aa26d2c18dc19eea236f91f83b875d89c86f9e"
+    },
+    {
+      "bytes": 40224,
+      "dataset_id": "t011_1794592800000_1794599999999/metaordres.jsonl",
+      "family": "copy_vault_fills",
+      "manifest_path": "runtime\\labo_phase1\\t011_1794592800000_1794599999999\\MANIFESTE.json",
+      "release_asset": "t011_1794592800000_1794599999999-metaordres.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "8da91dc1256b4882416eb4d297d9e4c65f841ae84245ac8540069878f0e56ac0"
+    },
+    {
+      "bytes": 2981710,
+      "dataset_id": "t011_1794592800000_1794599999999/carnets.jsonl",
+      "family": "copy_vault_l2",
+      "manifest_path": "runtime\\labo_phase1\\t011_1794592800000_1794599999999\\MANIFESTE.json",
+      "release_asset": "t011_1794592800000_1794599999999-carnets.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "6fa8b6ada977e15c9339b2795fe9c70ca0bdc8e236872b637ab4c00a30a8bad2"
+    },
+    {
+      "bytes": 231182,
+      "dataset_id": "t012_1794600000000_1794607199999/metaordres.jsonl",
+      "family": "copy_vault_fills",
+      "manifest_path": "runtime\\labo_phase1\\t012_1794600000000_1794607199999\\MANIFESTE.json",
+      "release_asset": "t012_1794600000000_1794607199999-metaordres.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "8dc0b9f5e57f7c547225b866dd87ac59e1631d5df89c05023184b6a0656ded25"
+    },
+    {
+      "bytes": 5188684,
+      "dataset_id": "t012_1794600000000_1794607199999/carnets.jsonl",
+      "family": "copy_vault_l2",
+      "manifest_path": "runtime\\labo_phase1\\t012_1794600000000_1794607199999\\MANIFESTE.json",
+      "release_asset": "t012_1794600000000_1794607199999-carnets.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "7df252e83c18d6d51a7aafb371085097cc05930cd9868c1b70445d1039f5b987"
+    },
+    {
+      "bytes": 129377,
+      "dataset_id": "t013_1794607200000_1794617999999/metaordres.jsonl",
+      "family": "copy_vault_fills",
+      "manifest_path": "runtime\\labo_phase1\\t013_1794607200000_1794617999999\\MANIFESTE.json",
+      "release_asset": "t013_1794607200000_1794617999999-metaordres.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "60192af7216e43d5fadf8202edfd180be68f528d87434fa1ab5d23fb90f6acb7"
+    },
+    {
+      "bytes": 4341679,
+      "dataset_id": "t013_1794607200000_1794617999999/carnets.jsonl",
+      "family": "copy_vault_l2",
+      "manifest_path": "runtime\\labo_phase1\\t013_1794607200000_1794617999999\\MANIFESTE.json",
+      "release_asset": "t013_1794607200000_1794617999999-carnets.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "5cdd2a6fd57baa28e599d47847355b0fef92d2e0bd7480f42a3018b14eff12d8"
+    },
+    {
+      "bytes": 428488,
+      "dataset_id": "t014_1794618000000_1794643199999/metaordres.jsonl",
+      "family": "copy_vault_fills",
+      "manifest_path": "runtime\\labo_phase1\\t014_1794618000000_1794643199999\\MANIFESTE.json",
+      "release_asset": "t014_1794618000000_1794643199999-metaordres.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "42406025c0d6275106997ec886cb61c4406ca296f4c47a0c20fe3bfcc8f3cb43"
+    },
+    {
+      "bytes": 11601813,
+      "dataset_id": "t014_1794618000000_1794643199999/carnets.jsonl",
+      "family": "copy_vault_l2",
+      "manifest_path": "runtime\\labo_phase1\\t014_1794618000000_1794643199999\\MANIFESTE.json",
+      "release_asset": "t014_1794618000000_1794643199999-carnets.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "74402e4fafb121d64bd742cf13eec5e5654f5d93a655e46a5fa999a4e55e004c"
+    },
+    {
+      "bytes": 351099,
+      "dataset_id": "t015_1794643200000_1794668399999/metaordres.jsonl",
+      "family": "copy_vault_fills",
+      "manifest_path": "runtime\\labo_phase1\\t015_1794643200000_1794668399999\\MANIFESTE.json",
+      "release_asset": "t015_1794643200000_1794668399999-metaordres.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "c03243f436dbb04712da408a7daab05cb59324cad3c0998fe2cb46b26578cefe"
+    },
+    {
+      "bytes": 10001980,
+      "dataset_id": "t015_1794643200000_1794668399999/carnets.jsonl",
+      "family": "copy_vault_l2",
+      "manifest_path": "runtime\\labo_phase1\\t015_1794643200000_1794668399999\\MANIFESTE.json",
+      "release_asset": "t015_1794643200000_1794668399999-carnets.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "45a06afb874abd34ba409c343315a29760ba45a4b863dd4e8cb1709e01f48a84"
+    },
+    {
+      "bytes": 1070660,
+      "dataset_id": "t016_1794668400000_1794686399999/metaordres.jsonl",
+      "family": "copy_vault_fills",
+      "manifest_path": "runtime\\labo_phase1\\t016_1794668400000_1794686399999\\MANIFESTE.json",
+      "release_asset": "t016_1794668400000_1794686399999-metaordres.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "172dfb0ce06d1f9f08c9e2db0765a57fe70cc85b673db11a90b05779201d6975"
+    },
+    {
+      "bytes": 12703118,
+      "dataset_id": "t016_1794668400000_1794686399999/carnets.jsonl",
+      "family": "copy_vault_l2",
+      "manifest_path": "runtime\\labo_phase1\\t016_1794668400000_1794686399999\\MANIFESTE.json",
+      "release_asset": "t016_1794668400000_1794686399999-carnets.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "425fa96881ecb7867ffa87750569e4e636e6bb360ba05ff1e876560e9841eabd"
+    },
+    {
+      "bytes": 1286960,
+      "dataset_id": "t017_1794686400000_1794697199999/metaordres.jsonl",
+      "family": "copy_vault_fills",
+      "manifest_path": "runtime\\labo_phase1\\t017_1794686400000_1794697199999\\MANIFESTE.json",
+      "release_asset": "t017_1794686400000_1794697199999-metaordres.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "7cb27f05a816086565e4eb5f8ae64113fc6dfcb59ef90db6166e308a526e0fe4"
+    },
+    {
+      "bytes": 12215069,
+      "dataset_id": "t017_1794686400000_1794697199999/carnets.jsonl",
+      "family": "copy_vault_l2",
+      "manifest_path": "runtime\\labo_phase1\\t017_1794686400000_1794697199999\\MANIFESTE.json",
+      "release_asset": "t017_1794686400000_1794697199999-carnets.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "81404895351e1998f3095a71cb2cb2f47009b32c72c90c21c8a6a1fd75bc6b81"
+    },
+    {
+      "bytes": 1715698,
+      "dataset_id": "t018_1794697200000_1794711599999/metaordres.jsonl",
+      "family": "copy_vault_fills",
+      "manifest_path": "runtime\\labo_phase1\\t018_1794697200000_1794711599999\\MANIFESTE.json",
+      "release_asset": "t018_1794697200000_1794711599999-metaordres.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "ab8b73a8052f489314905e505470264ee15c784cdb04f34a29f4d45e7e98f44f"
+    },
+    {
+      "bytes": 12263106,
+      "dataset_id": "t018_1794697200000_1794711599999/carnets.jsonl",
+      "family": "copy_vault_l2",
+      "manifest_path": "runtime\\labo_phase1\\t018_1794697200000_1794711599999\\MANIFESTE.json",
+      "release_asset": "t018_1794697200000_1794711599999-carnets.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "b87aa172af5ca9e366ef46889509e4774790f96735d370957df476440248b779"
+    },
+    {
+      "bytes": 1033102,
+      "dataset_id": "t019_1794711600000_1794733199999/metaordres.jsonl",
+      "family": "copy_vault_fills",
+      "manifest_path": "runtime\\labo_phase1\\t019_1794711600000_1794733199999\\MANIFESTE.json",
+      "release_asset": "t019_1794711600000_1794733199999-metaordres.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "16e450914142365c7e662b52ce909bf402977ddcac244bbc998048c54c374357"
+    },
+    {
+      "bytes": 9046323,
+      "dataset_id": "t019_1794711600000_1794733199999/carnets.jsonl",
+      "family": "copy_vault_l2",
+      "manifest_path": "runtime\\labo_phase1\\t019_1794711600000_1794733199999\\MANIFESTE.json",
+      "release_asset": "t019_1794711600000_1794733199999-carnets.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "4d0683c3164b1a98f08b3dfd8a5faf185576f547825cf7a626fef65886222bc9"
+    },
+    {
+      "bytes": 2687809,
+      "dataset_id": "t020_1794733200000_1794761999999/metaordres.jsonl",
+      "family": "copy_vault_fills",
+      "manifest_path": "runtime\\labo_phase1\\t020_1794733200000_1794761999999\\MANIFESTE.json",
+      "release_asset": "t020_1794733200000_1794761999999-metaordres.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "1ea7a9a895f09a5e59578a3daf28d954d889afd420ecff9137724a42de988862"
+    },
+    {
+      "bytes": 22766408,
+      "dataset_id": "t020_1794733200000_1794761999999/carnets.jsonl",
+      "family": "copy_vault_l2",
+      "manifest_path": "runtime\\labo_phase1\\t020_1794733200000_1794761999999\\MANIFESTE.json",
+      "release_asset": "t020_1794733200000_1794761999999-carnets.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "928e541961148faf833ab286ff6b9c2865065100f214100b2c91032a91ddd93a"
+    },
+    {
+      "bytes": 1181084,
+      "dataset_id": "t021_1794762000000_1794783599999/metaordres.jsonl",
+      "family": "copy_vault_fills",
+      "manifest_path": "runtime\\labo_phase1\\t021_1794762000000_1794783599999\\MANIFESTE.json",
+      "release_asset": "t021_1794762000000_1794783599999-metaordres.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "0db52d8243f4e79c91199c57a80f03df0a3b4f0e29d8256033e3bd28982121d6"
+    },
+    {
+      "bytes": 16096227,
+      "dataset_id": "t021_1794762000000_1794783599999/carnets.jsonl",
+      "family": "copy_vault_l2",
+      "manifest_path": "runtime\\labo_phase1\\t021_1794762000000_1794783599999\\MANIFESTE.json",
+      "release_asset": "t021_1794762000000_1794783599999-carnets.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "94616cdbebceeb4cbfff08817220802b78969b48751f9b90afd160892df787cf"
+    },
+    {
+      "bytes": 1383672,
+      "dataset_id": "t022_1794783600000_1794801599999/metaordres.jsonl",
+      "family": "copy_vault_fills",
+      "manifest_path": "runtime\\labo_phase1\\t022_1794783600000_1794801599999\\MANIFESTE.json",
+      "release_asset": "t022_1794783600000_1794801599999-metaordres.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "354dca8d4dba5f0366f2c7150e4638a1a67e563bdd205bdd8b3175054b49df07"
+    },
+    {
+      "bytes": 16597235,
+      "dataset_id": "t022_1794783600000_1794801599999/carnets.jsonl",
+      "family": "copy_vault_l2",
+      "manifest_path": "runtime\\labo_phase1\\t022_1794783600000_1794801599999\\MANIFESTE.json",
+      "release_asset": "t022_1794783600000_1794801599999-carnets.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "97fdcf2ffa1e3813370098adc8d8ee4543be4607bdcb57f54fa27d845b4856b7"
+    },
+    {
+      "bytes": 1185245,
+      "dataset_id": "t023_1794801600000_1794826799999/metaordres.jsonl",
+      "family": "copy_vault_fills",
+      "manifest_path": "runtime\\labo_phase1\\t023_1794801600000_1794826799999\\MANIFESTE.json",
+      "release_asset": "t023_1794801600000_1794826799999-metaordres.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "7e0abae53d49da91ecc832181d72e808a8a29210aca7cd854e6587b0c870a7c9"
+    },
+    {
+      "bytes": 9762861,
+      "dataset_id": "t023_1794801600000_1794826799999/carnets.jsonl",
+      "family": "copy_vault_l2",
+      "manifest_path": "runtime\\labo_phase1\\t023_1794801600000_1794826799999\\MANIFESTE.json",
+      "release_asset": "t023_1794801600000_1794826799999-carnets.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "326fef5faba9983de71f95cb914424060aa7e47d60ee1b297e1ed833ae7642cc"
+    },
+    {
+      "bytes": 2926764,
+      "dataset_id": "t024_1794826800000_1794841199999/metaordres.jsonl",
+      "family": "copy_vault_fills",
+      "manifest_path": "runtime\\labo_phase1\\t024_1794826800000_1794841199999\\MANIFESTE.json",
+      "release_asset": "t024_1794826800000_1794841199999-metaordres.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "54b21a2427c5a7a0d2404b356c607839eafcf8c5705f0d4f42f329a81c0a4c65"
+    },
+    {
+      "bytes": 15837568,
+      "dataset_id": "t024_1794826800000_1794841199999/carnets.jsonl",
+      "family": "copy_vault_l2",
+      "manifest_path": "runtime\\labo_phase1\\t024_1794826800000_1794841199999\\MANIFESTE.json",
+      "release_asset": "t024_1794826800000_1794841199999-carnets.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "47cd87ac090f188becc7afe586937bdd9cd245e8faea5ea113f4414470a6ac7c"
+    },
+    {
+      "bytes": 4707867,
+      "dataset_id": "t025_1794841200000_1794862799999/metaordres.jsonl",
+      "family": "copy_vault_fills",
+      "manifest_path": "runtime\\labo_phase1\\t025_1794841200000_1794862799999\\MANIFESTE.json",
+      "release_asset": "t025_1794841200000_1794862799999-metaordres.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "cd33f98145cfdf62ab0a8f3ef6b5c10389997f398b84e23fcf7bf05c74f1ef2d"
+    },
+    {
+      "bytes": 25539357,
+      "dataset_id": "t025_1794841200000_1794862799999/carnets.jsonl",
+      "family": "copy_vault_l2",
+      "manifest_path": "runtime\\labo_phase1\\t025_1794841200000_1794862799999\\MANIFESTE.json",
+      "release_asset": "t025_1794841200000_1794862799999-carnets.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "9608cb52dbd9985651744692f1fff17ff6615f5719d2515594304b1abdd6df5b"
+    },
+    {
+      "bytes": 1570447,
+      "dataset_id": "t026_1794862800000_1794884399999/metaordres.jsonl",
+      "family": "copy_vault_fills",
+      "manifest_path": "runtime\\labo_phase1\\t026_1794862800000_1794884399999\\MANIFESTE.json",
+      "release_asset": "t026_1794862800000_1794884399999-metaordres.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "6f5d175d4bd3ff79ba6f2117106afade9d4d2fc3b08e41c5217fee076a39bb71"
+    },
+    {
+      "bytes": 17673889,
+      "dataset_id": "t026_1794862800000_1794884399999/carnets.jsonl",
+      "family": "copy_vault_l2",
+      "manifest_path": "runtime\\labo_phase1\\t026_1794862800000_1794884399999\\MANIFESTE.json",
+      "release_asset": "t026_1794862800000_1794884399999-carnets.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "0b99af9cf48672b53d075b1c87c0aae69db87cff8c4d282666d06874cd2c6ef4"
+    },
+    {
+      "bytes": 1583077,
+      "dataset_id": "t027_1794884400000_1794913199999/metaordres.jsonl",
+      "family": "copy_vault_fills",
+      "manifest_path": "runtime\\labo_phase1\\t027_1794884400000_1794913199999\\MANIFESTE.json",
+      "release_asset": "t027_1794884400000_1794913199999-metaordres.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "b63ed0260c2d8fd3fe1993abf43343d25630e015d5b06553bf6f7c4569ba8be6"
+    },
+    {
+      "bytes": 18390378,
+      "dataset_id": "t027_1794884400000_1794913199999/carnets.jsonl",
+      "family": "copy_vault_l2",
+      "manifest_path": "runtime\\labo_phase1\\t027_1794884400000_1794913199999\\MANIFESTE.json",
+      "release_asset": "t027_1794884400000_1794913199999-carnets.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "a0ae2d40e2eea80a64328da2592f5eef7f497aebff13af516bef9a71924ddf0b"
+    },
+    {
+      "bytes": 2709625,
+      "dataset_id": "t028_1794913200000_1794934799999/metaordres.jsonl",
+      "family": "copy_vault_fills",
+      "manifest_path": "runtime\\labo_phase1\\t028_1794913200000_1794934799999\\MANIFESTE.json",
+      "release_asset": "t028_1794913200000_1794934799999-metaordres.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "ccedfac769159129bbc3aed6952e680998b7fc2d219caaac05a88e2c550f44f3"
+    },
+    {
+      "bytes": 21462273,
+      "dataset_id": "t028_1794913200000_1794934799999/carnets.jsonl",
+      "family": "copy_vault_l2",
+      "manifest_path": "runtime\\labo_phase1\\t028_1794913200000_1794934799999\\MANIFESTE.json",
+      "release_asset": "t028_1794913200000_1794934799999-carnets.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "7533d5fe6c52f4b0c4edc0f115c64237ab60eba5c5698a17a5b45b2d51ec34f0"
+    },
+    {
+      "bytes": 1109808,
+      "dataset_id": "t029_1794934800000_1794952799999/metaordres.jsonl",
+      "family": "copy_vault_fills",
+      "manifest_path": "runtime\\labo_phase1\\t029_1794934800000_1794952799999\\MANIFESTE.json",
+      "release_asset": "t029_1794934800000_1794952799999-metaordres.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "4284fb93f35c6290010d227868ca5e5ad9b3c72172dd7e0a33e35dae7e459b6f"
+    },
+    {
+      "bytes": 16310945,
+      "dataset_id": "t029_1794934800000_1794952799999/carnets.jsonl",
+      "family": "copy_vault_l2",
+      "manifest_path": "runtime\\labo_phase1\\t029_1794934800000_1794952799999\\MANIFESTE.json",
+      "release_asset": "t029_1794934800000_1794952799999-carnets.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "bec3003e10fcf168bbe6154a917bdfc4cc603d4ba06738ad56f2780426001c6f"
+    },
+    {
+      "bytes": 951263,
+      "dataset_id": "t030_1794952800000_1794970799999/metaordres.jsonl",
+      "family": "copy_vault_fills",
+      "manifest_path": "runtime\\labo_phase1\\t030_1794952800000_1794970799999\\MANIFESTE.json",
+      "release_asset": "t030_1794952800000_1794970799999-metaordres.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "673964e5c0ce3b9925ae0ef9fb3ff66e486ec1ba000a222bb79b6a8fb62e44dc"
+    },
+    {
+      "bytes": 16390715,
+      "dataset_id": "t030_1794952800000_1794970799999/carnets.jsonl",
+      "family": "copy_vault_l2",
+      "manifest_path": "runtime\\labo_phase1\\t030_1794952800000_1794970799999\\MANIFESTE.json",
+      "release_asset": "t030_1794952800000_1794970799999-carnets.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "5c6f8d18974fd5ddab906a00485b9ffdcecccd730d27644c6405b55b451635a6"
+    },
+    {
+      "bytes": 572954,
+      "dataset_id": "t031_1794970800000_1794999599999/metaordres.jsonl",
+      "family": "copy_vault_fills",
+      "manifest_path": "runtime\\labo_phase1\\t031_1794970800000_1794999599999\\MANIFESTE.json",
+      "release_asset": "t031_1794970800000_1794999599999-metaordres.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "bbcde99ee40a599a02365d6c8878515067fa799a76f8d28165dd098db191d8bd"
+    },
+    {
+      "bytes": 13020859,
+      "dataset_id": "t031_1794970800000_1794999599999/carnets.jsonl",
+      "family": "copy_vault_l2",
+      "manifest_path": "runtime\\labo_phase1\\t031_1794970800000_1794999599999\\MANIFESTE.json",
+      "release_asset": "t031_1794970800000_1794999599999-carnets.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "3e896f041e798da023089f1e7e6a9914b103992f8f04075b886bacd4bcaff686"
+    },
+    {
+      "bytes": 1349622,
+      "dataset_id": "t032_1794999600000_1795017599999/metaordres.jsonl",
+      "family": "copy_vault_fills",
+      "manifest_path": "runtime\\labo_phase1\\t032_1794999600000_1795017599999\\MANIFESTE.json",
+      "release_asset": "t032_1794999600000_1795017599999-metaordres.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "5bf9d5fcf6c545874bf929b5407865c7f46be05cef36e12aec61f8455a8899b1"
+    },
+    {
+      "bytes": 15574478,
+      "dataset_id": "t032_1794999600000_1795017599999/carnets.jsonl",
+      "family": "copy_vault_l2",
+      "manifest_path": "runtime\\labo_phase1\\t032_1794999600000_1795017599999\\MANIFESTE.json",
+      "release_asset": "t032_1794999600000_1795017599999-carnets.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "fbfc5e5562048246c7e789d2eedbffd02d80cc8a52608173d660a314bbdf4ec4"
+    },
+    {
+      "bytes": 624104,
+      "dataset_id": "t033_1795017600000_1795035599999/metaordres.jsonl",
+      "family": "copy_vault_fills",
+      "manifest_path": "runtime\\labo_phase1\\t033_1795017600000_1795035599999\\MANIFESTE.json",
+      "release_asset": "t033_1795017600000_1795035599999-metaordres.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "e5c4b1165e0f06f0328a06556e794ad28775a18a085d999fc58220ca6ede31a4"
+    },
+    {
+      "bytes": 14864770,
+      "dataset_id": "t033_1795017600000_1795035599999/carnets.jsonl",
+      "family": "copy_vault_l2",
+      "manifest_path": "runtime\\labo_phase1\\t033_1795017600000_1795035599999\\MANIFESTE.json",
+      "release_asset": "t033_1795017600000_1795035599999-carnets.jsonl",
+      "release_tag": "LOCAL-COFFRE-SCELLE",
+      "sha256": "da6896baed40ac192ac9db13b920bdd0bd7af32853dd651b971dd6ba50883781"
+    }
+  ]
+}
