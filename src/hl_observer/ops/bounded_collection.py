@@ -97,6 +97,89 @@ def resolve_project_python(root: str | Path) -> Path:
     raise FileNotFoundError("no usable Python executable for bounded collection")
 
 
+_BELOW_NORMAL_PRIORITY_CLASS = 0x00004000
+
+#: Part des coeurs logiques reservee aux collecteurs. L operateur a autorise 60 % le
+#: 19/11/2026. Mettre 0 (ou une valeur hors ]0, 1]) desactive toute affinite et rend
+#: le comportement d avant : priorite IDLE, tous les coeurs, cede des qu une
+#: application normale demande le processeur.
+FRACTION_COEURS_DEFAUT = 0.6
+VAR_FRACTION_COEURS = "HL_COLLECTEURS_FRACTION_COEURS"
+
+
+def fraction_coeurs(environnement: Mapping[str, str] | None = None) -> float:
+    """Fraction des coeurs reservee aux collecteurs, bornee a ]0, 1]."""
+    brut = (environnement or os.environ).get(VAR_FRACTION_COEURS, "")
+    try:
+        valeur = float(str(brut).strip().replace(",", ".")) if str(brut).strip() else FRACTION_COEURS_DEFAUT
+    except ValueError:
+        return FRACTION_COEURS_DEFAUT
+    return valeur if 0.0 < valeur <= 1.0 else 0.0
+
+
+def coeurs_autorises(*, total: int | None = None,
+                     environnement: Mapping[str, str] | None = None) -> tuple[int, ...]:
+    """Les coeurs logiques reserves aux collecteurs, ou () si aucune affinite.
+
+    POURQUOI UNE AFFINITE ET PAS SEULEMENT UNE PRIORITE. La priorite IDLE laisse les
+    collecteurs prendre TOUS les coeurs quand la machine est libre, mais les affame des
+    que l operateur travaille : leur debit s ecroule au pire moment. Reserver une PART
+    des coeurs donne les deux garanties a la fois -- ils travaillent vraiment sur leur
+    part, et ne touchent JAMAIS le reste, donc la machine reste reactive.
+
+    On prend les coeurs du HAUT : les premiers portent par convention les threads
+    systeme et l interface, ceux que l operateur sent en premier.
+    """
+    fraction = fraction_coeurs(environnement)
+    if fraction <= 0.0:
+        return ()
+    n_total = int(total if total is not None else (os.cpu_count() or 1))
+    if n_total <= 1:
+        return ()
+    n = max(1, min(n_total, int(n_total * fraction)))
+    if n >= n_total:
+        return ()   # rien a reserver : tout est deja autorise
+    return tuple(range(n_total - n, n_total))
+
+
+def appliquer_budget_cpu(processus: Any, *, psutil_mod: Any = None,
+                         environnement: Mapping[str, str] | None = None,
+                         total_coeurs: int | None = None) -> dict[str, Any]:
+    """Reserve la part de coeurs au processus, et ne releve sa priorite QUE si ca a marche.
+
+    FAIL-SAFE : sans affinite (psutil absent, plateforme sans affinite, droits refuses),
+    on GARDE la priorite IDLE. Relever la priorite sans avoir borne les coeurs rendrait
+    la machine moins reactive -- exactement ce que l operateur ne demande pas.
+    """
+    audit: dict[str, Any] = {"coeurs": [], "priorite": "IDLE", "raison": ""}
+    coeurs = coeurs_autorises(total=total_coeurs, environnement=environnement)
+    if not coeurs:
+        audit["raison"] = "aucune affinite demandee"
+        return audit
+    if psutil_mod is None:
+        try:
+            import psutil as psutil_mod   # type: ignore[no-redef]
+        except ImportError:
+            audit["raison"] = "psutil absent"
+            return audit
+    pid = getattr(processus, "pid", None)
+    if not pid:
+        audit["raison"] = "processus sans pid"
+        return audit
+    try:
+        poignee = psutil_mod.Process(int(pid))
+        poignee.cpu_affinity(list(coeurs))
+    except Exception as exc:                      # noqa: BLE001 - jamais fatal au lancement
+        audit["raison"] = "affinite refusee: %s" % type(exc).__name__
+        return audit
+    audit["coeurs"] = list(coeurs)
+    try:
+        poignee.nice(getattr(psutil_mod, "BELOW_NORMAL_PRIORITY_CLASS", 0))
+        audit["priorite"] = "BELOW_NORMAL"
+    except Exception as exc:                      # noqa: BLE001
+        audit["raison"] = "priorite inchangee: %s" % type(exc).__name__
+    return audit
+
 def _background_creation_flags(platform_name: str = os.name) -> int:
     if platform_name != "nt":
         return 0
@@ -124,7 +207,7 @@ def _default_spawn(
         "env": dict(environment),
     }
     try:
-        return subprocess.Popen(  # noqa: S603 - fixed local runner and registry scripts
+        processus = subprocess.Popen(  # noqa: S603 - fixed local runner and registry scripts
             command,
             creationflags=flags,
             **kwargs,
@@ -135,11 +218,16 @@ def _default_spawn(
         # no-window/process-group contract instead of failing startup.
         if os.name != "nt" or getattr(exc, "winerror", None) not in {5, 87}:
             raise
-        return subprocess.Popen(  # noqa: S603 - same fixed local command
+        processus = subprocess.Popen(  # noqa: S603 - same fixed local command
             command,
             creationflags=flags & ~_CREATE_BREAKAWAY_FROM_JOB,
             **kwargs,
         )
+    # Budget CPU de l operateur (60 % des coeurs par defaut) applique APRES le lancement :
+    # creationflags ne sait pas poser une affinite. Jamais fatal -- si ca echoue, le
+    # processus reste en IDLE sur tous les coeurs, c est-a-dire le comportement d avant.
+    appliquer_budget_cpu(processus)
+    return processus
 
 
 def _bounded_process_ids(processes: list[dict[str, Any]]) -> set[int]:

@@ -100,6 +100,63 @@ def age_vie_minutes(root: Path, c: dict[str, Any], *, maintenant: float | None =
     return age_log_minutes(root, c["nom"], maintenant=maintenant)
 
 
+#: Plafond RAM par collecteur, en Mo. Au-dela, le superviseur le SIGNALE (il ne tue
+#: rien de lui-meme : un collecteur occupe est utile, et le tuer perdrait son lot en
+#: cours). 19/11/2026 : mesure des imports seuls = 25 a 42 Mo par processus.
+PLAFOND_RSS_MO_DEFAUT = 700.0
+VAR_PLAFOND_RSS = "HL_COLLECTEURS_PLAFOND_RSS_MO"
+
+
+def plafond_rss_mo(environnement=None) -> float:
+    """Plafond RAM par collecteur (Mo). <= 0 desactive la surveillance."""
+    brut = (environnement if environnement is not None else os.environ).get(VAR_PLAFOND_RSS, "")
+    try:
+        return float(str(brut).strip().replace(",", ".")) if str(brut).strip() else PLAFOND_RSS_MO_DEFAUT
+    except ValueError:
+        return PLAFOND_RSS_MO_DEFAUT
+
+
+def rss_par_collecteur(*, psutil_mod=None, mon_pid: int | None = None) -> dict[str, float]:
+    """RAM resident (Mo) par collecteur, mesuree sur les processus VIVANTS.
+
+    POURQUOI MESURER AU LIEU D OPTIMISER AU HASARD. Sans chiffre par collecteur, on
+    reduit des tampons au hasard et on degrade le debit sans savoir ce qu on a gagne.
+    Chaque cycle etant un processus court (boucle_collecteur.cmd relance le script),
+    la RAM ne s accumule pas entre cycles : ce qui compte est le PIC d un cycle.
+
+    PIEGE EVITE. Un filtre de processus dont le motif figure dans sa PROPRE ligne de
+    commande se compte lui-meme (ou, pire, se tue). On exclut donc explicitement le
+    processus courant et ses ancetres.
+    """
+    if psutil_mod is None:
+        try:
+            import psutil as psutil_mod   # type: ignore[no-redef]
+        except ImportError:
+            return {}
+    moi = int(mon_pid if mon_pid is not None else os.getpid())
+    exclus = {moi}
+    try:
+        exclus |= {int(a.pid) for a in psutil_mod.Process(moi).parents()}
+    except Exception:                             # noqa: BLE001
+        pass
+    par_script = {str(c["script"]).replace(chr(92), "/").rsplit("/", 1)[-1]: c["nom"]
+                  for c in REGISTRE}
+    out: dict[str, float] = {}
+    for proc in psutil_mod.process_iter(["pid", "cmdline", "memory_info"]):
+        try:
+            if int(proc.info.get("pid") or 0) in exclus:
+                continue
+            ligne = " ".join(proc.info.get("cmdline") or ()).replace(chr(92), "/")
+            for script, nom in par_script.items():
+                if script and script in ligne:
+                    mi = proc.info.get("memory_info")
+                    if mi is not None:
+                        out[nom] = out.get(nom, 0.0) + mi.rss / 1048576.0
+                    break
+        except Exception:                         # noqa: BLE001 - un processus peut mourir pendant le scan
+            continue
+    return {k: round(v, 1) for k, v in out.items()}
+
 def etat_collecteurs(
     root: Path,
     *,
@@ -108,6 +165,8 @@ def etat_collecteurs(
 ) -> list[dict[str, Any]]:
     """Un dict par collecteur du REGISTRE : {nom, age_minutes, limite_minutes, mort}."""
     out: list[dict[str, Any]] = []
+    rss = rss_par_collecteur()
+    plafond = plafond_rss_mo()
     for c in collecteurs_pour_profil(profil):
         age = age_vie_minutes(root, c, maintenant=maintenant)
         out.append({
@@ -117,6 +176,10 @@ def etat_collecteurs(
             "limite_minutes": c["limite_minutes"],
             # log absent = mort (jamais démarré), log figé au-delà de la limite = mort.
             "mort": age is None or age > c["limite_minutes"],
+            "rss_mo": rss.get(c["nom"]),
+            "plafond_rss_mo": plafond if plafond > 0 else None,
+            # SIGNALE seulement : on ne tue pas un collecteur occupe, on le montre.
+            "trop_gros": bool(plafond > 0 and (rss.get(c["nom"]) or 0.0) > plafond),
         })
     return out
 

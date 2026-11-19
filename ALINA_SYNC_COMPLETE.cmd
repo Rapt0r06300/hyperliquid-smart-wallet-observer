@@ -71,10 +71,10 @@ if defined DEFAULT_SAFE_ARGS (set "ALINA_LAUNCH_MODE=default-all-safe") else (se
 call "%ALINA_ROOT%tools\launcher_log.cmd" "ALINA_SYNC_COMPLETE" START preflight "sync-request" ""
 if defined DEFAULT_SAFE_ARGS (
     call "%ALINA_ROOT%tools\launcher_log.cmd" "ALINA_SYNC_COMPLETE" STEP download "sync_complete_clone.py" ""
-    "!ALINA_SYNC_PYTHON!" !ALINA_SYNC_PY_ARGS! "%ALINA_ROOT%tools\sync_complete_clone.py" !DEFAULT_SAFE_ARGS!
+    "!ALINA_SYNC_PYTHON!" "%ALINA_ROOT%tools\tee_console.py" "%ALINA_ROOT%runtime\logs\launchers\ALINA_SYNC_COMPLETE.output.log" -- "!ALINA_SYNC_PYTHON!" !ALINA_SYNC_PY_ARGS! "%ALINA_ROOT%tools\sync_complete_clone.py" !DEFAULT_SAFE_ARGS!
 ) else (
     call "%ALINA_ROOT%tools\launcher_log.cmd" "ALINA_SYNC_COMPLETE" STEP download "sync_complete_clone.py" ""
-    "!ALINA_SYNC_PYTHON!" !ALINA_SYNC_PY_ARGS! "%ALINA_ROOT%tools\sync_complete_clone.py" %*
+    "!ALINA_SYNC_PYTHON!" "%ALINA_ROOT%tools\tee_console.py" "%ALINA_ROOT%runtime\logs\launchers\ALINA_SYNC_COMPLETE.output.log" -- "!ALINA_SYNC_PYTHON!" !ALINA_SYNC_PY_ARGS! "%ALINA_ROOT%tools\sync_complete_clone.py" %*
 )
 set "RC=!ERRORLEVEL!"
 call "%ALINA_ROOT%tools\launcher_log.cmd" "ALINA_SYNC_COMPLETE" RESULT primary-sync "sync_complete_clone.py" "!RC!"
@@ -122,6 +122,19 @@ goto :sync_complete
 call "%ALINA_ROOT%tools\launcher_log.cmd" "ALINA_SYNC_COMPLETE" SUMMARY github-lanes "skipped-for-non-download-mode" "0"
 
 :sync_complete
+rem 19/11/2026 -- 12 MINUTES DE SILENCE PUIS RIEN. Les lanes ecrivent dans le journal, mais
+rem l etape principale ecrivait sur une console qui se referme : le SEUL message expliquant
+rem l echec etait donc perdu. Il passe desormais par tee_console (console ET journal), et on
+rem le rappelle ici en clair. Cause de loin la plus frequente : du code local non committe,
+rem qu AlinaSync refuse d ecraser (fail-closed, sans reset ni stash).
+if not "!RC!"=="0" (
+    echo.
+    echo [ECHEC] AlinaSync s est arrete avec le code !RC!.
+    echo         Cause habituelle : du CODE local non committe. AlinaSync ne l ecrase jamais.
+    echo         Remede : lancer POUSSER-GITHUB.cmd, puis relancer AlinaSync.
+    echo         Detail complet : runtime\logs\launchers\ALINA_SYNC_COMPLETE.output.log
+    echo.
+)
 call "%ALINA_ROOT%tools\launcher_log.cmd" "ALINA_SYNC_COMPLETE" EXIT completion "sync-complete" "!RC!"
 endlocal & exit /b %RC%
 

@@ -560,6 +560,65 @@ def position_avant(
     return szi
 
 
+def _nombre_normalise(valeur) -> str | None:
+    """Un nombre rendu de facon STABLE, pour qu une meme taille s ecrive pareil partout.
+
+    Les deux sources peuvent ecrire 8.3998 et "8.39980" : sans normalisation numerique, la
+    cle stricte verrait deux fills differents et le MEME fill serait compte DEUX FOIS.
+    """
+    if isinstance(valeur, bool) or valeur is None:
+        return None
+    try:
+        return repr(float(valeur))
+    except (TypeError, ValueError):
+        return None
+
+
+def _empreinte_du_fill(ligne) -> str:
+    """L identite STRICTE d un fill, ou "" si elle n est pas prouvable.
+
+    POURQUOI NI `hash` NI `tid` NE SUFFISENT (mesures du 19/11/2026).
+
+    * `hash` est le hash de la TRANSACTION, pas du fill : une transaction en contient
+      plusieurs. 3,9 % des identites portaient des directions contradictoires sur le meme
+      hash (`Close Long` ET `Open Short`). Deduire l identite du hash DETRUISAIT des fills
+      distincts : ~200 000 par journee, 12 % des lignes lues. Un hash entierement nul
+      (`0x000...0`) etait meme le plus frequent des deux familles, 4,4 % et 6,3 %.
+    * `tid` non plus : il groupe des fills PARTIELS -- le flux WS diffuse les morceaux et le
+      REST renvoie l agregat. 1 142 `tid` portaient des tailles differentes (ETC 0.25 et
+      ETC 7.98, meme compte, meme prix).
+
+    L IDENTITE RETENUE est donc le tuple complet qui decrit le fill lui-meme. Verifiee sur une
+    heure reelle lue dans LES DEUX familles (18/11 12h-13h UTC, 80 225 lignes) : 15 132 noyaux
+    revus plusieurs fois, dont 14 942 presents dans les deux familles -- donc les vrais
+    doublons inter-sources sont bien attrapes -- et ZERO noyau a direction divergente, donc la
+    cle ne SCINDE jamais un doublon reel.
+
+    POURQUOI `ts_ms` EN FAIT PARTIE. Sans lui, deux remplissages PARTIELS de meme taille au
+    meme prix sur le meme compte fusionnaient, donc une observation reelle disparaissait --
+    defaut attrape par `test_une_position_declaree_decide_l_action`. L ajouter ne risquait de
+    scinder un vrai doublon que si les deux sources dataient le meme fill differemment :
+    mesure sur l heure commune du 18/11, les comptes sont RIGOUREUSEMENT identiques avec et
+    sans `ts_ms` (63 187 noyaux, 15 132 doublons, 14 942 inter-familles). Elles le datent donc
+    pareil, et l ajout est sur.
+
+    DENY-BY-DEFAULT : sans de quoi decrire le fill, on ne declare pas de doublon et on garde
+    les deux lignes. Declarer un doublon a tort DETRUIT une observation ; en manquer un la
+    laisse comptee deux fois, ce qui GONFLE le signal donc le PnL -- c est pourquoi la cle
+    doit etre assez riche pour separer, et assez stable pour reunir.
+    """
+    coin = str(ligne.get("coin") or "").strip()
+    compte = str(ligne.get("vault") or ligne.get("user") or "").strip()
+    taille = _nombre_normalise(ligne.get("sz"))
+    instant = _nombre_normalise(ligne.get("ts_ms"))
+    prix = _nombre_normalise(ligne.get("px"))
+    if not coin or not compte or taille is None or prix is None or instant is None:
+        return ""   # identite non prouvable -> jamais declare doublon
+    tid = ligne.get("tid")
+    marque = str(tid).strip() if (not isinstance(tid, bool) and tid is not None) else ""
+    sens = str(ligne.get("dir") or "").strip().lower()
+    return "|".join(("f2", marque, coin, compte, taille, prix, sens, instant))
+
 def fills_du_coffre(
     racine: str | Path,
     *,
@@ -677,7 +736,7 @@ def fills_du_coffre(
             entree["direction"] = signe
             entree["action"] = action
             entree["taille_usd"] = prix * taille
-            empreinte = str(ligne.get("hash") or "")
+            empreinte = _empreinte_du_fill(ligne)
             deja = par_hash.get(empreinte) if empreinte else None
             if deja is None:
                 if empreinte:

@@ -142,6 +142,72 @@ def coins_et_fenetre(root: Path) -> tuple[list[str], int, int]:
     return list(coins), (tmin if tmax else 0), tmax
 
 
+MANIFESTES_COFFRE = Path("runtime") / "coffre_certifie" / "local" / "manifests"
+#: Nom du ruban d origine -> serie de cette passe. Le manifeste du coffre ne porte
+#: PAS l intervalle des bougies, mais le chemin SOURCE le porte (candles_5m.jsonl...).
+#: Identite stable du flux telle que le certificateur l inscrit dans chaque entree.
+_TAG_VERS_SERIE = {
+    "REST_BACKFILL_5M": "5m",
+    "REST_BACKFILL_1H": "1h",
+    "REST_BACKFILL_4H": "4h",
+    "REST_BACKFILL_1D": "1d",
+    "REST_FUNDING_HISTORY": SERIE_FUNDING,
+}
+_SOURCE_VERS_SERIE = {
+    "candles_5m.jsonl": "5m",
+    "candles_1h.jsonl": "1h",
+    "candles_4h.jsonl": "4h",
+    "candles_1d.jsonl": "1d",
+    "funding_1h.jsonl": SERIE_FUNDING,
+}
+
+
+def coins_du_coffre(root: Path) -> dict[str, set[str]]:
+    """Coins dont le COFFRE atteste deja un historique, par serie.
+
+    POURQUOI LIRE LES MANIFESTES ET PAS LES SHARDS. Chaque entree de manifeste porte
+    sa famille, son ruban source, ses bornes ts_min_ms/ts_max_ms et le DICTIONNAIRE
+    DES COINS presents. Lire ~350 petits JSON coute quelques dizaines de ms, la ou
+    rouvrir les shards demanderait de relire des centaines de millions de lignes.
+
+    CE QUE CETTE FONCTION NE FAIT PAS. Elle ne rend AUCUNE borne de temps. Les bornes
+    du manifeste valent pour le shard ENTIER, donc pour tous ses coins a la fois :
+    s en servir pour declarer un coin "a jour" pourrait sauter un vrai trou. Or
+    retelecharger est idempotent (le scellage deduplique) alors qu un trou saute ne
+    se voit jamais. Le coffre peut donc ELARGIR l univers suivi, jamais l abreger.
+    """
+    par_serie: dict[str, set[str]] = {}
+    try:
+        manifestes = sorted((root / MANIFESTES_COFFRE).iterdir())
+    except OSError:
+        return par_serie
+    for manifeste in manifestes:
+        if not manifeste.name.endswith(".json"):
+            continue
+        try:
+            lot = json.loads(manifeste.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue   # un manifeste illisible ne doit pas casser la passe
+        for entree in (lot.get("fichiers") or ()) if isinstance(lot, dict) else ():
+            if not isinstance(entree, dict):
+                continue
+            # Le TAG est l identite STABLE du flux (REST_BACKFILL_1H...) ; le chemin
+            # source ne sert que de repli si un ruban change un jour de dossier.
+            serie = _TAG_VERS_SERIE.get(str(entree.get("source_tag") or ""))
+            if serie is None:
+                source = str(entree.get("source") or "").replace("\\", "/")
+                serie = _SOURCE_VERS_SERIE.get(source.rsplit("/", 1)[-1])
+            coins = entree.get("coins")
+            if serie is None or not isinstance(coins, dict):
+                continue
+            cible = par_serie.setdefault(serie, set())
+            for coin in coins:
+                nom = preserve_native_instrument_symbol(coin)
+                if nom:
+                    cible.add(nom)
+    return par_serie
+
+
 def coins_deja_commences(root: Path) -> list[str]:
     """Coins dont on tient DEJA un historique, lus de l'etat du backfill.
 
@@ -163,13 +229,21 @@ def coins_deja_commences(root: Path) -> list[str]:
     except (OSError, ValueError, AttributeError):
         etat = None
     if not isinstance(etat, dict):
-        return []
+        etat = {}   # pas d etat lisible : le coffre reste consulte ci-dessous
     vus: dict[str, None] = {}
     for serie in series:
         for coin in (etat.get(serie) or {}):
             nom = preserve_native_instrument_symbol(coin)
             if nom:
                 vus.setdefault(nom, None)
+    # RECOUPEMENT AVEC LE COFFRE (19/11/2026). L etat ci-dessus vit dans
+    # runtime/data, que le lanceur ARCHIVE a chaque demarrage de session : il etait
+    # donc un point unique de defaillance. S il disparait, cette passe croyait ne
+    # rien detenir et retelechargeait tout. Le coffre certifie, lui, est le magasin
+    # DURABLE -- et le seul que lise le labo. On en tire les coins deja attestes.
+    for _coins in coins_du_coffre(root).values():
+        for _nom in _coins:
+            vus.setdefault(_nom, None)
     return list(vus)
 
 
@@ -732,12 +806,19 @@ def passe(root: Path, *, intervalles: tuple[str, ...] = ("1h", "5m"), now_ms: in
                 derniers[coin] = max(x["t_ms"] for x in nouvelles)
                 compte["bougies"] += len(nouvelles)
                 sauver_etat(root, etat)
-                jours = (now_ms - min(x["t_ms"] for x in nouvelles)) / 86_400_000
+                # 19/11/2026 -- "0 j" POUR UN LOT DE 7 HEURES : la colonne affichait des JOURS
+                # arrondis a l entier, donc tout lot de moins de 12 h se lisait "0 j". L operateur
+                # a cru deux fois que le creusement ne partait pas, alors que le rattrapage
+                # comblait 6 a 7 heures. On montre desormais l unite qui a du SENS a cette
+                # echelle : heures sous la journee, jours au-dela.
+                age_ms = now_ms - min(x["t_ms"] for x in nouvelles)
+                jours = age_ms / 86_400_000
+                portee = ("%6.1f h" % (age_ms / 3_600_000)) if jours < 1 else ("%6.0f j" % jours)
                 ecoule = time.time() - debut_heure
                 print(f"[candles] {intervalle} {rang:>4}/{total} {coin:<12} "
                       # 17/11/2026 : « remonte a 0 j | 1 au total » se lisait comme le STOCK, alors
                       # que ces chiffres ne comptent que ce que CE passage vient d'ajouter.
-                      f"+{len(nouvelles):>5} bougies | ce lot remonte a {jours:>6.0f} j | "
+                      f"+{len(nouvelles):>5} bougies | ce lot remonte a {portee} | "
                       f"{compte['bougies']:>8} ajoutees ce passage | {ecoule / 60:.0f} min", flush=True)
             if tronque:
                 compte["tronques"].append(coin)

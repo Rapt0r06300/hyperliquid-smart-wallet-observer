@@ -50,6 +50,10 @@ from hl_observer.backtesting.copy_vault_coffre_vers_labo import (  # noqa: E402
     fills_du_coffre,
     positions_du_coffre,
 )
+from hl_observer.backtesting.copy_vault_position_derivee import (  # noqa: E402
+    fusionner_positions,
+    positions_depuis_les_fills,
+)
 from hl_observer.backtesting.copy_vault_labo_deux_phases import (  # noqa: E402
     MANIFESTE,
     preparer_tranche,
@@ -135,6 +139,25 @@ def phase_1(
         if positions_audit.get("status") == "LU_DEPUIS_LE_COFFRE":
             print(f"        positions : {positions_audit['observations_gardees']} observation(s) "
                   f"sur {positions_audit['couples_vault_coin']} couple(s) leader/coin", flush=True)
+        # LA QUEUE DE DISTRIBUTION, QUI MANQUAIT (19/11/2026). La famille "position" ne couvre
+        # que 179 coins sur les 1 648 qui portent des fills : 6 194 061 fills etaient jetes
+        # faute de position connue, soit 44 % des lignes lues, et toujours les MEMES coins --
+        # un biais de selection, pas seulement un trou. "fills_backfill" porte start_position
+        # sur 81,3 % de ses lignes et comble cette queue.
+        #
+        # ETAT, JAMAIS SIGNAL : ces fills ne sont connus qu apres coup (chaque ligne porte
+        # "causal_forward_eligible: False"), donc ils ne deviennent JAMAIS des evenements
+        # a copier -- FAMILLES_DE_FILLS reste ("fills_forward",). Ils ne repondent qu a la
+        # question « que detenait le leader avant SON fill », dont la reponse ne depend pas du
+        # moment ou nous l avons apprise. La causalite reste imposee par position_avant.
+        derivees, audit_derivees = positions_depuis_les_fills(
+            workspace, debut_ms=debut, fin_ms=fin)
+        if audit_derivees.get("observations_gardees"):
+            avant_fusion = len(positions)
+            positions = fusionner_positions(positions, derivees)
+            print(f"        positions derivees : {audit_derivees['observations_gardees']} "
+                  f"observation(s) sur {audit_derivees['couples_vault_coin']} couple(s) "
+                  f"-> {avant_fusion} puis {len(positions)} couple(s) apres fusion", flush=True)
         entrees, fills_audit = fills_du_coffre(
             workspace, debut_ms=debut, fin_ms=fin, positions=positions or None)
         if fills_audit.get("status") == "COFFRE_ABSENT":

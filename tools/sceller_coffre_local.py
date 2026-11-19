@@ -567,6 +567,15 @@ def _log(handle, message: str) -> None:
         handle.flush()
 
 
+def _cle_fichier(chemin) -> str:
+    """Cle d identite d un fichier, insensible a la casse et au chemin relatif.
+
+    Le scan --tout redescend dans runtime/data : sans cette cle, chaque ruban y
+    serait inventorie deux fois.
+    """
+    return os.path.normcase(os.path.abspath(str(chemin)))
+
+
 def collecter_fichiers(root: Path, *, tout: bool, log=None) -> list[tuple[Path, str, str]]:
     """Liste des (fichier, famille, source) à certifier.
 
@@ -574,7 +583,12 @@ def collecter_fichiers(root: Path, *, tout: bool, log=None) -> list[tuple[Path, 
     battement régulier (jamais de blocage silencieux), avec un garde-fou dur.
     """
     trouves: list[tuple[Path, str, str]] = []
-    if not tout:
+    # 19/11/2026 -- CE BLOC TOURNE AUSSI EN MODE --tout. Avant, il etait garde par
+    # `if not tout`, et --tout partait en scan recursif en elaguant _EXCLUS, qui
+    # contient `history` ET `research_lab` : --tout scellait donc MOINS que le mode
+    # par defaut (il perdait les bougies de backfill et la microstructure). --tout
+    # est desormais un SUR-ENSEMBLE STRICT du defaut.
+    if DOSSIERS_COLLECTE:
         # Scan EXHAUSTIF de runtime/data : on ne se limite plus a une liste figee.
         # Chaque .jsonl est classe par NOM (familles connues) puis, si inconnu, par
         # CONTENU (reniflage) -> le coffre trouve TOUT, y compris de nouveaux flux.
@@ -603,10 +617,14 @@ def collecter_fichiers(root: Path, *, tout: bool, log=None) -> list[tuple[Path, 
                 trouves.append((p, info[0], info[1]))
             except OSError:
                 continue
-        return trouves
+        if not tout:
+            return trouves
     # --tout : scan récursif borné via os.scandir. Sur Windows, DirEntry.stat()
     # est MIS EN CACHE par scandir -> aucun appel système par fichier, donc rapide
     # meme dans un dossier a 100 000+ entrees (ex. runtime/data et ses recus).
+    # Les dossiers de collecte sont deja inventories ci-dessus : on ne les
+    # recense pas deux fois (un meme ruban scelle en double est du travail perdu).
+    deja_vus = {_cle_fichier(c) for c, _fam, _src in trouves}
     vus_dossiers = 0
     vus_entrees = 0
     pile = [str(root)]
@@ -647,6 +665,8 @@ def collecter_fichiers(root: Path, *, tout: bool, log=None) -> list[tuple[Path, 
                             continue
                     elif e.stat().st_size == 0:  # stat en cache
                         continue
+                    if _cle_fichier(e.path) in deja_vus:
+                        continue   # deja inventorie par les dossiers de collecte
                     trouves.append((Path(e.path), info[0], info[1]))
                 except OSError:
                     continue
@@ -924,7 +944,8 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Scelle les données locales certifiées dans le coffre-fort.")
     p.add_argument("--root", default=str(ROOT))
     p.add_argument("--tout", action="store_true",
-                   help="scanne TOUT le dossier projet (sinon seulement runtime/data)")
+                   help="scan RECURSIF du projet EN PLUS des dossiers de collecte (qui sont "
+                        "toujours inventories, meme sans cette option)")
     # DANGER — NOM HISTORIQUE TROMPEUR. « reset-affichage » ne remet PAS un affichage à zéro :
     # il VIDE (tronque à 0 octet) les rubans de données vivants de runtime/data dont le scellage
     # a été vérifié par SHA. Le 19/11/2026 j'ai lancé ce drapeau en croyant nettoyer un simple
