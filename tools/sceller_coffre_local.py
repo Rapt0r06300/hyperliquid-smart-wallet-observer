@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import gzip
 import hashlib
+import io
 import json
 import os
 import re
@@ -116,6 +117,83 @@ _MAX_DOSSIERS_SCAN = 60_000
 #: d'ouvertures inutiles (ex. les ~19 000 petits .jsonl de runtime/data).
 _TAILLE_MIN_SNIFF = 64 * 1024  # 64 Ko
 
+#: VITESSE — niveau de compression des shards. `gzip.open` par défaut utilise 9, le plus LENT.
+#: Mesuré le 19/11/2026 sur un ruban réel de 162 Mo décompressés : niveau 9 = 1,54 s pour 17,2 Mo ;
+#: niveau 6 = 1,12 s pour 16,5 Mo (donc PLUS RAPIDE *et* PLUS PETIT — 9 n'a aucun avantage ici) ;
+#: niveau 4 = 0,88 s / 17,4 Mo ; niveau 1 = 0,33 s / 28,0 Mo (très rapide mais +63 % de disque).
+#: La compression ne change QUE les octets du shard, jamais son contenu décompressé : aucun
+#: enregistrement n'est perdu ni modifié, et le `shard_sha256` de chaque shard reste enregistré
+#: dans l'index. Les shards DÉJÀ déposés sont immuables et ne sont jamais réécrits.
+#: Réglable sans toucher au code : COFFRE_GZIP_NIVEAU=1 pour privilégier la vitesse.
+def _niveau_gzip(defaut: int = 6) -> int:
+    try:
+        v = int(os.environ.get("COFFRE_GZIP_NIVEAU", "") or defaut)
+    except (TypeError, ValueError):
+        return defaut
+    return v if 1 <= v <= 9 else defaut
+
+
+NIVEAU_GZIP = _niveau_gzip()
+
+#: VITESSE + TAILLE — séparateurs compacts pour la sérialisation des enregistrements scellés.
+#: `json.dumps` par défaut écrit « , » et « : » (avec espaces) : des octets inutiles sur des
+#: centaines de millions de lignes. Le JSON produit est strictement équivalent à la relecture.
+_SEPARATEURS_COMPACTS = (",", ":")
+
+#: VITESSE — JSON rapide OPTIONNEL. Mesuré le 19/11/2026 : `json.loads` et `json.dumps` pèsent
+#: à eux deux ~48 % du temps de certification (0,68 s + 0,68 s pour 81 Mo). `orjson` les fait
+#: typiquement 3 à 6 fois plus vite. Il est DÉJÀ traité comme optionnel ailleurs dans le projet
+#: (`LANCER_COLLECTEURS.cmd` retente son contrôle de dépendances sans lui).
+#: ABSENT = comportement d'avant, à l'octet près. Aucune dépendance n'est imposée.
+try:                                   # pragma: no cover - dépend de l'environnement
+    import orjson as _orjson
+except ImportError:                    # pragma: no cover
+    _orjson = None
+
+JSON_RAPIDE = _orjson is not None
+
+
+def _charger_json(texte: str):
+    """Parse une ligne JSON. Lève ValueError sur entrée invalide (comme `json.loads`).
+
+    `orjson.JSONDecodeError` dérive de `ValueError` : les appelants qui attrapent
+    `(ValueError, UnicodeError)` gardent exactement le même comportement.
+    """
+    if _orjson is not None:
+        return _orjson.loads(texte)
+    return json.loads(texte)
+
+
+#: ÉCRITURE : la bibliothèque standard est le DÉFAUT, volontairement.
+#: Mesuré le 19/11/2026 sur 120 000 enregistrements réels (6 familles) : `orjson` et la lib
+#: standard donnent un contenu identique à 100,000 % après relecture, mais seulement 71,2 %
+#: d'octets identiques — les flottants n'ont pas la même représentation (les deux sont exactes
+#: au retour). Or un shard est identifié par son SHA : laisser l'écriture dépendre d'une
+#: bibliothèque OPTIONNELLE rendrait les octets du coffre dépendants de l'environnement, dans un
+#: système bâti sur des reçus cryptographiques. Le déterminisme passe donc avant ces ~24 %.
+#: Opt-in explicite pour qui privilégie la vitesse : COFFRE_JSON_ECRITURE_RAPIDE=1.
+_ECRITURE_RAPIDE = (
+    _orjson is not None
+    and os.environ.get("COFFRE_JSON_ECRITURE_RAPIDE", "").strip() in {"1", "true", "oui", "on"}
+)
+
+
+def _ecrire_json(obj) -> str:
+    """Sérialise un enregistrement scellé en JSON compact UTF-8 non échappé.
+
+    Par défaut : bibliothèque standard, pour des octets de shard REPRODUCTIBLES quelle que
+    soit la présence d'`orjson`. Sous `COFFRE_JSON_ECRITURE_RAPIDE=1`, `orjson` est utilisé
+    (contenu identique, octets éventuellement différents sur les flottants), avec repli
+    standard pour tout objet qu'il refuse : un type inattendu ne doit JAMAIS faire perdre
+    un enregistrement.
+    """
+    if _ECRITURE_RAPIDE:
+        try:
+            return _orjson.dumps(obj).decode("utf-8")
+        except TypeError:
+            pass
+    return json.dumps(obj, ensure_ascii=False, separators=_SEPARATEURS_COMPACTS)
+
 
 def _dossier_ignore(nom: str) -> bool:
     """Dossiers ignorés en plus de ``_EXCLUS`` : venvs et dossiers temporaires."""
@@ -187,6 +265,33 @@ def _sha256_fichier(path: Path) -> str:
         for bloc in iter(lambda: handle.read(4 * 1024 * 1024), b""):
             h.update(bloc)
     return h.hexdigest()
+
+
+class _SortieHachee(io.RawIOBase):
+    """Relais d'écriture qui HACHE les octets au passage.
+
+    VITESSE : le shard était écrit, refermé, puis RELU entièrement pour calculer son
+    `shard_sha256`. Comme le SHA porte sur les octets compressés, on peut l'accumuler
+    pendant l'écriture : le résultat est le MÊME condensé, sans la seconde lecture.
+    Le condensé n'est complet qu'une fois le GzipFile fermé (il écrit sa bande-annonce).
+    """
+
+    def __init__(self, brut, digest) -> None:
+        super().__init__()
+        self._brut = brut
+        self._digest = digest
+
+    def writable(self) -> bool:
+        return True
+
+    def write(self, donnees) -> int:  # type: ignore[override]
+        vue = bytes(donnees)
+        self._digest.update(vue)
+        self._brut.write(vue)
+        return len(vue)
+
+    def flush(self) -> None:
+        self._brut.flush()
 
 
 def _lire_lignes(path: Path, *, debut: int = 0, fin: int | None = None) -> Iterator[str]:
@@ -346,8 +451,12 @@ def sceller_fichier(
     ecrits = 0
     shard_final = shard_abs
     shard_abs = shard_final.with_name(f".{shard_final.name}.partial")
+    h_shard = hashlib.sha256()
     try:
-        with gzip.open(shard_abs, "wt", encoding="utf-8") as sortie:
+        with open(shard_abs, "wb") as _octets_shard, \
+             _SortieHachee(_octets_shard, h_shard) as _relais, \
+             gzip.GzipFile(fileobj=_relais, mode="wb", compresslevel=NIVEAU_GZIP) as _gz, \
+             io.TextIOWrapper(_gz, encoding="utf-8", newline="\n") as sortie:
             for brut in _lire_lignes(source, debut=debut_octets, fin=fin_octets):
                 brut = brut.strip()
                 if not brut:
@@ -356,7 +465,7 @@ def sceller_fichier(
                 if stats.entrees % 250_000 == 0:
                     _log(log, f"        ... {stats.entrees:,} lignes lues, {ecrits:,} gardees jusqu'ici")
                 try:
-                    record = json.loads(brut)
+                    record = _charger_json(brut)
                 except (ValueError, UnicodeError):
                     stats.quarantaine += 1
                     stats._ajouter_raison("json_invalide")
@@ -387,9 +496,8 @@ def sceller_fichier(
                     stats.repares += 1
                 else:
                     stats.passes += 1
-                sortie.write(json.dumps({**norm, "tier": "LOCAL",
-                                         "reconciliation_status": "LOCAL_UNRECONCILED"},
-                                        ensure_ascii=False) + "\n")
+                sortie.write(_ecrire_json({**norm, "tier": "LOCAL",
+                                           "reconciliation_status": "LOCAL_UNRECONCILED"}) + "\n")
                 ecrits += 1
                 coin = str(norm.get("coin") or "?")
                 coins[coin] = coins.get(coin, 0) + 1
@@ -430,7 +538,9 @@ def sceller_fichier(
         return {"source": str(rel_src), "famille": famille, "deposes": 0,
                 "stats": stats.resume(), "shard": None}
 
-    shard_sha = _sha256_fichier(shard_abs)
+    # Condensé accumulé PENDANT l'écriture (cf. _SortieHachee) : identique à une relecture
+    # complète du shard, sans la payer. Complet ici, le GzipFile étant refermé.
+    shard_sha = h_shard.hexdigest()
     _log(log, f"        -> {ecrits:,} gardees | {stats.repares:,} reparees | "
               f"{stats.quarantaine:,} ecartees | {stats.doublons:,} doublons")
     return {
@@ -815,8 +925,16 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--root", default=str(ROOT))
     p.add_argument("--tout", action="store_true",
                    help="scanne TOUT le dossier projet (sinon seulement runtime/data)")
-    p.add_argument("--reset-affichage", action="store_true",
-                   help="après scellage vérifié, remet à zéro les flux vivants de runtime/data")
+    # DANGER — NOM HISTORIQUE TROMPEUR. « reset-affichage » ne remet PAS un affichage à zéro :
+    # il VIDE (tronque à 0 octet) les rubans de données vivants de runtime/data dont le scellage
+    # a été vérifié par SHA. Le 19/11/2026 j'ai lancé ce drapeau en croyant nettoyer un simple
+    # drapeau d'état ; seule l'interruption de la passe a évité la troncature. L'ancien nom est
+    # CONSERVÉ (des appelants existent), mais l'alias explicite est désormais à préférer.
+    p.add_argument("--reset-affichage", "--vider-flux-vivants-apres-scellage-verifie",
+                   dest="reset_affichage", action="store_true",
+                   help="DESTRUCTIF : vide (0 octet) les rubans vivants de runtime/data dont le "
+                        "scellage est vérifié par SHA. Les données restent dans le coffre. "
+                        "Ne PAS utiliser pour corriger un drapeau d'état.")
     p.add_argument("--now-ms", type=int, default=0, help="horloge injectable (tests)")
     p.add_argument("--famille", default="",
                    help="ne certifie que cette famille (ex. snapshot) ; vide = toutes")
@@ -1082,8 +1200,12 @@ def main(argv: list[str] | None = None) -> int:
         _journaliser(coffre, manifeste)
         _ecrire_json_atomique(etat_path, etat)
 
-        # Reset affichage (fail-closed : seulement les shards vérifiés SHA)
+        # DESTRUCTIF, fail-closed : ne vide QUE des rubans dont le shard scellé a été vérifié
+        # par SHA. On l'annonce fort dans le log : c'est une troncature de données vivantes,
+        # pas un réglage d'affichage (cf. le nom historique trompeur du drapeau).
         if args.reset_affichage and scelles_pour_reset:
+            _log(log, f"  [RESET] DESTRUCTIF : {len(scelles_pour_reset)} ruban(s) vivant(s) vont "
+                      f"etre VIDES (0 octet) ; leurs donnees sont deja scellees et verifiees.")
             for src in scelles_pour_reset:
                 try:
                     src.write_text("", encoding="utf-8")
