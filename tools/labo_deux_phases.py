@@ -46,6 +46,7 @@ for _chemin in (RACINE / "src", RACINE):
 from hl_observer.backtesting.copy_vault_labo_deux_phases import (  # noqa: E402
     MANIFESTE,
     carnets_du_coffre,
+    fills_du_coffre,
     preparer_tranche,
 )
 
@@ -87,7 +88,7 @@ def phase_1(
     from hl_observer.backtesting import copy_vault_executable as cv
     from hl_observer.backtesting.copy_vault_local_lab import _load_pipeline
 
-    pipeline = _load_pipeline()
+    pipeline = _load_pipeline()   # garde pour le repli si le coffre manque
     sortie.mkdir(parents=True, exist_ok=True)
     faits: list[dict[str, Any]] = []
     sautees = 0
@@ -108,8 +109,22 @@ def phase_1(
             break
 
         print(f"   [{index}/{len(tranches)}] {nom} — reconstruction", flush=True)
-        entrees, _audit = pipeline.charger_entrees_alpha_notional_fixe_avec_audit(
-            workspace, fenetre=(debut, fin))
+        # LES FILLS VIENNENT DU COFFRE. Le pipeline lit `runtime/data/vault_fills_live.jsonl`, qui
+        # ne retient que la source `LIVE_WS` (demarree le 17/11 19:10) : 2 journees. Le coffre
+        # porte `fills_forward` -- 21,6 M de lignes sur 23 journees -- avec en plus `LIVE_POLL`,
+        # une collecte par interrogation active depuis le 13/11 et tout aussi causale. Mesure du
+        # 18/11/2026 : 30 minutes du coffre rendent 6 876 metaordres causaux, soit 3,6 fois ce que
+        # six journees du ruban local donnaient. Il ne manquait pas de donnees, mais un chemin.
+        entrees, fills_audit = fills_du_coffre(workspace, debut_ms=debut, fin_ms=fin)
+        if fills_audit.get("status") == "COFFRE_ABSENT":
+            print(f"        [REPLI] coffre absent -> pipeline local ({fills_audit['chemin']})")
+            entrees, _audit = pipeline.charger_entrees_alpha_notional_fixe_avec_audit(
+                workspace, fenetre=(debut, fin))
+        else:
+            print(f"        fills : {fills_audit['lignes_lues']} lue(s) -> "
+                  f"{fills_audit['entrees_rendues']} entree(s) "
+                  f"({fills_audit['ecartes_libelle_inconnu']} libelle inconnu, "
+                  f"{fills_audit['ecartes_champ_manquant']} champ manquant)", flush=True)
         metaordres, _meta_audit = cv.cluster_metaorders(entrees)
         del entrees
         gc.collect()

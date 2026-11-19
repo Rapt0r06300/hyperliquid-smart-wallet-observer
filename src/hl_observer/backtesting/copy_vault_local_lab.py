@@ -1919,7 +1919,7 @@ def _load_pipeline():
     return module
 
 
-def _bounds(timestamps: list[int]) -> dict[str, int | bool | str] | None:
+def _bounds(timestamps: list[int], *, seuil_jours: int | None = None) -> dict[str, int | bool | str] | None:
     """Split by UTC day and purge the longest searched holding horizon."""
     day_ms = 86_400_000
     # The search includes holding horizons up to four hours. Purge at least
@@ -1930,7 +1930,9 @@ def _bounds(timestamps: list[int]) -> dict[str, int | bool | str] | None:
         + int(cv.MAX_TARGET_LAG_MS)
     )
     days = sorted({int(timestamp) // day_ms for timestamp in timestamps if int(timestamp) > 0})
-    if len(days) < _MINIMUM_SIGNAL_UTC_DAYS:
+    # Seuil de L'APPELANT, minimum ABSOLU 3 : TRAIN + VALIDATION + OOS = 2 journees impossibles.
+    minimum = max(3, int(seuil_jours or _MINIMUM_SIGNAL_UTC_DAYS))
+    if len(days) < minimum:
         return None
     train_cut = max(2, int(len(days) * 0.60))
     validation_cut = max(train_cut + 1, int(len(days) * 0.80))
@@ -2690,6 +2692,8 @@ def run_local_campaign(
             "candidates_tested": 0, "freeze_created": False, "economically_proven": False,
         }
     selection_digest = str(input_manifest.get("selection_digest") or "")
+    # Seuil declare par le MANIFESTE (defaut 6) ; defini ICI : le decoupage le lit plus haut.
+    seuil_jours = int(input_manifest.get("minimum_signal_utc_days") or _MINIMUM_SIGNAL_UTC_DAYS)
     source_catalog_sha = str(input_manifest.get("source_index_sha256") or "").lower()
     source_inventory_error = _source_asset_inventory_error(input_manifest)
     if source_inventory_error is not None:
@@ -2711,7 +2715,9 @@ def run_local_campaign(
         or len(source_catalog_sha) != 64
         or any(char not in "0123456789abcdef" for char in source_catalog_sha)
         or input_manifest.get("status") not in {"READY", "MORE_DATA"}
-        or input_manifest.get("safe_catalog_status") not in {"SAFE_COMPLETE", "SAFE_PARTIAL"}
+        # `LOCAL_CERTIFIED` ouvre LA MESURE, jamais la certification (cf. refus de champion).
+        or input_manifest.get("safe_catalog_status") not in {
+            "SAFE_COMPLETE", "SAFE_PARTIAL", "LOCAL_CERTIFIED"}
         or input_manifest.get("replay_inputs_available") is not True
         or type(input_manifest.get("unique_fills")) is not int
         or input_manifest.get("unique_fills", 0) <= 0
@@ -2722,7 +2728,9 @@ def run_local_campaign(
             "status": "UNMEASURABLE", "reason": "LOCAL_SAFE_MANIFEST_INVALID",
             "candidates_tested": 0, "freeze_created": False, "economically_proven": False,
         }
-    tape_error = _verify_materialized_tapes(workspace, input_manifest)
+    # Porte sur `runtime/data/`, que la PHASE 2 ne lit pas : son corpus est verifie par empreinte.
+    tape_error = (None if corpus_prepare is not None
+                  else _verify_materialized_tapes(workspace, input_manifest))
     if tape_error is not None:
         return {
             "status": "UNMEASURABLE", "reason": tape_error,
@@ -2731,15 +2739,13 @@ def run_local_campaign(
             "economically_proven": False, "paper_read_only": True,
             "real_execution": False,
         }
+    pipeline = None   # defini dans LES DEUX branches : `oublier_les_cycles()` vient plus bas
     if corpus_prepare is not None:
-        # PHASE 2 : relire des tranches deja preparees et allegees, au lieu de reconstruire. La
-        # logique vit dans `copy_vault_labo_deux_phases` : ce fichier est au plafond de lignes que
-        # son invariant d'architecture lui accorde. Les audits de reconstruction annoncent
-        # NOT_RECONSTRUCTED_PHASE_2 plutot que des compteurs a zero, qu'on lirait comme « rien
-        # trouve » au lieu de « pas reconstruit ».
         from hl_observer.backtesting.copy_vault_labo_deux_phases import entrees_de_phase_2
         metaorders, books, corpus_audit = entrees_de_phase_2(
-            corpus_prepare, tranche=tranche, dire=say)
+            corpus_prepare, tranche=tranche, dire=say,
+            max_leaders=int(input_manifest.get("max_leaders") or 0) or None,
+            min_notionnel_leader=float(input_manifest.get("min_notionnel_leader_usd") or 0) or None)
         entries_audit = {"status": "NOT_RECONSTRUCTED_PHASE_2", "corpus_prepare": corpus_audit}
         meta_audit = books_audit = {"status": "NOT_RECONSTRUCTED_PHASE_2"}
         entries = len(metaorders)
@@ -2836,7 +2842,7 @@ def run_local_campaign(
     # Découpe sur les jours ÉVALUABLES (signal + carnet causal) : sans carnet, TRAIN restait vide.
     alignment = evaluable_signals(metaorders, books)
     aligned_adds = alignment["aligned_adds"]
-    bounds = _bounds(alignment["timestamps"])
+    bounds = _bounds(alignment["timestamps"], seuil_jours=seuil_jours)
     signal_coverage = {**_signal_coverage(timestamps), "evaluable": alignment["summary"]}
     # Les portes des six journees jugent l'ENSEMBLE quand une tranche est en cours et que les
     # journees du corpus sont connues ; sinon elles jugent ce qu'elles ont sous les yeux, comme
@@ -2950,12 +2956,12 @@ def run_local_campaign(
             "freeze_created": False,
             "economically_proven": False,
         }
-    if jours_juges < _MINIMUM_SIGNAL_UTC_DAYS:
+    if jours_juges < seuil_jours:
         return {
             **base, "status": "MORE_DATA", "reason": "INSUFFICIENT_DISTINCT_SIGNAL_DAYS",
             "candidates_tested": 0, "freeze_created": False, "economically_proven": False,
         }
-    if jours_evaluables_juges < _MINIMUM_SIGNAL_UTC_DAYS:
+    if jours_evaluables_juges < seuil_jours:
         return {
             **base, "status": "MORE_DATA", "reason": "INSUFFICIENT_EVALUABLE_SIGNAL_DAYS",
             "candidates_tested": 0, "freeze_created": False, "economically_proven": False,
@@ -3694,6 +3700,10 @@ def run_local_campaign(
             # des tranches : cela appartient au conducteur, et n'est pas simule ici.
             champion_deploye_refuse = "VERDICT_PARTIEL_TRANCHE"
             say("Champion deploye NON ecrit : cette campagne ne couvre qu'une tranche de temps")
+        elif best is not None and input_manifest.get("champion_eligible") is False:
+            # PROVENANCE EXPLORATOIRE : mesurable, jamais deployable. C'est le MANIFESTE qui le dit.
+            champion_deploye_refuse = "PROVENANCE_EXPLORATOIRE_NON_SAFE"
+            say("Champion deploye NON ecrit : provenance exploratoire (corpus local, hors SAFE)")
         elif best is not None:
             champion_deploye_path = _ecrire_champion_deploye(
                 repository_root,
