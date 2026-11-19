@@ -71,10 +71,10 @@ if defined DEFAULT_SAFE_ARGS (set "ALINA_LAUNCH_MODE=default-all-safe") else (se
 call "%ALINA_ROOT%tools\launcher_log.cmd" "ALINA_SYNC_COMPLETE" START preflight "sync-request" ""
 if defined DEFAULT_SAFE_ARGS (
     call "%ALINA_ROOT%tools\launcher_log.cmd" "ALINA_SYNC_COMPLETE" STEP download "sync_complete_clone.py" ""
-    "!ALINA_SYNC_PYTHON!" "%ALINA_ROOT%tools\tee_console.py" "%ALINA_ROOT%runtime\logs\launchers\ALINA_SYNC_COMPLETE.output.log" -- "!ALINA_SYNC_PYTHON!" !ALINA_SYNC_PY_ARGS! "%ALINA_ROOT%tools\sync_complete_clone.py" !DEFAULT_SAFE_ARGS!
+    "!ALINA_SYNC_PYTHON!" !ALINA_SYNC_PY_ARGS! "%ALINA_ROOT%tools\sync_complete_clone.py" !DEFAULT_SAFE_ARGS!
 ) else (
     call "%ALINA_ROOT%tools\launcher_log.cmd" "ALINA_SYNC_COMPLETE" STEP download "sync_complete_clone.py" ""
-    "!ALINA_SYNC_PYTHON!" "%ALINA_ROOT%tools\tee_console.py" "%ALINA_ROOT%runtime\logs\launchers\ALINA_SYNC_COMPLETE.output.log" -- "!ALINA_SYNC_PYTHON!" !ALINA_SYNC_PY_ARGS! "%ALINA_ROOT%tools\sync_complete_clone.py" %*
+    "!ALINA_SYNC_PYTHON!" !ALINA_SYNC_PY_ARGS! "%ALINA_ROOT%tools\sync_complete_clone.py" %*
 )
 set "RC=!ERRORLEVEL!"
 call "%ALINA_ROOT%tools\launcher_log.cmd" "ALINA_SYNC_COMPLETE" RESULT primary-sync "sync_complete_clone.py" "!RC!"
@@ -116,6 +116,21 @@ call "%ALINA_ROOT%tools\launcher_log.cmd" "ALINA_SYNC_COMPLETE" RESULT github-la
 if not "!LANE_RC!"=="0" set /a LANE_FAILURES+=1
 for /f "delims=" %%R in ("!RC!") do set "RC=%%R"
 call "%ALINA_ROOT%tools\launcher_log.cmd" "ALINA_SYNC_COMPLETE" SUMMARY github-lanes "failed-lanes=!LANE_FAILURES!" "!LANE_FAILURES!"
+rem 19/11/2026 -- LES DONNEES D ALINASYNC SONT TRAITEES COMME CELLES DES COLLECTEURS.
+rem AlinaSync depose ses shards SAFE dans runtime/recovery/, que le certificateur n inspecte
+rem JAMAIS (recovery est dans son _EXCLUS) et que le labo ne voit pas (il ne lit que
+rem LOCAL_INDEX.json, et COFFRE_INDEX.json est vide : 0 shard). Le pont existait pourtant,
+rem teste et couvert par la CI, mais AUCUN lanceur ne l appelait : les 149,5 Go telecharges
+rem restaient donc invisibles au labo. Il convertit les enveloppes SAFE en entrees Copy-Vault
+rem DANS runtime/data/, le dossier meme ou ecrivent les collecteurs, et le certificateur les
+rem scelle alors comme le reste.
+rem FAIL-SOFT : le pont REFUSE legitimement quand rien n est admissible (aucun fill causal,
+rem aucun L2 rejouable). Ce refus est une information, pas un echec de synchronisation.
+call "%ALINA_ROOT%tools\launcher_log.cmd" "ALINA_SYNC_COMPLETE" STEP safe-bridge "copy_vault_safe_bridge.py" ""
+"!ALINA_SYNC_PYTHON!" !ALINA_SYNC_PY_ARGS! "%ALINA_ROOT%tools\copy_vault_safe_bridge.py" --root "%ALINA_ROOT%." >>"%ALINA_ROOT%runtime\logs\launchers\ALINA_SYNC_COMPLETE.output.log" 2>&1
+set "BRIDGE_RC=!ERRORLEVEL!"
+call "%ALINA_ROOT%tools\launcher_log.cmd" "ALINA_SYNC_COMPLETE" RESULT safe-bridge "copy_vault_safe_bridge.py" "!BRIDGE_RC!"
+if not "!BRIDGE_RC!"=="0" echo [INFO] Pont SAFE : rien d admissible a convertir (code !BRIDGE_RC!). Detail dans le journal.
 goto :sync_complete
 
 :primary_only
@@ -125,7 +140,9 @@ call "%ALINA_ROOT%tools\launcher_log.cmd" "ALINA_SYNC_COMPLETE" SUMMARY github-l
 rem 19/11/2026 -- 12 MINUTES DE SILENCE PUIS RIEN. Les lanes ecrivent dans le journal, mais
 rem l etape principale ecrivait sur une console qui se referme : le SEUL message expliquant
 rem l echec etait donc perdu. Il passe desormais par tee_console (console ET journal), et on
-rem le rappelle ici en clair. Cause de loin la plus frequente : du code local non committe,
+rem le rappelle ici en clair. (tee_console a ete essaye puis RETIRE : sans son « -- », il
+rem bascule en mode tuyau et attend une saisie, ce qui figeait le lanceur sur une
+rem fenetre vide.) Cause de loin la plus frequente : du code local non committe,
 rem qu AlinaSync refuse d ecraser (fail-closed, sans reset ni stash).
 if not "!RC!"=="0" (
     echo.
