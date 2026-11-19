@@ -43,10 +43,12 @@ for _chemin in (RACINE / "src", RACINE):
     if str(_chemin) not in sys.path:
         sys.path.insert(0, str(_chemin))
 
-from hl_observer.backtesting.copy_vault_labo_deux_phases import (  # noqa: E402
-    MANIFESTE,
+from hl_observer.backtesting.copy_vault_coffre_vers_labo import (  # noqa: E402
     carnets_du_coffre,
     fills_du_coffre,
+)
+from hl_observer.backtesting.copy_vault_labo_deux_phases import (  # noqa: E402
+    MANIFESTE,
     preparer_tranche,
 )
 
@@ -81,8 +83,16 @@ def _tranches_du_plan(chemin: Path) -> list[tuple[int, int]]:
     return tranches
 
 
+def _nombre(valeur: Any) -> float | None:
+    try:
+        return float(valeur)
+    except (TypeError, ValueError):
+        return None
+
+
 def phase_1(
-    workspace: Path, tranches: list[tuple[int, int]], sortie: Path, *, reprendre: bool = True
+    workspace: Path, tranches: list[tuple[int, int]], sortie: Path, *, reprendre: bool = True,
+    min_notionnel: float | None = None,
 ) -> dict[str, Any]:
     """Prepare chaque tranche sur disque. Reprend ou elle s'est arretee."""
     from hl_observer.backtesting import copy_vault_executable as cv
@@ -128,6 +138,20 @@ def phase_1(
         metaordres, _meta_audit = cv.cluster_metaorders(entrees)
         del entrees
         gc.collect()
+        if min_notionnel:
+            # LE SEUIL EN PHASE 1, parce que c'est lui qui decide quels signaux auront besoin de
+            # carnets. Chaque signal retenu ouvre une fenetre de ~1 h (reference, entree, sortie) :
+            # avec 89 509 signaux par tranche, les fenetres se recouvrent et couvrent tout le
+            # temps, donc 98,3 % des carnets sont conserves et l'economie de la phase 1 dispar
+            # ait. Mesure du 19/11/2026 : >=100 000 USD laisse 8 027 signaux sur les six journees.
+            avant = len(metaordres)
+            metaordres = [
+                o for o in metaordres
+                if (lambda v: v is not None and v >= min_notionnel)(
+                    _nombre(o.get("leader_notional_usd")))
+            ]
+            print(f"        notionnel >= {min_notionnel:.0f} USD : {len(metaordres)} signal(aux) "
+                  f"retenu(s) sur {avant}", flush=True)
         # LES CARNETS VIENNENT DU COFFRE. `load_observed_books` lit `runtime/data/*.jsonl`, qui
         # ne commence qu'au 17/11 18:35 ; le coffre porte `bbo` et `book_l2` depuis le 26/10.
         # Branchee sur les rubans locaux, la phase 1 preparait du vide pour toute tranche
@@ -187,7 +211,9 @@ def phase_1(
     }
 
 
-def phase_2(workspace: Path, corpus: Path, *, max_trials: int) -> dict[str, Any]:
+def phase_2(
+    workspace: Path, corpus: Path, *, max_trials: int, continu: bool = False
+) -> dict[str, Any]:
     """Explore UNE FOIS sur le corpus fusionne. Tout verdict appartient au labo."""
     from hl_observer.backtesting.copy_vault_local_lab import run_local_campaign
 
@@ -196,6 +222,10 @@ def phase_2(workspace: Path, corpus: Path, *, max_trials: int) -> dict[str, Any]
         progress=lambda message: print(f"   {message}", flush=True),
         corpus_prepare=corpus,
         max_trials=max_trials,
+        # `BOUNDED_TRAIN_SEARCH_BATCH_COMPLETE` veut dire « ce LOT est fini », pas « la recherche
+        # est finie » : sans le mode continu, on s'arrete apres `max_trials` essais sans jamais
+        # rendre de verdict economique.
+        continuous=continu,
     )
 
 
@@ -209,6 +239,10 @@ def main(argv: list[str] | None = None) -> int:
     parseur.add_argument("--phase", choices=("1", "2", "tout"), default="tout")
     parseur.add_argument("--max-tranches", type=int, default=None)
     parseur.add_argument("--max-trials", type=int, default=128)
+    parseur.add_argument("--continu", action="store_true",
+                         help="poursuit la recherche jusqu'a un verdict, lot apres lot")
+    parseur.add_argument("--min-notionnel", type=float, default=None,
+                         help="notionnel minimum du leader, applique DES la phase 1")
     parseur.add_argument("--sans-reprise", action="store_true",
                          help="refait les tranches deja preparees")
     args = parseur.parse_args(argv)
@@ -230,7 +264,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[REFUS] aucune tranche lisible dans {plan}")
             return 2
         print(f"=== PHASE 1 : preparer {len(tranches)} tranche(s) -> {sortie} ===")
-        bilan = phase_1(workspace, tranches, sortie, reprendre=not args.sans_reprise)
+        bilan = phase_1(workspace, tranches, sortie, reprendre=not args.sans_reprise,
+                        min_notionnel=args.min_notionnel)
         allegement = bilan["allegement"]
         print(f"=== PHASE 1 terminee : {bilan['tranches_preparees']} preparee(s), "
               f"{bilan['tranches_deja_faites']} deja faite(s) ===")
@@ -246,7 +281,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.phase in ("2", "tout"):
         print(f"=== PHASE 2 : explorer le corpus fusionne ({sortie}) ===")
-        resultat = phase_2(workspace, sortie, max_trials=args.max_trials)
+        resultat = phase_2(workspace, sortie, max_trials=args.max_trials,
+                           continu=args.continu)
         print(f"    statut            : {resultat.get('status')}")
         print(f"    raison            : {resultat.get('reason')}")
         print(f"    candidats essayes : {resultat.get('candidates_tested')}")

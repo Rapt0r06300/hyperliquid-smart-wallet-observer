@@ -2715,7 +2715,6 @@ def run_local_campaign(
         or len(source_catalog_sha) != 64
         or any(char not in "0123456789abcdef" for char in source_catalog_sha)
         or input_manifest.get("status") not in {"READY", "MORE_DATA"}
-        # `LOCAL_CERTIFIED` ouvre LA MESURE, jamais la certification (cf. refus de champion).
         or input_manifest.get("safe_catalog_status") not in {
             "SAFE_COMPLETE", "SAFE_PARTIAL", "LOCAL_CERTIFIED"}
         or input_manifest.get("replay_inputs_available") is not True
@@ -2739,7 +2738,7 @@ def run_local_campaign(
             "economically_proven": False, "paper_read_only": True,
             "real_execution": False,
         }
-    pipeline = None   # defini dans LES DEUX branches : `oublier_les_cycles()` vient plus bas
+    pipeline = _load_pipeline()   # LES DEUX branches : sert a l'empreinte du MOTEUR
     if corpus_prepare is not None:
         from hl_observer.backtesting.copy_vault_labo_deux_phases import entrees_de_phase_2
         metaorders, books, corpus_audit = entrees_de_phase_2(
@@ -2750,7 +2749,6 @@ def run_local_campaign(
         meta_audit = books_audit = {"status": "NOT_RECONSTRUCTED_PHASE_2"}
         entries = len(metaorders)
     else:
-        pipeline = _load_pipeline()
         say("Reconstruction des cycles leader OPEN/ADD/REDUCE/CLOSE")
         entries, entries_audit = pipeline.charger_entrees_alpha_notional_fixe_avec_audit(
             workspace, fenetre=tranche)
@@ -3302,7 +3300,9 @@ def run_local_campaign(
             freeze = _candidate(params, bounds, max(timestamps) + 1, candidate_id, trial_count)
             say(
                 f"Essai {trial_count} · séquence {this_sequence:,} · "
-                f"{len(_PARAMETER_DOMAINS)} paramètres · capital {params['core_notional_usd'] + params['probe_notional_usd']:.0f}/350 USD"
+                f"{len(_PARAMETER_DOMAINS)} paramètres · capital "
+                f"{params['core_notional_usd'] + params['probe_notional_usd']:.0f}"
+                f"/{PAPER_CAPITAL_USD:.0f} USD"
             )
             # #1/#2 — pré-filtre overshoot GELABLE : on écarte les copies en plein
             # débordement (|overshoot| > seuil du candidat). Le seuil "off" (1_000_000)
