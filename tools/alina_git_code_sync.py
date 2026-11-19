@@ -3039,7 +3039,24 @@ class Synchronizer:
             if not (local_path.exists() or local_path.is_symlink()):
                 continue
             if path in tracked_paths:
-                if path in local_changed and not _can_defer_staged_protected(path):
+                # LE CHURN RUNTIME NE BLOQUE PAS LA FUSION. Troisieme garde de ce module a ignorer
+                # `RUNTIME_CHURN_FILES` apres celles de sync et de promotion. Mesure du
+                # 19/11/2026 : `config/copy_vault_leaders_candidats.json` differait du distant de
+                # 92 insertions pour 92 suppressions -- les memes lignes reecrites par
+                # `collecter_userfills_poll` et `explorer_autonome`. Le fichier est DEJA declare
+                # churn, mais `_can_defer_staged_protected` le refuse parce qu'il vit sous
+                # `config/` et non sous un dossier de donnees.
+                #
+                # Pour un classement rafraichi en continu, la version LOCALE est la plus recente :
+                # il n'y a rien a proteger contre la fusion, et refuser bloque une publication de
+                # code qui n'a aucun rapport. Les fichiers sensibles continuent d'echouer en
+                # ferme, via `_can_defer_staged_protected`.
+                churn_connu = path.replace("\\", "/").casefold() in RUNTIME_CHURN_FILES
+                if (
+                    path in local_changed
+                    and not churn_connu
+                    and not _can_defer_staged_protected(path)
+                ):
                     raise SyncBlocked(
                         f"GitHub toucherait un fichier protege modifie localement: {path}. "
                         "Fusion interdite pour proteger les donnees."
