@@ -1300,7 +1300,7 @@ The historical milestone in that retired proposal was:
 
 > **at least +5 USD net per UTC day per module on 200 USD paper capital**, measured after fees, spread, slippage, latency, impact, capacity, funding where applicable, and realistic fill assumptions.
 
-This was a research target, not a guarantee or an ANALYZE stage-completion gate. It is not the current economic target: only Copy-Vault has the active +5 USD net/day objective, evaluated at the terminal economic gate after technical and OOS/forward evidence. Historical evidence produced with 100 USD capital or a 4 USD/day target remains historical and cannot prove the current contract. The archived monotone-calibration proposal compared measurable replay/backtest results with retained references under consistent proof semantics. Non-measurable runs were never promotion evidence; missing, stale, duplicated or corrupt evidence never counted as improvement.
+This was a research target, not a guarantee or an ANALYZE stage-completion gate. It is not the current economic target. **Superseded on 2026-11-18:** Copy-Vault no longer has any active daily USD objective. It maximizes reproducible causal net PnL on 100 USD paper capital, with no fixed target, no profit ceiling and no terminal profit threshold, under constraints of risk, cost, drawdown, exposure, liquidity and capacity. The +5 USD/day figure survives only as a display reference, never as a gate. Historical evidence produced with 100 USD capital or a 4 USD/day target remains historical and cannot prove the current contract. The archived monotone-calibration proposal compared measurable replay/backtest results with retained references under consistent proof semantics. Non-measurable runs were never promotion evidence; missing, stale, duplicated or corrupt evidence never counted as improvement.
 
 Promotion of an actual economic strategy remains fail-closed. Thresholds, costs, OOS/forward separation or validation rules may not be weakened merely to obtain a higher number.
 
@@ -4148,8 +4148,11 @@ Copy-Vault-only scope at the top of this specification.
 
 The earlier V6 proposal treated **+5 USD net/day per module on 200 USD paper capital**
 as a research-allocation target. That multi-family target is historical and inactive;
-the only current economic target is Copy-Vault's +5 USD net/day at the terminal gate,
-after technical corrections and OOS/forward-paper evidence.
+and so is Copy-Vault's own +5 USD/day terminal gate, **superseded on 2026-11-18**: the
+current objective is to maximize reproducible causal net PnL on 100 USD paper capital under
+risk, cost, drawdown, exposure, liquidity and capacity constraints, with no fixed target and
+no terminal profit threshold. Technical corrections and OOS/forward-paper evidence remain
+required; only the daily USD figure ceases to be a gate.
 
 The core diagnosis from existing Alina evidence is that many simple ideas have shown **small gross predictability but insufficient economic amplitude after friction**. Therefore the system must stop treating every statistically interesting signal as an equally valuable research direction.
 
@@ -11940,10 +11943,12 @@ Evaluate Copy-Vault net PnL after explicit fees, spread, slippage, latency, capa
 and fill assumptions. This terminal economic gate is reached only after technical
 corrections and valid replay/backtest/OOS/forward-paper evidence.
 
-The only current economic target is at least **+5 USD net per complete UTC day for
-Copy-Vault on 350 USD paper capital**, under the frozen proof contract. It is a
-measurement target, not a gate that can waive repairs or evidence requirements and
-not a promise. Other families cannot contribute or combine PnL. After this terminal
+**Superseded on 2026-11-18.** The current economic objective is to maximize **reproducible
+causal net PnL on 100 USD paper capital**, with no fixed target, no profit ceiling and no
+terminal profit threshold, under constraints of risk, cost, drawdown, exposure, liquidity
+and capacity. No profit is guaranteed. The former target -- at least +5 USD net per complete
+UTC day for Copy-Vault on 350 USD paper capital -- is kept below as history, and was itself
+a measurement target rather than a gate that could waive repairs or evidence requirements. Other families cannot contribute or combine PnL. After this terminal
 milestone, research may seek the highest robust scalable daily net PnL supported by
 OOS/forward evidence without weakening the contract.
 

@@ -65,7 +65,15 @@ def test_retired_multi_family_research_sections_are_explicitly_historical() -> N
     )[1].split("#### economic-distance-to-target accounting", maxsplit=1)[0]
     assert "current economic milestone" not in convergence
     assert "that multi-family target is historical and inactive" in convergence
-    assert "the only current economic target is copy-vault's +5 usd net/day" in convergence
+    # CE QUE CE TEST GARDE : la section multi-familles est marquee historique, et le texte renvoie
+    # a l'objectif de Copy-Vault. Il exigeait AUSSI la phrase litterale « the only current economic
+    # target is copy-vault's +5 usd net/day » -- donc il figeait un objectif que le contrat du
+    # 18/11/2026 retire (plus de cible chiffree, plus de seuil terminal). Un test qui impose la
+    # formulation d'un objectif empeche de le changer : il garde desormais l'INTENTION.
+    assert "copy-vault" in convergence
+    assert "superseded on 2026-11-18" in convergence, (
+        "la section doit dire que l'ancien objectif chiffre est remplace, pas le reaffirmer")
+    assert "no fixed target" in convergence or "sans cible" in convergence
 
 
 def test_active_documents_have_one_copy_vault_target_and_no_old_multi_family_target() -> None:
