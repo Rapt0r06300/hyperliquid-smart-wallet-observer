@@ -1,4 +1,10 @@
-"""Réplication PAPER sous contraintes réelles (350 USD, ordre minimal 10 USD, frais, écart, funding)."""
+"""Réplication PAPER sous contraintes réelles (capital du CONTRAT, ordre minimal, frais, écart, funding).
+
+Le capital n'est JAMAIS recopié en dur ici : il est lu dans ``PAPER_EQUITY_USD``, source unique du
+contrat. Ce fichier épinglait ``350.0`` à quatre endroits ; le contrat est passé à 100 USD et des
+tests ont rougi alors que le code de production, lui, était JUSTE (il lisait bien la constante).
+Une grandeur, une seule valeur — sinon le test accuse le code à tort au prochain changement.
+"""
 from __future__ import annotations
 
 from dataclasses import replace
@@ -8,6 +14,7 @@ import pytest
 
 from hl_observer.backtesting import copy_vault_replication_paper as R
 from hl_observer.backtesting.copy_vault_copiability_entrees import PricePanel
+from hl_observer.contrat_paper import PAPER_EQUITY_USD
 from hl_observer.fees.hyperliquid_fees import MIN_ORDER_VALUE_USD, TAKER_PERP_BPS
 
 HEURE = 3_600_000
@@ -39,8 +46,8 @@ def test_prix_immobiles_la_valeur_ne_baisse_que_des_couts_payes():
     panel = _panel({"BTC": [100.0] * _minutes(60)})
     resultat = R.run_replication(_portefeuille({"BTC": 10.0}, 1_000.0, 60), panel, ECARTS, CONFIG)
     assert resultat["status"] == "OK" and resultat["orders"] == 1                 # une entrée, puis plus rien à faire
-    cout = 350.0 * (TAKER_PERP_BPS + 1.0) / 1e4
-    assert resultat["fees_usd"] == pytest.approx(350.0 * TAKER_PERP_BPS / 1e4)
+    cout = PAPER_EQUITY_USD * (TAKER_PERP_BPS + 1.0) / 1e4
+    assert resultat["fees_usd"] == pytest.approx(PAPER_EQUITY_USD * TAKER_PERP_BPS / 1e4)
     assert resultat["net_total_usd"] == pytest.approx(-cout, abs=1e-9)
     assert resultat["mean_gross_exposure"] == pytest.approx(1.0, abs=0.02)          # jamais de levier
     # la première journée commence après le délai de réaction : elle est incomplète, donc non comptée
@@ -63,7 +70,7 @@ def test_le_gain_suit_le_leader_moins_les_couts_et_les_frictions_ne_rapportent_j
     assert cher["net_total_usd"] < decomposition["full"]["net_total_usd"]
 
 
-def test_un_portefeuille_trop_morcele_ne_peut_pas_etre_copie_avec_350_usd():
+def test_un_portefeuille_trop_morcele_ne_peut_pas_etre_copie_avec_le_capital_du_contrat():
     """50 lignes de 2 % = 7 USD chacune : sous l'ordre minimal de la plateforme. Aucune position, aucun gain inventé."""
     coins = {f"C{i}": [10.0 * (1.0 + 0.0002 * k) for k in range(_minutes(30))] for i in range(50)}
     panel = _panel(coins)
@@ -81,7 +88,9 @@ def test_ecart_inconnu_ou_prix_absent_pas_d_ordre():
     portefeuille = _portefeuille({"BTC": 5.0, "ETH": 10.0, "SOL": 3.0}, 1_000.0, 30)
     resultat = R.run_replication(portefeuille, panel, {"BTC": 1.0}, CONFIG)       # ETH sans écart mesuré, SOL sans prix
     assert resultat["untradable_coins"] == {"ETH": "ECART_INCONNU", "SOL": "PRIX_INCONNU"}
-    assert resultat["orders"] == 1 and resultat["spread_cost_usd"] == pytest.approx(175.0 * 1.0 / 1e4)
+    # BTC pese 500 sur 1 000 chez le leader : la jambe copiee vaut la MOITIE du capital.
+    notionnel_btc = PAPER_EQUITY_USD / 2
+    assert resultat["orders"] == 1 and resultat["spread_cost_usd"] == pytest.approx(notionnel_btc * 1.0 / 1e4)
 
 
 def test_portefeuille_perime_cible_inconnue_on_ne_touche_a_rien():
@@ -125,7 +134,7 @@ def test_funding_paye_quand_il_est_connu_jamais_suppose_nul_sinon():
     taux = {"BTC": np.full(len(panel.ts), 0.0001)}                                 # 1 bp par heure, payé par le long
     connu = R.run_replication(portefeuille, panel, ECARTS, CONFIG, funding_rates=taux)
     assert connu["funding_coverage"] == pytest.approx(1.0) and connu["funding_usd"] > 0
-    assert connu["funding_usd"] == pytest.approx(350.0 * 0.0001 * (connu["steps"] - 1), rel=0.02)
+    assert connu["funding_usd"] == pytest.approx(PAPER_EQUITY_USD * 0.0001 * (connu["steps"] - 1), rel=0.02)
     inconnu = R.run_replication(portefeuille, panel, ECARTS, CONFIG)
     assert inconnu["funding_usd"] == 0.0 and inconnu["funding_coverage"] == 0.0    # inconnu, signalé, pas compté comme nul
     assert connu["net_total_usd"] < inconnu["net_total_usd"]
@@ -149,7 +158,7 @@ def test_entrees_vides_non_mesurable_et_deterministe():
     assert R.run_replication([], panel, ECARTS)["status"] == "UNMEASURABLE"
     portefeuille = _portefeuille({"BTC": 10.0}, 1_000.0, 30)
     assert R.run_replication(portefeuille, panel, ECARTS) == R.run_replication(portefeuille, panel, ECARTS)
-    assert R.ReplicationConfig().capital_usd == 350.0 and R.ReplicationConfig().taker_fee_bps == TAKER_PERP_BPS
+    assert R.ReplicationConfig().capital_usd == PAPER_EQUITY_USD and R.ReplicationConfig().taker_fee_bps == TAKER_PERP_BPS
 
 
 # ------------------------------------------------------------------ portefeuille entier : un état par dex

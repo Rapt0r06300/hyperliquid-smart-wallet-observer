@@ -27,6 +27,7 @@ from hl_observer.backtesting.copy_vault_protocol import (
     MAX_TARGET_LAG_MS,
     PAPER_EQUITY_USD,
 )
+from hl_observer.backtesting import copy_vault_funding_realise as _FUNDING_REEL
 from hl_observer.backtesting.copy_vault_v4_train import assess_train_variant
 from hl_observer.backtesting.train_statistics import (
     UTC_DAY_MS,
@@ -272,10 +273,28 @@ def _reference_objective_status(*segments: Mapping[str, Any]) -> str:
     )
 
 
-def _funding_receipt(trades: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    """Prove zero realized funding only when every accepted position avoids settlement."""
+def _funding_receipt(
+    trades: Sequence[Mapping[str, Any]],
+    taux_funding_par_coin: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Reçu de funding. Deux modes, le défaut étant INCHANGÉ.
+
+    ``taux_funding_par_coin is None`` (DÉFAUT, comportement historique) : le funding n'est prouvé
+    que d'une seule façon — « zéro, car aucune position n'a traversé de règlement ». Un seul
+    franchissement rend ``UNMEASURABLE``.
+
+    Taux fournis : on délègue à ``copy_vault_funding_realise.funding_des_trades``, qui **MESURE**
+    le carry réellement payé/reçu en ``Decimal`` depuis les règlements OBSERVÉS du coffre
+    (``funding_history``), refuse tout intervalle autre que ``1h`` au lieu de le supposer, et
+    produit le statut canonique ``MEASURED`` déjà attendu par ``_reference_objective_status``.
+    Répare une porte pratiquement infranchissable : le funding se règle toutes les heures et les
+    horizons vont jusqu'à 1 h, donc exiger « aucun franchissement » rejetait structurellement les
+    candidats. FAIL-CLOSED conservé : une seule inconnue rend le total inconnu, jamais un zéro
+    favorable.
+    """
 
     trade_count = len(trades)
+    franchissements = 0
     for index, trade in enumerate(trades):
         if not isinstance(trade, Mapping):
             return {
@@ -339,16 +358,32 @@ def _funding_receipt(trades: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
                 "trade_index": index,
             }
         if first_possible_funding_ms <= exit_raw:
-            return {
-                "status": "UNMEASURABLE",
-                "carry_pnl_usd": None,
-                "trade_count": trade_count,
-                "settlement_crossing_count": 1,
-                "settlement_interval_hours": 1,
-                "reason": "ACCEPTED_TRADE_CROSSES_FUNDING_BOUNDARY",
-                "trade_index": index,
-                "funding_boundary_ms": first_possible_funding_ms,
-            }
+            franchissements += 1
+            if taux_funding_par_coin is None:
+                # Mode historique : un franchissement suffit à rendre le segment inéligible.
+                return {
+                    "status": "UNMEASURABLE",
+                    "carry_pnl_usd": None,
+                    "trade_count": trade_count,
+                    "settlement_crossing_count": 1,
+                    "settlement_interval_hours": 1,
+                    "reason": "ACCEPTED_TRADE_CROSSES_FUNDING_BOUNDARY",
+                    "trade_index": index,
+                    "funding_boundary_ms": first_possible_funding_ms,
+                }
+    if taux_funding_par_coin is not None and franchissements:
+        # On MESURE au lieu d'exiger l'absence. Le module dédié tient la comptabilité exacte
+        # (Decimal), refuse un intervalle inattendu, et ne rend MEASURED que si CHAQUE épisode
+        # est lisible : une seule inconnue emporte le verdict (jamais un zéro flatteur).
+        mesure = _FUNDING_REEL.funding_des_trades(trades, taux_funding_par_coin)
+        return {
+            **mesure,
+            "trade_count": trade_count,
+            "settlement_interval_hours": 1,
+            "reason": mesure.get("reason")
+            or ("MEASURED_FROM_OBSERVED_FUNDING_HISTORY" if mesure.get("status") == "MEASURED"
+                else "FUNDING_RATE_NOT_OBSERVED_AT_CROSSED_BOUNDARY"),
+        }
     return {
         "status": "MEASURED_ZERO_NO_SETTLEMENT_CROSSED",
         "carry_pnl_usd": 0.0,
@@ -495,126 +530,13 @@ def _aggregate_funding_receipt(
     }
 
 
-def _verified_freeze(raw: Mapping[str, Any]) -> dict[str, Any]:
-    freeze = raw.get("freeze") if isinstance(raw.get("freeze"), Mapping) else raw
-    if not isinstance(freeze, Mapping):
-        raise ValueError("COPY_V21_FREEZE_MISSING")
-    row = dict(freeze)
-    params = row.get("parameters")
-    if (
-        row.get("schema_version") != "hypersmart.economic_parameter_freeze.v1"
-        or row.get("family") != "copy_vault"
-        or row.get("selected_before_final_evaluation") is not True
-        or not isinstance(params, Mapping)
-    ):
-        raise ValueError("COPY_V21_FREEZE_INVALID")
-    parameters = dict(params)
-    if parameters.get("protocol") != PROTOCOL:
-        raise ValueError("COPY_V21_PROTOCOL_MISMATCH")
-    if parameters.get("paper_read_only") is not True or parameters.get("real_execution") is not False:
-        raise ValueError("COPY_V21_SAFETY_CONTRACT_MISMATCH")
-    if parameter_hash(parameters) != str(row.get("parameters_sha256") or ""):
-        raise ValueError("COPY_V21_FREEZE_HASH_MISMATCH")
-    required_parameters = {
-        "training_selection_eligible",
-        "minimum_leader_fill_notional_usd",
-        "signed_depth_imbalance_minimum",
-        "core_notional_usd",
-        "probe_notional_usd",
-        "daily_profit_lock_usd",
-        "stop_loss_bps",
-        "take_profit_bps",
-        "horizon_ms",
-        "vault_daily_limit",
-        "coin_daily_limit",
-        "max_open_positions",
-        "bonferroni_trial_count",
-        "bounds",
-    }
-    if (
-        not required_parameters.issubset(parameters)
-        or parameters.get("training_selection_eligible") is not True
-    ):
-        raise ValueError("COPY_V21_FREEZE_PARAMETERS_INVALID")
-    positive_parameters = (
-        "minimum_leader_fill_notional_usd",
-        "daily_profit_lock_usd",
-        "stop_loss_bps",
-        "take_profit_bps",
-        "horizon_ms",
-        "vault_daily_limit",
-        "coin_daily_limit",
-        "max_open_positions",
-        "bonferroni_trial_count",
-    )
-    try:
-        positive_values = [float(parameters[name]) for name in positive_parameters]
-        signed_imbalance_minimum = float(parameters["signed_depth_imbalance_minimum"])
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError("COPY_V21_FREEZE_PARAMETERS_INVALID") from exc
-    if (
-        any(not math.isfinite(value) or value <= 0.0 for value in positive_values)
-        or not math.isfinite(signed_imbalance_minimum)
-        or not -1.0 <= signed_imbalance_minimum <= 1.0
-        or any(not value.is_integer() for value in positive_values[-5:])
-    ):
-        raise ValueError("COPY_V21_FREEZE_PARAMETERS_INVALID")
-    for name in ("core_notional_usd", "probe_notional_usd"):
-        try:
-            notional = float(parameters[name])
-        except (KeyError, TypeError, ValueError, OverflowError) as exc:
-            raise ValueError("COPY_V21_PAPER_NOTIONAL_INVALID") from exc
-        if (
-            not math.isfinite(notional)
-            or notional <= 0.0
-            or notional > MAX_GROSS_EXPOSURE_USD
-        ):
-            raise ValueError("COPY_V21_PAPER_GROSS_EXPOSURE_LIMIT_EXCEEDED")
-    frozen_at_ms = _strict_positive_int(row.get("frozen_at_ms"))
-    if frozen_at_ms is None:
-        raise ValueError("COPY_V21_FREEZE_TIMESTAMP_INVALID")
-    bounds = parameters.get("bounds")
-    if not isinstance(bounds, Mapping):
-        raise ValueError("COPY_V21_FREEZE_BOUNDS_INVALID")
-    bound_values = {
-        name: _strict_positive_int(bounds.get(name))
-        for name in (
-            "train_start_ms", "train_end_ms", "validation_start_ms",
-            "validation_end_ms", "oos_start_ms", "oos_end_ms",
-        )
-    }
-    if any(value is None for value in bound_values.values()):
-        raise ValueError("COPY_V21_FREEZE_BOUNDS_INVALID")
-    train_start_ms = bound_values["train_start_ms"]
-    train_end_ms = bound_values["train_end_ms"]
-    validation_start_ms = bound_values["validation_start_ms"]
-    validation_end_ms = bound_values["validation_end_ms"]
-    oos_start_ms = bound_values["oos_start_ms"]
-    oos_end_ms = bound_values["oos_end_ms"]
-    if (
-        min(
-            train_start_ms,
-            train_end_ms,
-            validation_start_ms,
-            validation_end_ms,
-            oos_start_ms,
-            oos_end_ms,
-        ) <= 0
-        or train_end_ms < train_start_ms
-        or validation_start_ms <= train_end_ms
-        or validation_end_ms < validation_start_ms
-        or oos_start_ms <= validation_end_ms
-        or oos_end_ms < oos_start_ms
-        or frozen_at_ms <= oos_end_ms
-    ):
-        raise ValueError("COPY_V21_FREEZE_BOUNDS_INVALID")
-    if (
-        int(COPY_DELAY_MS) != FROZEN_COPY_DELAY_MS
-        or int(MAX_REFERENCE_LAG_MS) != FROZEN_MAX_REFERENCE_LAG_MS
-        or int(MAX_TARGET_LAG_MS) != FROZEN_MAX_TARGET_LAG_MS
-    ):
-        raise ValueError("COPY_V21_EXECUTION_PROTOCOL_DRIFT")
-    return row
+# La verification du gel vit dans `copy_vault_v21_verification_du_gel` depuis le 19/11/2026 :
+# ce fichier depassait son plafond d'architecture (1 561 > 1 516) apres l'ajout de la mesure
+# de funding, et la reponse juste est de sortir du code, pas de relever le plafond. L'import
+# est DIFFERE la-bas, pas ici : ce module expose les constantes dont elle a besoin.
+from hl_observer.backtesting.copy_vault_v21_verification_du_gel import (  # noqa: E402
+    verifier_le_gel as _verified_freeze,
+)
 
 
 def _prepare_segment_rows(
@@ -996,6 +918,7 @@ def _evaluate_segment(
     fee_bps: float | None = None,
     complete_utc_day_starts_ms: Sequence[object] | None = None,
     prepared_cache: dict[Any, Any] | None = None,
+    taux_funding_par_coin: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     # #5 — fenêtre causale (lag) cherchable : absente des params (v21 incumbent)
     # -> constante gelée -> comportement strictement identique.
@@ -1057,7 +980,7 @@ def _evaluate_segment(
         timestamp_key="exit_ts_ms",
         complete_day_starts_ms=fully_covered_days,
     )
-    funding_receipt = _funding_receipt(trades)
+    funding_receipt = _funding_receipt(trades, taux_funding_par_coin)
     reasons = list(assessment["reasons"])
     if calendar_stats.get("status") != "MEASURABLE":
         receipt_reason = (
@@ -1074,7 +997,14 @@ def _evaluate_segment(
             "coverage_reason": calendar_stats.get("reason"),
         }
         reasons.append("CALENDAR_PNL_UNMEASURABLE")
-    if funding_receipt["status"] != "MEASURED_ZERO_NO_SETTLEMENT_CROSSED":
+    # Deux statuts seulement sont acceptables, et les deux sont des MESURES :
+    #  - zéro prouvé (aucun règlement franchi) : le cas historique ;
+    #  - carry mesuré depuis les taux OBSERVÉS, possible uniquement si un index funding a été
+    #    fourni ET que chaque frontière franchie avait un taux observé (sinon fail-closed).
+    if funding_receipt["status"] not in {
+        "MEASURED_ZERO_NO_SETTLEMENT_CROSSED",
+        "MEASURED",
+    }:
         reasons.append("FUNDING_PNL_UNMEASURABLE")
     return {
         **assessment,
@@ -1113,6 +1043,7 @@ def evaluate_frozen_v21_segment(
     capital_scenario_usd: float | None = None,
     complete_utc_day_starts_ms: Sequence[object] | None = None,
     prepared_cache: dict[Any, Any] | None = None,
+    taux_funding_par_coin: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Reproduce one named segment with the immutable V21 policy.
 
@@ -1148,6 +1079,7 @@ def evaluate_frozen_v21_segment(
         capital_scenario_usd=capital_scenario_usd,
         complete_utc_day_starts_ms=complete_utc_day_starts_ms,
         prepared_cache=prepared_cache,
+        taux_funding_par_coin=taux_funding_par_coin,
     )
 
 

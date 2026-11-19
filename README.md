@@ -1,6 +1,6 @@
 # Alina Smart Flow
 
-Dernière mise à jour : **2026-11-11**.
+Dernière mise à jour : **2026-11-19**.
 
 **Dataset principal** : données, manifestes, catalogues et preuves de collecte réunis dans **ce dépôt GitHub unique**, sur `main`. L'appellation historique « Dataset V2 » ne désigne pas un second dépôt actif ; les identifiants de format et les chemins techniques `v2` restent inchangés pour garantir la compatibilité.
 
@@ -26,7 +26,7 @@ Le fonctionnement attendu est organisé autour de trois blocs et de la synchroni
 | Synchronisation du code | `POUSSER-GITHUB.cmd` | Réconcilier le code local et `main` puis pousser sans force, reset ni effacement. Ce lanceur ne transfère pas les shards. |
 | Shards SAFE | AlinaSync / `ALINA_SYNC_COMPLETE.cmd` | Récupérer/restaurer les assets SAFE publiés sur GitHub, puis vérifier tailles, SHA-256 et reçus. |
 
-À la racine, seuls ces quatre lanceurs principaux et AlinaSync restent visibles. Les outils de support et de restauration sont rangés dans [`tools/launchers/README.md`](tools/launchers/README.md). « Portable » signifie qu'un clone fonctionne depuis son propre chemin local ; aucune archive séparée n'est requise pour utiliser le dépôt.
+À la racine restent ces quatre lanceurs, AlinaSync (`ALINA_SYNC_COMPLETE.cmd` et `.sh`) et les lanceurs d'appoint **enregistrés** : `Certificateur Coffre Fort.cmd` et `CERTIFIER_EN_CONTINU.cmd` (scellement du coffre), `SUIVI_COFFRE.cmd`, `RAPPORT-COLLECTEURS.cmd`, `RATTRAPAGE.cmd`, `Noeud-HL.cmd`, `Installer Noeud HL.cmd`. **Tout autre `.cmd` à la racine est interdit** : la liste autorisée est fixée par `tests/test_launcher_unifie.py`, et un ajout non enregistré rend ce test rouge. Les outils de support sont rangés dans [`tools/launchers/README.md`](tools/launchers/README.md). « Portable » signifie qu'un clone fonctionne depuis son propre chemin local ; aucune archive séparée n'est requise pour utiliser le dépôt.
 
 Le labo est le cerveau de recherche : chaque amélioration, même petite ou provisoire, reste inscrite avec son identité, ses données, ses paramètres et ses résultats ; les versions précédentes ne sont pas effacées lorsqu'un candidat ultérieur fait mieux. Un candidat TRAIN ou un score exploratoire n'est pas une preuve économique. **Aucun PnL, fill, coût, prix ou timestamp ne doit être inventé** ; une donnée manquante reste inconnue et peut rendre le résultat `UNMEASURABLE`.
 
@@ -106,7 +106,7 @@ shards attendu/vérifié et le code retour. Un run rapide ne constitue pas une
 preuve de rentabilité : les résultats restent soumis aux gates causales,
 replay, validation, OOS et forward.
 
-La preuve Copy-Vault passe par le control plane canonique : `IDLE → COLLECT → ANALYZE`, puis `DRAIN → QUALITY → REPLAY → BACKTEST → OOS → FORWARD_PAPER → PNL_PROOF → SCOREBOARD → DONE`. Le capital paper opérationnel est **350 USD** et le repère de recherche est **+5 USD nets/jour**. Ce repère n'est ni une gate automatique ni une promesse : la recherche conserve une trajectoire nette de coûts, avec preuves causales et reproductibles. Copy-Vault est la seule famille économique active ; les autres restent désactivées.
+La preuve Copy-Vault passe par le control plane canonique : `IDLE → COLLECT → ANALYZE`, puis `DRAIN → QUALITY → REPLAY → BACKTEST → OOS → FORWARD_PAPER → PNL_PROOF → SCOREBOARD → DONE`. Le capital paper opérationnel est **100 USD**, défini en une seule source (`PAPER_EQUITY_USD` dans `src/hl_observer/contrat_paper.py`). **Aucun objectif chiffré n'est actif** : on cherche le plus grand PnL net causal reproductible, sans cible fixe, sans plafond de profit ni seuil terminal, sous contraintes de risque, coûts, drawdown, exposition, liquidité et capacité. Le repère historique de +5 USD nets/jour n'est qu'une référence d'affichage, jamais une gate. Copy-Vault est la seule famille économique active ; les autres restent désactivées.
 
 Ces noms fixent le rôle opérateur attendu, pas la preuve que le code actuel est déjà conforme : toute divergence entre un lanceur et ce contrat doit être réparée avant d'annoncer une simulation ou une preuve valide. Les rapports et candidats historiques restent conservés.
 
@@ -273,12 +273,19 @@ Autres statuts encodés dans `src/hl_observer/strategies/active_scope.py` :
 
 **Carry / Funding Carry reste `DISABLED_BY_SCOPE`.**
 
+À ne pas confondre : le funding est désormais **mesuré comme un coût** des épisodes
+Copy-Vault, depuis les règlements horaires observés du coffre (famille
+`funding_history`, module `copy_vault_funding_realise`). Chiffrer ce que coûte un
+portage n'active pas la famille Carry : aucune stratégie ne cherche à *encaisser* le
+funding, il est seulement déduit comme frais. Un règlement manquant garde le statut
+`UNMEASURABLE` avec sa raison, jamais un zéro favorable.
+
 ### Cible opérationnelle actuelle
 
 La cible courante est :
 
 **démontrer Copy-Vault seul en PAPER, avec des données SAFE, causales, exécutables,
-backtestables et replayables, sur 350 USD de capital paper.**
+backtestables et replayables, sur 100 USD de capital paper.**
 
 Lead-Lag, Cross-Venue, arbitrage et les autres modules ne peuvent ni contribuer au PnL,
 ni compenser Copy-Vault, ni être lancés implicitement. Leur éventuelle réactivation exigera
@@ -292,10 +299,14 @@ Les conclusions honnêtes sont :
 - `UNMEASURABLE`
 - `REJECTED`
 
-Le repère de **+5 USD nets/jour sur 350 USD paper** est un objectif de recherche,
-pas une gate automatique ni une promesse. Le moteur de découverte reste le couple
-**backtest + replay** du laboratoire, qui doit produire des variantes et ne garder
-que celles qui battent le meilleur courant après coûts. Les versions précédentes
+**Aucun objectif chiffré n'est actif** : on cherche la plus grande croissance nette
+reproductible du capital, sans cible fixe de dollars par jour, sans plafond de profit
+et sans seuil terminal, en maîtrisant perte, drawdown, liquidité et risque de ruine.
+Le repère historique de +5 USD nets/jour, sur 200 ou 350 USD paper, ne survit que
+comme référence d'affichage — jamais comme gate, et une preuve produite dans ces
+anciennes conditions ne démontre pas le contrat actuel. Le moteur de découverte reste
+le couple **backtest + replay** du laboratoire, qui doit produire des variantes et ne
+garder que celles qui battent le meilleur courant après coûts. Les versions précédentes
 ne sont pas écrasées et toute preuve reste soumise à OOS/forward.
 
 Un progrès monotone-positif n'est jamais obtenu en abaissant artificiellement les frais, le slippage, la latence, l'impact, les exigences statistiques ou les gates de qualité.

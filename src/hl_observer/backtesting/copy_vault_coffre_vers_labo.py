@@ -23,6 +23,7 @@ from typing import Any
 
 from hl_observer.backtesting.copy_vault_signal_alignment import MAX_BOOK_AGE_MS
 
+
 def _fenetre_apres_signal() -> int:
     """Combien de temps APRES un signal un carnet peut encore servir.
 
@@ -54,6 +55,153 @@ def _fenetre_apres_signal() -> int:
 #: une journee de carnets et trois semaines.
 FAMILLES_DE_CARNETS = ("book_l2", "micro_l2", "venue_book", "bbo", "micro_bbo")
 
+#: LES SEULES ACTIONS QUE LA POLITIQUE GELEE SAIT COPIER.
+#:
+#: `copy_vault_v21_frozen._segment_candidates` ecarte tout metaordre dont la premiere action n'est
+#: pas `ADD` (compteur `NON_ADD_REJECTED`) : elle ne copie donc que les RENFORCEMENTS de position
+#: d'un leader, jamais ses ouvertures ni ses sorties. Mesure du 19/11/2026 sur une tranche de
+#: quatre heures : 386 328 fills, dont **180 666 OPEN, 204 630 CLOSE et 1 032 ADD** -- soit 0,3 %
+#: de copiable. Preparer les 99,7 % restants coute des carnets pour rien et noie les signaux
+#: utiles : un corpus filtre au notionnel du leader rendait 765 signaux, dont 765 refuses pour
+#: cette seule raison, donc zero candidat.
+#:
+#: Cette constante DUPLIQUE une regle du moteur gele, qu'on ne reecrit pas. Ce qui empeche la
+#: copie de deriver, c'est `test_le_filtre_d_action_suit_la_politique_gelee` : il fait juger un
+#: OPEN, un CLOSE et un ADD par le moteur lui-meme et verifie que seul l'ADD survit. Si la
+#: politique change, ce test rougit -- il ne faut pas que le filtre, lui, reste muet.
+ACTIONS_COPIEES_PAR_LA_POLITIQUE = ("ADD",)
+
+
+def premiere_action(metaordre: Mapping[str, Any]) -> str:
+    """L'action du PREMIER fill du metaordre, comme le moteur gele la lit.
+
+    Le groupement rassemble plusieurs fills ; c'est le premier qui decide si l'episode est une
+    ouverture ou un renforcement, parce que c'est lui qui declenche la copie.
+    """
+    membres = list(metaordre.get("member_events") or ())
+    if membres and isinstance(membres[0], Mapping):
+        return str(membres[0].get("action") or "").strip().upper()
+    return str(metaordre.get("action") or "").strip().upper()
+
+
+def copiable_par_la_politique(metaordre: Mapping[str, Any]) -> bool:
+    """Vrai si la politique gelee tentera quelque chose avec ce metaordre."""
+    return premiere_action(metaordre) in ACTIONS_COPIEES_PAR_LA_POLITIQUE
+
+
+def ancres_utiles(
+    instants: Sequence[int], *, delai_ms: int, horizons_ms: Sequence[int], pas_ms: int
+) -> list[int]:
+    """Les instants OU un carnet sert vraiment au replay, pour une suite de signaux d'un coin.
+
+    DEFAUT QUE CECI CORRIGE (19/11/2026). La version precedente gardait « les premiers carnets de
+    chaque fenetre », avec un plafond de 240 par signal, en expliquant qu'ils etaient « les plus
+    proches des instants cibles ». C'etait faux : les premiers d'une fenetre sont les plus proches
+    de son DEBUT, donc du carnet de reference -- et le carnet de SORTIE, a une heure de la, etait
+    systematiquement jete. Mesure sur la tranche t001 : SOL, TIA, XMR, ZEC et XRP portaient
+    exactement 240 carnets couvrant 40,9 minutes d'une fenetre de 240, sur une connexion unique et
+    sans la moindre coupure reelle. Le plafond, pose pour la memoire, detruisait la mesure.
+
+    Le replay cherche trois instants par signal : `t` (reference), `t + delai` (entree) et
+    `t + delai + horizon` (sortie) -- pour CHACUN des horizons que le labo explore, puisqu'il les
+    cherche. On garde donc des carnets autour de ces instants-la, et de nulle part ailleurs.
+
+    `pas_ms` quantifie les ancres : deux instants separes de moins d'un pas n'ont pas besoin de
+    deux carnets, puisque le meme carnet repond pour les deux. C'est ce qui empeche le budget de
+    croitre avec le nombre de signaux voisins.
+    """
+    exactes: set[int] = set()
+    crans: set[int] = set()
+    pas = max(1, int(pas_ms))
+    for brut in instants:
+        t = int(brut)
+        # LA REFERENCE ET L'ENTREE NE SE QUANTIFIENT PAS.
+        #
+        # Premiere version : tout etait arrondi au cran inferieur. L'ancre de reference tombait
+        # donc jusqu'a un pas AVANT le signal, et le carnet garde de son cote passe pouvait se
+        # trouver a `pas + fenetre` du signal -- 45 s pour un pas de 15 s. Le replay, qui exige une
+        # reference a `max_reference_lag_ms` pres, refusait alors : mesure du 19/11/2026,
+        # `STALE_OR_MISSING_REFERENCE_BOOK` sur 418 candidats de VALIDATION sur 418 et 623 sur 636
+        # en OOS. Ces deux instants sont connus exactement, et ils decident de l'episode : on les
+        # garde tels quels.
+        exactes.add(t)
+        exactes.add(t + int(delai_ms))
+        # Les sorties, elles, se quantifient sans dommage : leur cible depend de l'horizon cherche
+        # ET de l'instant d'entree reel, donc elle est deja approximative a quelques secondes.
+        # C'est ce qui empeche le budget de croitre avec le nombre de signaux voisins.
+        for horizon in horizons_ms:
+            crans.add((t + int(delai_ms) + int(horizon)) // pas)
+    return sorted(exactes | {cran * pas for cran in crans})
+
+def une_seule_connexion_par_coin(
+    carnets: Mapping[str, Sequence[Mapping[str, Any]]],
+) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any]]:
+    """Ne laisser au replay, pour chaque coin, que l'observateur le plus continu.
+
+    POURQUOI (mesure du 19/11/2026). Le replay refuse un episode dont la reference, l'entree et
+    la sortie ne portent pas la MEME `connection_id` : c'est `L2_CONNECTION_GAP_CROSSED`, et c'est
+    une regle juste -- trois carnets venus de trois flux differents ne prouvent pas qu'on aurait
+    observe le marche sans interruption. Mais plusieurs lanes observent le meme coin en meme
+    temps : sur la tranche t001, BTC portait une connexion longue (151 minutes d'affilee) PLUS
+    neuf reconnexions qui se relaient toutes les dix a vingt-cinq minutes. Le replay, qui prend le
+    carnet le plus proche sans regarder l'identite, melangeait les deux et refusait : 250 des 262
+    candidats de TRAIN, soit 95 % des refus, pour un trou qui n'existait pas.
+
+    On choisit donc la connexion qui couvre le plus d'instants distincts, coin par coin, et on
+    COMPTE ce qu'on ecarte. Ce filtre s'applique APRES la lecture, ce qui serait un defaut s'il
+    portait sur un volume non borne -- ce n'est pas le cas : `carnets_du_coffre` a deja limite a un
+    carnet par ancre, par cote et par connexion.
+    """
+    gardes: dict[str, list[dict[str, Any]]] = {}
+    ecartes = 0
+    coins_mono = 0
+    for coin, liste in carnets.items():
+        groupes: dict[Any, list[dict[str, Any]]] = {}
+        for brut in liste:
+            groupes.setdefault(brut.get("connection_id"), []).append(dict(brut))
+        if len(groupes) <= 1:
+            coins_mono += 1
+            gardes[str(coin)] = [dict(x) for x in liste]
+            continue
+        # PLUSIEURS CONNEXIONS, MAIS JAMAIS DEUX EN MEME TEMPS.
+        #
+        # Premiere version : garder LA connexion la plus etendue, pour tout le corpus. Mesure du
+        # 19/11/2026, qui l'a refutee : une lane L2 vit quelques heures, pas six journees. Choisir
+        # globalement laissait donc **un seul coin couvert le 13/11 et treize le 14**, alors que
+        # TRAIN est precisement le 13-15 ; 365 819 carnets tombaient a 64 024, et 418 candidats de
+        # VALIDATION sur 418 etaient refuses faute du moindre carnet.
+        #
+        # Ce que le replay exige n'est pas une connexion unique, c'est qu'un EPISODE n'en traverse
+        # pas deux. On garde donc plusieurs connexions par coin, a condition qu'elles ne se
+        # recouvrent pas : les periodes se succedent, chacune servie par un seul observateur. Un
+        # episode a cheval sur une frontiere sera refuse -- et il le merite, l'observateur a
+        # vraiment change.
+        intervalles: list[tuple[int, int, Any, list[dict[str, Any]]]] = []
+        for identite, groupe in groupes.items():
+            horodatages = [int(x["ts_ms"]) for x in groupe]
+            intervalles.append((min(horodatages), max(horodatages), identite, groupe))
+        # Du plus long au plus court : une connexion longue vaut mieux que deux courtes, puisque
+        # c'est la duree qui decide si un episode tient dedans.
+        intervalles.sort(key=lambda bloc: (bloc[0] - bloc[1], bloc[0]))
+        pris: list[tuple[int, int]] = []
+        retenus_du_coin: list[dict[str, Any]] = []
+        for debut, fin, _identite, groupe in intervalles:
+            if any(debut <= f and d <= fin for d, f in pris):
+                continue        # recouvrement : cette connexion ferait un melange
+            pris.append((debut, fin))
+            retenus_du_coin.extend(dict(x) for x in groupe)
+        retenus_du_coin.sort(key=lambda x: int(x["ts_ms"]))
+        ecartes += len(liste) - len(retenus_du_coin)
+        gardes[str(coin)] = retenus_du_coin
+    audit = {
+        "coins": len(gardes),
+        "coins_a_connexion_unique": coins_mono,
+        "carnets_gardes": sum(len(v) for v in gardes.values()),
+        "ecartes_connexion_minoritaire": ecartes,
+    }
+    return gardes, audit
+
+
 def carnets_du_coffre(
     racine: str | Path,
     *,
@@ -63,7 +211,7 @@ def carnets_du_coffre(
     familles: Sequence[str] = FAMILLES_DE_CARNETS,
     fenetre_ms: int = MAX_BOOK_AGE_MS,
     instants_par_coin: Mapping[str, Sequence[int]] | None = None,
-    par_signal: int = 240,
+    par_ancre: int = 1,
 ) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any]]:
     """Lit les carnets du COFFRE en flux, et ne garde que ceux a portee d'un signal.
 
@@ -90,15 +238,34 @@ def carnets_du_coffre(
     if isinstance(shards_tous, dict):
         shards_tous = list(shards_tous.values())
 
-    # Les instants de signal, par coin, pour filtrer au vol.
+    # Les ANCRES, par coin : la ou le replay cherchera un carnet. Pas les instants de signal --
+    # voir `ancres_utiles`, qui dit pourquoi un filtre pose sur les signaux seuls jetait les
+    # carnets de sortie.
+    from hl_observer.backtesting import copy_vault_executable as cv
+    from hl_observer.backtesting.copy_vault_local_lab import _PARAMETER_DOMAINS
+
+    horizons = tuple(dict(_PARAMETER_DOMAINS)["horizon_ms"])
+    pas_ms = max(1, int(fenetre_ms) // 2)
+    tolerance_ms = int(fenetre_ms) + pas_ms
     cibles: dict[str, list[int]] = {}
     if instants_par_coin:
-        cibles = {str(k): sorted(int(x) for x in v) for k, v in instants_par_coin.items()}
+        cibles = {
+            str(coin): ancres_utiles(
+                [int(x) for x in instants],
+                delai_ms=int(cv.COPY_DELAY_MS),
+                horizons_ms=horizons,
+                pas_ms=pas_ms,
+            )
+            for coin, instants in instants_par_coin.items()
+        }
 
     apres_ms = _fenetre_apres_signal()
-    densite: dict[tuple[str, int], int] = {}
+    densite: dict[tuple[str, int, int, Any], list[tuple[int, int]]] = {}
     trop_denses = 0
     incomplets = 0
+    ecartes_sans_signal = 0
+    homonymes = 0
+    sans_identite = 0
     gardes: dict[str, list[dict[str, Any]]] = {}
     par_famille: dict[str, dict[str, int]] = {}
     for famille in familles:
@@ -121,33 +288,102 @@ def carnets_du_coffre(
             if not coin or ts is None:
                 continue
             ts = int(ts)
-            instants = cibles.get(coin)
-            if instants is not None:
-                # DES DEUX COTES du signal : avant pour la reference, apres pour l'entree et la
-                # sortie. Ne regarder qu'en arriere jetait les carnets d'entree et de sortie, et
-                # le replay rendait zero trade sur 4 000 signaux.
-                i = bisect.bisect_left(instants, ts - apres_ms)
-                if not (i < len(instants) and instants[i] - ts <= fenetre_ms):
-                    continue
-                # ET PAS PLUS DE `par_signal` CARNETS PAR SIGNAL. Le replay n'a besoin que de
-                # TROIS carnets -- reference, entree, sortie -- mais la fenetre d'une heure en
-                # contient des milliers, et les fenetres de signaux voisins se recouvrent : mesure
-                # du 19/11/2026, 459 signaux retenaient 1 950 464 carnets. On garde les premiers
-                # de chaque fenetre, qui sont les plus proches des instants cibles ; au-dela, un
-                # carnet de plus n'ajoute aucune information que le replay saurait lire.
-                vus_du_signal = densite.get((coin, i), 0)
-                if vus_du_signal >= par_signal:
-                    trop_denses += 1
-                    continue
-                densite[(coin, i)] = vus_du_signal + 1
-            # LE REPLAY EXIGE CES CHAMPS : `bid`, `ask` et `capacity_usd`. Les cinq familles de
-            # carnets du coffre n'ont pas le meme schema -- `bbo` et `book_l2` portent les deux
-            # cotes, d'autres non -- et le replay levait `KeyError: 'ask'` apres 60 candidats.
-            # Une donnee incomplete se REFUSE et se COMPTE, elle ne fait pas tomber la mesure :
-            # c'est la regle du contrat, et c'est aussi la seule façon de savoir ce qui manque.
+            # LES CHAMPS D'ABORD, LE BUDGET ENSUITE. Le replay exige `bid`, `ask` et
+            # `capacity_usd` ; les cinq familles du coffre n'ont pas le meme schema, et il levait
+            # `KeyError: 'ask'` apres 60 candidats. Une donnee incomplete se REFUSE et se COMPTE,
+            # elle ne fait pas tomber la mesure. Mais l'ordre compte autant que le refus : tant que
+            # ce controle venait APRES le budget par ancre, un carnet inutilisable consommait la
+            # place du seul carnet gardee pour cette ancre, et un carnet complet arrive juste apres
+            # etait refuse comme « trop dense ». Un test du chantier l'a attrape -- il comptait
+            # trois refus de champs et en recevait zero, parce que les trois etaient deja tombes
+            # dans le plafond.
             if any(ligne.get(champ) is None for champ in ("bid", "ask", "capacity_usd")):
                 incomplets += 1
                 continue
+            # ET UNE IDENTITE DE CONNEXION, sans quoi l'episode sera refuse de toute façon.
+            #
+            # Le replay exige que les trois carnets d'un episode portent une `connection_id` et un
+            # `l2_gap_epoch` (`L2_CONNECTION_IDENTITY_INCOMPLETE` sinon) : c'est ainsi qu'il prouve
+            # qu'on observait le marche SANS interruption. Un carnet qui n'en a pas ne peut pas
+            # participer a cette preuve.
+            #
+            # Mesure du 19/11/2026 : 34,8 % des carnets des tranches t021 et suivantes sont des
+            # snapshots ponctuels de source `HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT` -- une
+            # interrogation REST au moment d'un fill, pas un flux persistant, donc sans identite ni
+            # epoque. Ce sont eux qui portaient le `checkpoint_id` homonyme. Les laisser passer
+            # faisait refuser 344 candidats de VALIDATION sur 425 et 473 sur 628 en OOS, et pire :
+            # ils CONSOMMAIENT le budget d'une ancre au detriment d'un carnet utilisable.
+            #
+            # CE QU'ON PERD, ET IL FAUDRA Y REVENIR : ces snapshots sont causaux et poses pile au
+            # moment d'un fill, donc ce sont d'excellentes references. Le replay a un chemin pour
+            # eux (`EXACT_METAORDER_CHECKPOINTS`, qui n'exige aucune identite) mais il demande des
+            # `checkpoint_id` de la forme `{metaorder_id}:REFERENCE` -- un apparaige que le coffre
+            # ne fournit pas. Les rendre utilisables est un chantier a part, pas un filtre.
+            identite = ligne.get("connection_id")
+            epoque = ligne.get("l2_gap_epoch")
+            if (
+                not isinstance(identite, str) or not identite
+                or type(epoque) is not int or epoque < 0
+            ):
+                sans_identite += 1
+                continue
+            ancres = cibles.get(coin)
+            if ancres is None and instants_par_coin is not None:
+                # PAS DE SIGNAL SUR CE COIN = PAS DE CARNET. Sans cette ligne, un coin absent du
+                # dictionnaire des instants echappait au filtre et faisait garder TOUTE la
+                # fenetre : mesure du 19/11/2026, une tranche dont les signaux avaient tous ete
+                # ecartes en amont a retenu 268 674 carnets pour **zero** metaordre, et c'est la
+                # memoire qui l'a dit, pas l'audit. « Aucun filtre demande » (`instants_par_coin`
+                # a None) et « ce coin n'interesse personne » doivent se distinguer.
+                ecartes_sans_signal += 1
+                continue
+            if ancres is not None:
+                # L'ANCRE LA PLUS PROCHE, des deux cotes. Un carnet ne sert que s'il repond a une
+                # ancre : le replay prend le dernier au plus tard a la reference et le premier a
+                # partir de l'entree puis de la sortie, chacun a `fenetre_ms` pres au maximum.
+                # La tolerance vaut `fenetre_ms` PLUS le pas de quantification : une ancre est
+                # arrondie vers le bas, donc l'instant vraiment cherche peut se trouver jusqu'a un
+                # pas plus loin. Serrer la tolerance sur `fenetre_ms` seul rejetterait des carnets
+                # que le replay aurait acceptes -- la meme erreur, en plus petit, que la fenetre
+                # unilaterale qui rendait zero trade.
+                i = bisect.bisect_left(ancres, ts)
+                proche: int | None = None
+                for j in (i - 1, i):
+                    if (
+                        0 <= j < len(ancres)
+                        and abs(ancres[j] - ts) <= tolerance_ms
+                        and (proche is None or abs(ancres[j] - ts) < abs(ancres[proche] - ts))
+                    ):
+                        proche = j
+                if proche is None:
+                    continue
+                # UN CARNET DE CHAQUE COTE DE L'ANCRE, PAR CONNEXION. Le cote compte parce que la
+                # reference se cherche en arriere et l'entree en avant : un budget qui les melange
+                # peut rendre deux carnets du meme cote et laisser l'autre vide. La CONNEXION
+                # compte parce que le replay refuse un episode dont les trois carnets ne partagent
+                # pas la meme identite (`L2_CONNECTION_GAP_CROSSED`) : mesure du 19/11/2026, 250
+                # des 262 candidats de TRAIN refuses pour cette seule raison, parce que plusieurs
+                # lanes observent le MEME coin -- une connexion longue plus des reconnexions qui
+                # se relaient toutes les ~20 minutes. Garder un carnet par connexion laisse au
+                # replay une suite coherente a choisir, au lieu d'un melange qu'il doit refuser.
+                #
+                # ET QUAND LE BUDGET EST PLEIN, ON GARDE LE PLUS PROCHE, pas le premier arrive.
+                # Les familles sont lues l'une apres l'autre : garder le premier ferait dependre
+                # la reference choisie de l'ORDRE DE LECTURE, donc rendrait la mesure sensible a
+                # un detail qui n'a aucun sens economique. Un test du chantier attendait deux
+                # references pour une meme ancre, a 10 ms et a 30 s du signal : le replay n'en lit
+                # qu'une, et c'est la plus proche qui dit la verite du marche a cet instant.
+                cote = 0 if ts <= ancres[proche] else 1
+                clef = (coin, proche, cote, ligne.get("connection_id"))
+                ecart = abs(ancres[proche] - ts)
+                places = densite.setdefault(clef, [])
+                remplace: int | None = None
+                if len(places) >= par_ancre:
+                    rang_pire = max(range(len(places)), key=lambda k: places[k][1])
+                    if ecart >= places[rang_pire][1]:
+                        trop_denses += 1
+                        continue
+                    remplace = rang_pire
             carnet = dict(ligne)
             carnet["ts_ms"] = ts
             carnet.setdefault("coin", coin)
@@ -159,8 +395,43 @@ def carnets_du_coffre(
             # ligne dans la famille lue -- pas un numero invente : une provenance fausse serait
             # pire qu'absente, puisqu'elle designerait le mauvais carnet.
             carnet.setdefault("source_line", f"{famille}:{lus}")
-            gardes.setdefault(coin, []).append(carnet)
-            retenus += 1
+            # `checkpoint_id` EST UN HOMONYME, et il decidait de la mesure.
+            #
+            # Pour le replay, un `checkpoint_id` designe un point de controle lie
+            # CRYPTOGRAPHIQUEMENT a un metaordre : il attend la forme `{metaorder_id}:REFERENCE`,
+            # `{metaorder_id}:ENTRY`, `{metaorder_id}:EXIT:{horizon}`. Pour le collecteur de
+            # `book_l2`, c'est l'identifiant d'un snapshot -- un hash, sans aucun rapport. Or
+            # `index_des_carnets(...).continus()` EXCLUT tout carnet qui en porte un.
+            #
+            # Mesure du 19/11/2026 : le champ apparait a partir de la tranche t021, soit le 16/11,
+            # donc exactement sur VALIDATION et OOS. 46 % des carnets du corpus de phase 2 en
+            # portaient un -- et c'etait la connexion la plus etendue, celle que le filtre de
+            # connexion privilegie. Resultat : 425 candidats de VALIDATION sur 425 et 613 sur 628
+            # en OOS refuses en `STALE_OR_MISSING_REFERENCE_BOOK`, alors que 1 322 signaux sur
+            # 1 969 avaient bien un carnet a moins de 30 s. Une evolution de la collecte avait
+            # casse le replay sans que rien ne le dise.
+            #
+            # On RENOMME au lieu de jeter : la provenance reste lisible, mais elle ne se fait plus
+            # passer pour ce qu'elle n'est pas.
+            if "checkpoint_id" in carnet:
+                carnet["checkpoint_id_coffre"] = carnet.pop("checkpoint_id")
+                homonymes += 1
+            liste_du_coin = gardes.setdefault(coin, [])
+            if ancres is None:
+                liste_du_coin.append(carnet)
+                retenus += 1
+            elif remplace is None:
+                places.append((len(liste_du_coin), ecart))
+                liste_du_coin.append(carnet)
+                retenus += 1
+            else:
+                # Le carnet plus lointain cede sa place : rien n'est ajoute, donc `retenus` ne
+                # bouge pas, et `trop_denses` compte celui qui sort -- un seul carnet occupe la
+                # place a la fin, quel que soit l'ordre dans lequel les familles ont ete lues.
+                rang_liste = places[remplace][0]
+                liste_du_coin[rang_liste] = carnet
+                places[remplace] = (rang_liste, ecart)
+                trop_denses += 1
         par_famille[famille] = {"shards": len(shards), "lus": lus, "gardes": retenus}
 
     for liste in gardes.values():
@@ -174,7 +445,11 @@ def carnets_du_coffre(
         "fenetre_ms": int(fenetre_ms),
         "ecartes_trop_denses": trop_denses,
         "ecartes_champs_manquants": incomplets,
-        "par_signal": int(par_signal),
+        "ecartes_coin_sans_signal": ecartes_sans_signal,
+        "checkpoint_id_renommes": homonymes,
+        "ecartes_sans_identite_de_connexion": sans_identite,
+        "par_ancre": int(par_ancre),
+        "ancres": sum(len(v) for v in cibles.values()),
     }
     return gardes, audit
 
@@ -197,12 +472,101 @@ _ACTION_PAR_LIBELLE = {
     "close short": "CLOSE",
 }
 
+#: Jusqu'a quand une position observee renseigne encore un fill. Les observations tombent toutes
+#: les 57 s en mediane et toutes les 299 s au neuvieme decile (mesure du 19/11/2026) : au-dela de
+#: cinq minutes, on ne sait plus, et on le DIT.
+MAX_AGE_POSITION_MS = 300_000
+
+
+def positions_du_coffre(
+    racine: str | Path, *, debut_ms: int, fin_ms: int
+) -> tuple[dict[tuple[str, str], list[tuple[int, float]]], dict[str, Any]]:
+    """La position signee (`szi`) de chaque leader par coin, observee et triee.
+
+    POURQUOI IL FAUT LA LIRE. La politique gelee ne copie que les RENFORCEMENTS, et distinguer un
+    renforcement d'une ouverture demande de savoir si le leader detenait deja. Cette information
+    manque a 99,6 % des fills du coffre : `start_position` n'est renseigne que par `LIVE_WS`
+    (434 lignes sur 117 137 pour une heure), jamais par `LIVE_POLL`. La famille `position` la
+    porte autrement -- `szi`, source `CLEARINGHOUSE_WS`, `data_origin: REAL_OBSERVED`.
+
+    On lit une heure AVANT la fenetre demandee : une position observee juste avant son debut
+    renseigne les premiers fills, et l'oublier les rendrait faussement indeterminés.
+    """
+    import json
+
+    from hl_observer.backtesting import coffre_tranches
+
+    racine = Path(racine)
+    index = racine / "runtime/coffre_certifie/LOCAL_INDEX.json"
+    if not index.exists():
+        return {}, {"status": "COFFRE_ABSENT", "chemin": str(index)}
+    brut = json.loads(index.read_text(encoding="utf-8"))
+    tous = brut.get("shards") or brut.get("entrees") or []
+    if isinstance(tous, dict):
+        tous = list(tous.values())
+    debut_lecture = int(debut_ms) - MAX_AGE_POSITION_MS - 3_600_000
+    choix = coffre_tranches.selectionner(
+        tous, famille="position", coins=None, debut_ms=debut_lecture, fin_ms=int(fin_ms))
+    shards = choix.get("shards") or choix.get("retenus") or []
+    if not shards:
+        return {}, {"status": "AUCUN_SHARD_DE_POSITION", "shards": 0}
+    series: dict[tuple[str, str], list[tuple[int, float]]] = {}
+    lus = gardes = 0
+    for ligne in coffre_tranches.flux(
+        racine, shards, famille="position", coins=None,
+        debut_ms=debut_lecture, fin_ms=int(fin_ms), verifier_sha=False,
+    ):
+        lus += 1
+        instant = ligne.get("received_at_ms")
+        if isinstance(instant, bool) or not isinstance(instant, (int, float)):
+            continue
+        try:
+            szi = float(ligne["szi"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        cle = (str(ligne.get("vault") or ""), str(ligne.get("coin") or ""))
+        if not cle[0] or not cle[1]:
+            continue
+        series.setdefault(cle, []).append((int(instant), szi))
+        gardes += 1
+    for serie in series.values():
+        serie.sort(key=lambda couple: couple[0])
+    return series, {
+        "status": "LU_DEPUIS_LE_COFFRE", "shards": len(shards), "lignes_lues": lus,
+        "observations_gardees": gardes, "couples_vault_coin": len(series),
+    }
+
+
+def position_avant(
+    series: Mapping[tuple[str, str], Sequence[tuple[int, float]]],
+    *, vault: str, coin: str, instant_ms: int,
+    age_max_ms: int = MAX_AGE_POSITION_MS,
+) -> float | None:
+    """La derniere position observee AU PLUS TARD a `instant_ms`, ou `None` si on ne sait pas.
+
+    Causal par construction : on ne regarde jamais apres le fill, sans quoi on lirait l'avenir
+    pour decider s'il faut copier. Et `None` veut dire « inconnu » -- jamais zero, qui
+    affirmerait que le leader n'avait pas de position.
+    """
+    serie = series.get((str(vault), str(coin)))
+    if not serie:
+        return None
+    rang = bisect.bisect_right([instant for instant, _ in serie], int(instant_ms)) - 1
+    if rang < 0:
+        return None
+    instant, szi = serie[rang]
+    if int(instant_ms) - instant > int(age_max_ms):
+        return None
+    return szi
+
+
 def fills_du_coffre(
     racine: str | Path,
     *,
     debut_ms: int,
     fin_ms: int,
     familles: Sequence[str] = FAMILLES_DE_FILLS,
+    positions: Mapping[tuple[str, str], Sequence[tuple[int, float]]] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Lit les fills du COFFRE et les met au format que `cluster_metaorders` attend.
 
@@ -235,8 +599,19 @@ def fills_du_coffre(
     audit: dict[str, Any] = {
         "status": "LU_DEPUIS_LE_COFFRE", "lignes_lues": 0, "entrees_rendues": 0,
         "ecartes_libelle_inconnu": 0, "ecartes_champ_manquant": 0, "familles": {},
-        "actions": {},
+        "actions": {}, "ecartes_position_inconnue": 0, "doublons_de_hash": 0,
+        "doublons_plus_informatifs": 0,
     }
+    # LE MEME FILL ARRIVE DEUX FOIS, et la moins informative des deux copies gagnait.
+    #
+    # `LIVE_POLL` et `LIVE_WS` rapportent le meme fill -- meme `hash`, meme `ts_ms`, meme `sz` --
+    # mais `LIVE_WS` seul porte `start_position`. Mesure du 19/11/2026 : 117 137 lignes brutes
+    # pour 54 072 fills distincts, et 434 couples divergeaient sur ce champ. `cluster_metaorders`
+    # ecartait ensuite l'une des deux comme doublon (52 142 pour une heure) en gardant LA PREMIERE
+    # VENUE : les 915 renforcements reels se faisaient ecraser par leur jumeau sans position, et
+    # il sortait **zero ADD**. On deduplique donc ici, sur le `hash` du fill, en gardant toujours
+    # la copie qui porte la position -- la plus informative, pas la plus rapide.
+    par_hash: dict[str, int] = {}
     for famille in familles:
         choix = coffre_tranches.selectionner(
             tous, famille=famille, debut_ms=debut_ms, fin_ms=fin_ms)
@@ -254,20 +629,39 @@ def fills_du_coffre(
                 continue
             if action == "OPEN":
                 # OPEN ou ADD : la distinction NE SE LIT PAS dans `dir`, qui dit « Open Long »
-                # aussi bien pour une ouverture que pour un renforcement. Elle se CALCULE sur
-                # `start_position`, la position du leader AVANT ce fill : non nulle, le fill
-                # renforce une position existante, donc c'est un ADD.
+                # aussi bien pour une ouverture que pour un renforcement. Elle demande la position
+                # du leader AVANT ce fill -- et cette position, il faut la LIRE, jamais la
+                # supposer.
                 #
-                # Sans cette distinction, tous les metaordres sortaient en OPEN -- 514 544 sur
-                # six tranches, zero ADD -- et l'alignement, qui compte les ADD evaluables,
-                # rendait `NO_CAUSAL_L2_AT_OR_BEFORE_SIGNAL_WITHIN_30_SECONDS` alors que 99,4 %
-                # des signaux avaient bien un carnet a portee. Le refus accusait les carnets ; la
-                # cause etait une action manquante.
-                try:
-                    position_avant = float(ligne.get("start_position") or 0.0)
-                except (TypeError, ValueError):
-                    position_avant = 0.0
-                if position_avant != 0.0:
+                # LE DEFAUT QUE CECI REPARE (19/11/2026), et c'est la cause racine du refus
+                # unanime du labo. Cette ligne faisait `float(ligne.get("start_position") or 0.0)`
+                # puis `ADD si != 0`. Or `start_position` n'est renseigne que par `LIVE_WS` : 434
+                # lignes sur 117 137 pour une heure, soit **0,4 %**. Le `or 0.0` transformait donc
+                # « on ne sait pas » en « position nulle », donc en `OPEN`, pour 99,6 % du corpus.
+                # La politique ne copiant que les `ADD`, elle refusait tout (`NON_ADD_REJECTED`) :
+                # 0 ADD sur 50 581 metaordres, 0 candidat, 0 trade, 11 391 essais rejetes sans
+                # qu'aucune porte ne soit en cause. Un zero invente n'etait meme pas favorable au
+                # PnL ici -- il faisait disparaitre les candidats, ce qui se voit encore moins.
+                #
+                # Trois issues, donc, et jamais une valeur par defaut : l'observation directe du
+                # fill si elle existe, sinon la position observee par la famille `position` du
+                # coffre (causale, au plus `MAX_AGE_POSITION_MS` avant le fill), sinon un REFUS
+                # COMPTE.
+                declaree = ligne.get("start_position")
+                avant: float | None = None
+                if not isinstance(declaree, bool) and isinstance(declaree, (int, float)):
+                    avant = float(declaree)
+                elif positions is not None:
+                    avant = position_avant(
+                        positions,
+                        vault=str(ligne.get("vault") or ligne.get("user") or ""),
+                        coin=str(ligne.get("coin") or ""),
+                        instant_ms=int(ligne.get("ts_ms") or 0),
+                    )
+                if avant is None:
+                    audit["ecartes_position_inconnue"] += 1
+                    continue
+                if avant != 0.0:
                     action = "ADD"
             try:
                 signe = int(ligne["signe"])
@@ -283,9 +677,33 @@ def fills_du_coffre(
             entree["direction"] = signe
             entree["action"] = action
             entree["taille_usd"] = prix * taille
-            entrees.append(entree)
-            audit["actions"][action] = audit["actions"].get(action, 0) + 1
-            rendus += 1
+            empreinte = str(ligne.get("hash") or "")
+            deja = par_hash.get(empreinte) if empreinte else None
+            if deja is None:
+                if empreinte:
+                    par_hash[empreinte] = len(entrees)
+                entrees.append(entree)
+                audit["actions"][action] = audit["actions"].get(action, 0) + 1
+                rendus += 1
+                continue
+            # Deja vu : on ne garde la nouvelle copie que si elle sait quelque chose que l'autre
+            # ignorait -- la position du leader. Un doublon n'ajoute jamais un fill, il peut
+            # seulement en corriger un.
+            audit["doublons_de_hash"] += 1
+            ancienne = entrees[deja]
+            savait = not isinstance(ancienne.get("start_position"), bool) and isinstance(
+                ancienne.get("start_position"), (int, float))
+            sait = not isinstance(ligne.get("start_position"), bool) and isinstance(
+                ligne.get("start_position"), (int, float))
+            if sait and not savait:
+                # On RETIRE la cle tombee a zero : un `{"OPEN": 0}` dans l'audit se lit « il y a
+                # eu des ouvertures », alors qu'il n'en reste aucune apres correction.
+                audit["actions"][ancienne["action"]] -= 1
+                if audit["actions"][ancienne["action"]] <= 0:
+                    del audit["actions"][ancienne["action"]]
+                audit["actions"][action] = audit["actions"].get(action, 0) + 1
+                audit["doublons_plus_informatifs"] += 1
+                entrees[deja] = entree
         audit["familles"][famille] = {"shards": len(shards), "lus": lus, "rendus": rendus}
         audit["lignes_lues"] += lus
         audit["entrees_rendues"] += rendus

@@ -40,11 +40,8 @@ from pathlib import Path
 from typing import Any
 
 from hl_observer.backtesting.copy_vault_coffre_vers_labo import (
-    FAMILLES_DE_CARNETS,
-    FAMILLES_DE_FILLS,
     _fenetre_apres_signal,
-    carnets_du_coffre,
-    fills_du_coffre,
+    une_seule_connexion_par_coin,
 )
 from hl_observer.backtesting.copy_vault_signal_alignment import MAX_BOOK_AGE_MS
 
@@ -491,6 +488,21 @@ def entrees_de_phase_2(
         Path(chemin), garder=(lambda o: all(f(o) for f in filtres)) if filtres else None,
         coins_utiles=coins_utiles, instants_par_coin=instants_utiles)
     audit["leaders_retenus"] = len(leaders_gardes) if leaders_gardes is not None else None
+
+    # UNE SEULE CONNEXION PAR COIN, et ICI, pas en phase 1 : chaque tranche ne voit que les
+    # connexions de ses quatre heures, et deux tranches voisines peuvent retenir des connexions
+    # differentes pour le meme coin. Choisir avant la fusion remelangerait donc exactement ce
+    # qu'on cherche a demeler. Le choix se fait apres, sur le corpus reuni, une fois pour toutes.
+    carnets, audit_connexion = une_seule_connexion_par_coin(carnets)
+    audit["connexion_unique"] = audit_connexion
+    ecartes = audit_connexion["ecartes_connexion_minoritaire"]
+    if ecartes:
+        parler(
+            f"Phase 2 : une seule connexion L2 par coin -> "
+            f"{audit_connexion['carnets_gardes']} carnet(s) gardes, {ecartes} ecarte(s) comme "
+            f"connexion minoritaire ({audit_connexion['coins_a_connexion_unique']}/"
+            f"{audit_connexion['coins']} coins n'en avaient qu'une)"
+        )
 
     return metaordres, carnets, audit
 

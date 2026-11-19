@@ -7,7 +7,10 @@ runtime:
   signatures_enabled: false
   wallet_connect_enabled: false
 
-starting_balance_usdc: 350.0
+# CONTRAT PAPER : 100 USD. Doit rester egal a `hl_observer.contrat_paper.PAPER_EQUITY_USD`,
+# que tout le code lit deja -- cette ligne etait la derniere a porter 350 en dur dans une
+# config active, et une config qui contredit le contrat est pire qu'un commentaire perime.
+starting_balance_usdc: 100.0
 
 paper_ledger:
   fee_bps_default: 4.5

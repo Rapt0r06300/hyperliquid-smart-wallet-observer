@@ -1404,7 +1404,10 @@ def consensus_report(
 
 @app.command("simulate-magic-bot")
 def simulate_magic_bot(
-    capital: float = typer.Option(350.0, "--capital", min=1.0, help="Virtual local starting capital."),
+    capital: float = typer.Option(
+        PAPER_EQUITY_USD, "--capital", min=1.0,
+        help="Virtual local starting capital (contrat PAPER : 100 USD).",
+    ),
     scenario: str = typer.Option("conservative", "--scenario", help="Simulation scenario label."),
 ) -> None:
     """Start/report a local simulation plan; no order, no network."""

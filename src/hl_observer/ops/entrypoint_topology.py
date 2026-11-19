@@ -69,6 +69,12 @@ ENTRYPOINT_ROLES: dict[str, EntrypointRole] = {
     "tools/launchers/Noeud-HL.cmd": EntrypointRole.MAINTENANCE,
     "tools/launchers/RAPPORT-COLLECTEURS.cmd": EntrypointRole.MAINTENANCE,
     "tools/launchers/SUIVI_COFFRE.cmd": EntrypointRole.MAINTENANCE,
+    # 19/11/2026 — SUIVI_LABO.cmd vivait a la RACINE sans aucun role : il n'etait ni dans
+    # ENTRYPOINT_ROLES ni dans ROOT_SUPPORT_ENTRYPOINTS, ce qui laissait
+    # `test_la_racine_contient_uniquement_les_lanceurs_principaux_et_alinasync` rouge. Decision
+    # de l'operateur : le RANGER ici plutot que de l'enregistrer a la racine. C'est un ecran de
+    # suivi, pas un lanceur principal.
+    "tools/launchers/SUIVI_LABO.cmd": EntrypointRole.MAINTENANCE,
     "tools/launchers/LANCER_OBJECTIF_4USD.cmd": EntrypointRole.COMPAT,
     "tools/launchers/LANCER_REPLAY_176GO.cmd": EntrypointRole.COMPAT,
     "tools/launchers/POUSSER_TOUT_LE_TRAVAIL.cmd": EntrypointRole.LEGACY,

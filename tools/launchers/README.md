@@ -50,3 +50,4 @@ Les scripts ci-dessous sont conservés pour les workflows, les diagnostics, la r
 - `Noeud-HL.cmd` (utilitaire historique, relocalisé depuis la racine)
 - `RAPPORT-COLLECTEURS.cmd` (utilitaire historique, relocalisé depuis la racine)
 - `SUIVI_COFFRE.cmd` (utilitaire historique, relocalisé depuis la racine)
+- `SUIVI_LABO.cmd` (écran de suivi du labo, **déplacé depuis la racine le 19/11/2026** : il y vivait sans aucun rôle enregistré, ce qui laissait `test_launcher_unifie.py` rouge. Contrairement aux cinq ci-dessus, il ne garde **pas** de copie à la racine — décision de l'opérateur : un écran de suivi n'est pas un lanceur principal.)

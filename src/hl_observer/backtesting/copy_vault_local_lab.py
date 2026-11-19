@@ -2837,6 +2837,56 @@ def run_local_campaign(
             say("Revues leaders V9 TRAIN : échec de persistance explicite — " + leader_review_persistence["reason"])
     getattr(pipeline, "oublier_les_cycles", lambda: None)()   # épisodes mémorisés : plus relus (2,3 Go)
     timestamps = [int(row["signal_ts_ms"]) for row in metaorders]
+    # ------------------------------------------------------------------------------------------
+    # TAUX DE FUNDING : on MESURE le portage au lieu de le déclarer inmesurable.
+    #
+    # La porte économique n'acceptait qu'un seul statut — « zéro, car aucun règlement franchi ».
+    # Le funding se réglant toutes les heures et les horizons allant jusqu'à 1 h, presque tout
+    # épisode en franchit un : la porte refusait 100 % des essais, sans rapport avec la qualité
+    # des stratégies, pendant que 4,3 M de règlements dormaient dans le coffre.
+    #
+    # Les MÊMES taux vont à la baseline, à l'incumbent et aux challengers : comparer un segment
+    # mesuré à un segment non mesuré n'aurait aucun sens.
+    #
+    # Fenêtre demandée large (± horizon maximum + 1 h) : la garde de couverture du module refuse
+    # tout épisode qui sort de la fenêtre LUE, et un épisode se termine APRÈS son dernier signal.
+    # Lecture vide -> `None` -> comportement historique exact (fail-closed), jamais un zéro
+    # flatteur. L'audit est DIT : « 0 règlement » et « je n'ai pas su lire » ne se confondent pas.
+    # Interrupteur de reproductibilité : COPY_VAULT_FUNDING_MESURE=0 restaure l'ancien verdict.
+    taux_funding: dict[str, Any] = {}
+    audit_funding: dict[str, Any] = {"status": "DESACTIVE_PAR_ENV"}
+    if os.environ.get("COPY_VAULT_FUNDING_MESURE", "1").strip().lower() not in {
+        "0", "false", "non", "off",
+    }:
+        try:
+            # Import PARESSEUX : ce module n'est utile qu'ici, et l'ajouter au graphe
+            # d'imports du labo reveillait une fuite d'etat entre tests (un module laisse
+            # a demi initialise dans sys.modules par un autre test). Meme precaution que
+            # `copy_vault_funding_realise` prend lui-meme pour `coffre_tranches`.
+            from hl_observer.backtesting import copy_vault_funding_realise as _FUNDING_REEL
+            _marge_ms = max(dict(_PARAMETER_DOMAINS)["horizon_ms"]) + 3_600_000
+            taux_funding, audit_funding = _FUNDING_REEL.taux_du_coffre(
+                repository_root,
+                coins=sorted({str(r.get("coin") or "") for r in metaorders if r.get("coin")}),
+                debut_ms=min(timestamps) - 3_600_000 if timestamps else 0,
+                fin_ms=(max(timestamps) + _marge_ms) if timestamps else 0,
+            )
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            taux_funding, audit_funding = {}, {
+                "status": "LECTURE_IMPOSSIBLE", "erreur": f"{type(exc).__name__}: {exc}"[:180],
+            }
+    say(
+        "Funding : "
+        + (f"{audit_funding.get('reglements_gardes', 0):,} règlements gardés sur "
+           f"{audit_funding.get('lignes_lues', 0):,} lus, {audit_funding.get('coins', 0)} coins "
+           f"({audit_funding.get('status')})"
+           if taux_funding else
+           f"AUCUN taux utilisable ({audit_funding.get('status')}) — "
+           "le portage restera INMESURABLE, comme avant")
+    )
+    #: Passé tel quel aux trois scorings. ``None`` quand rien n'est lisible : le reçu gelé
+    #: retombe alors exactement sur son verdict historique.
+    taux_funding_scoring = taux_funding or None
     # Découpe sur les jours ÉVALUABLES (signal + carnet causal) : sans carnet, TRAIN restait vide.
     alignment = evaluable_signals(metaorders, books)
     aligned_adds = alignment["aligned_adds"]
@@ -2860,7 +2910,7 @@ def run_local_campaign(
     # (mark vs oracle) bat-il la baseline ? Sautée sans jours évaluables ou sans contexte : jamais à vide.
     overshoot_exploration: dict[str, Any] = {"status": "NOT_RUN"}
     try:
-        if jours_evaluables_juges < _MINIMUM_SIGNAL_UTC_DAYS:
+        if jours_evaluables_juges < seuil_jours:   # le MEME seuil que les deux autres portes
             raise LookupError("INSUFFICIENT_EVALUABLE_SIGNAL_DAYS")
         from hl_observer.backtesting.copy_vault_overshoot_train import explorer_si_le_contexte_existe
         _asset_ctx_safe = _charger_asset_ctx_safe(workspace)
@@ -2893,6 +2943,10 @@ def run_local_campaign(
         "verdict_partiel": tranche is not None,
         "jours_du_corpus": jours_du_corpus,
         "overshoot_exploration": overshoot_exploration,
+        # D'où vient le portage mesuré, DIT dans le résultat : un carry chiffré sans sa
+        # provenance ne se distingue pas d'un carry supposé. Porte le couple « lu / gardé »,
+        # donc « 0 règlement » ne peut pas passer pour « je n'ai pas su lire ».
+        "funding_audit": audit_funding,
         "objective_usd_per_day": OBJECTIVE_USD_PER_DAY,
         "paper_capital_usd": PAPER_CAPITAL_USD,
         "pnl_uplift_freeze_count": 0,
@@ -3118,9 +3172,9 @@ def run_local_campaign(
             if sizing_scale < 1.0:
                 params["core_notional_usd"] = core_notional * sizing_scale
                 params["probe_notional_usd"] = probe_notional * sizing_scale
-                params["daily_profit_lock_usd"] = (
-                    _number(params["daily_profit_lock_usd"]) * sizing_scale
-                )
+                # Verrou NEUTRALISE comme les challengers (contrat : aucun plafond de profit)
+                params["daily_profit_lock_usd"] = max(
+                    dict(_PARAMETER_DOMAINS)["daily_profit_lock_usd"])
             params["bounds"] = dict(bounds)
             params["bonferroni_trial_count"] = max(1, prior_trial_count + len(history_rows) + 1)
             rebased = dict(current_freeze.get("freeze", current_freeze))
@@ -3130,7 +3184,8 @@ def run_local_campaign(
                 "parameters_sha256": parameter_hash(params),
             })
             baseline_train = evaluate_frozen_v21_segment(
-                metaorders, books, {"freeze": rebased}, segment="train"
+                metaorders, books, {"freeze": rebased}, segment="train",
+                taux_funding_par_coin=taux_funding_scoring,
             )
         except (OSError, ValueError, TypeError, KeyError, RuntimeError):
             baseline_train = None
@@ -3141,7 +3196,8 @@ def run_local_campaign(
             # sufficient evidence for a new promotion decision.
             try:
                 incumbent_train = evaluate_frozen_v21_segment(
-                    metaorders, books, best["candidate"], segment="train"
+                    metaorders, books, best["candidate"], segment="train",
+                    taux_funding_par_coin=taux_funding_scoring,
                 )
                 best["train"] = incumbent_train
                 incumbent_statistics = incumbent_train.get("statistics") or {}
@@ -3330,6 +3386,7 @@ def run_local_campaign(
             train = evaluate_frozen_v21_segment(
                 _mo_scored, books, freeze, segment="train",
                 prepared_cache=_cache_scored,
+                taux_funding_par_coin=taux_funding_scoring,
             )
             stats = train.get("statistics") if isinstance(train.get("statistics"), Mapping) else {}
             daily_values = list(stats.get("daily_net_pnl_usd") or [])

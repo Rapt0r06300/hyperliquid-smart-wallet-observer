@@ -44,8 +44,11 @@ for _chemin in (RACINE / "src", RACINE):
         sys.path.insert(0, str(_chemin))
 
 from hl_observer.backtesting.copy_vault_coffre_vers_labo import (  # noqa: E402
+    ACTIONS_COPIEES_PAR_LA_POLITIQUE,
     carnets_du_coffre,
+    copiable_par_la_politique,
     fills_du_coffre,
+    positions_du_coffre,
 )
 from hl_observer.backtesting.copy_vault_labo_deux_phases import (  # noqa: E402
     MANIFESTE,
@@ -125,7 +128,15 @@ def phase_1(
         # une collecte par interrogation active depuis le 13/11 et tout aussi causale. Mesure du
         # 18/11/2026 : 30 minutes du coffre rendent 6 876 metaordres causaux, soit 3,6 fois ce que
         # six journees du ruban local donnaient. Il ne manquait pas de donnees, mais un chemin.
-        entrees, fills_audit = fills_du_coffre(workspace, debut_ms=debut, fin_ms=fin)
+        # LA POSITION DU LEADER AVANT CHAQUE FILL, lue et non supposee. Sans elle, la distinction
+        # entre une ouverture et un renforcement est indecidable pour 99,6 % des fills -- et la
+        # politique gelee ne copie QUE les renforcements. C'etait la cause racine du refus unanime.
+        positions, positions_audit = positions_du_coffre(workspace, debut_ms=debut, fin_ms=fin)
+        if positions_audit.get("status") == "LU_DEPUIS_LE_COFFRE":
+            print(f"        positions : {positions_audit['observations_gardees']} observation(s) "
+                  f"sur {positions_audit['couples_vault_coin']} couple(s) leader/coin", flush=True)
+        entrees, fills_audit = fills_du_coffre(
+            workspace, debut_ms=debut, fin_ms=fin, positions=positions or None)
         if fills_audit.get("status") == "COFFRE_ABSENT":
             print(f"        [REPLI] coffre absent -> pipeline local ({fills_audit['chemin']})")
             entrees, _audit = pipeline.charger_entrees_alpha_notional_fixe_avec_audit(
@@ -134,10 +145,26 @@ def phase_1(
             print(f"        fills : {fills_audit['lignes_lues']} lue(s) -> "
                   f"{fills_audit['entrees_rendues']} entree(s) "
                   f"({fills_audit['ecartes_libelle_inconnu']} libelle inconnu, "
-                  f"{fills_audit['ecartes_champ_manquant']} champ manquant)", flush=True)
+                  f"{fills_audit['ecartes_champ_manquant']} champ manquant, "
+                  f"{fills_audit.get('ecartes_position_inconnue', 0)} position inconnue, "
+                  f"{fills_audit.get('doublons_de_hash', 0)} doublon(s) dont "
+                  f"{fills_audit.get('doublons_plus_informatifs', 0)} corrige(s))", flush=True)
+            print(f"        actions : {fills_audit.get('actions')}", flush=True)
         metaordres, _meta_audit = cv.cluster_metaorders(entrees)
         del entrees
         gc.collect()
+        # D'ABORD, NE GARDER QUE CE QUE LA POLITIQUE SAIT COPIER. Voir
+        # `ACTIONS_COPIEES_PAR_LA_POLITIQUE` : elle ne copie que les RENFORCEMENTS, soit 0,3 % des
+        # fills. Ce filtre-la est economiquement fonde -- il n'ecarte aucun candidat possible --
+        # alors qu'un seuil de notionnel en ecarte, et pas ceux qu'on croit : il garde surtout de
+        # gros fills isoles, qui sont des OUVERTURES, donc exactement ce que la politique refuse.
+        # Mesure du 19/11/2026 : le corpus filtre a 20 000 USD rendait 765 signaux, dont 765
+        # refuses en `NON_ADD_REJECTED`, donc zero candidat et zero trade.
+        avant_action = len(metaordres)
+        metaordres = [o for o in metaordres if copiable_par_la_politique(o)]
+        print(f"        copiables par la politique "
+              f"({'/'.join(ACTIONS_COPIEES_PAR_LA_POLITIQUE)}) : {len(metaordres)} "
+              f"sur {avant_action}", flush=True)
         if min_notionnel:
             # LE SEUIL EN PHASE 1, parce que c'est lui qui decide quels signaux auront besoin de
             # carnets. Chaque signal retenu ouvre une fenetre de ~1 h (reference, entree, sortie) :

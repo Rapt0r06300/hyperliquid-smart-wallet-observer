@@ -304,9 +304,12 @@ def test_le_seuil_JUGE_L_ENSEMBLE_quand_on_lui_donne_les_journees_du_corpus():
     """
     source = inspect.getsource(local_lab.run_local_campaign)
     assert local_lab._MINIMUM_SIGNAL_UTC_DAYS == 6
-    # les trois portes passent par les grandeurs jugees
-    assert source.count("jours_evaluables_juges < _MINIMUM_SIGNAL_UTC_DAYS") == 2
-    assert source.count("jours_juges < _MINIMUM_SIGNAL_UTC_DAYS") == 1
+    # Les trois portes passent par les grandeurs JUGEES, et contre `seuil_jours` -- qui vaut la
+    # constante par defaut et peut etre abaisse par le manifeste. ACTUALISE le 19/11/2026 : ces
+    # deux lignes comptaient la constante, et comparer la constante en dur faisait ignorer la
+    # surcharge a la porte de l'exploration overshoot (6 journees exigees contre 3 ailleurs).
+    assert source.count("jours_evaluables_juges < seuil_jours") == 2
+    assert source.count("jours_juges < seuil_jours") == 1
     # et aucune ne compare plus directement les journees de la tranche
     assert "distinct_utc_days\"] < _MINIMUM_SIGNAL_UTC_DAYS" not in source
     assert "evaluable_utc_days\"] < _MINIMUM_SIGNAL_UTC_DAYS" not in source
@@ -398,11 +401,29 @@ def test_une_valeur_de_journees_INVALIDE_laisse_la_porte_fermee(tmp_path, monkey
 
 
 def test_les_TROIS_portes_utilisent_les_journees_jugees():
-    """Dont celle qui garde l'exploration overshoot, qui LÈVE au lieu de rendre."""
+    """Dont celle qui garde l'exploration overshoot, qui LÈVE au lieu de rendre.
+
+    ACTUALISÉ le 19/11/2026, et il avait raison de rougir. Les trois portes comparaient la
+    constante `_MINIMUM_SIGNAL_UTC_DAYS`, jusqu'à ce que le seuil devienne surchargeable par le
+    manifeste (`seuil_jours`). Deux portes ont suivi, **la troisième non** : celle qui garde
+    l'exploration overshoot exigeait donc 6 journées là où les deux autres en demandaient 3, et
+    sautait silencieusement l'exploration sur un corpus que le reste du labo acceptait.
+
+    Ce test ne compte donc plus une constante, il verrouille ce qui compte vraiment : les TROIS
+    portes jugent sur les journées JUGÉES et contre LE MÊME seuil. Compter un nom de variable
+    aurait de nouveau rougi au prochain renommage sans rien protéger de plus.
+    """
     source = inspect.getsource(local_lab.run_local_campaign)
-    assert source.count("jours_evaluables_juges < _MINIMUM_SIGNAL_UTC_DAYS") == 2
-    assert source.count("jours_juges < _MINIMUM_SIGNAL_UTC_DAYS") == 1
+    assert source.count("jours_evaluables_juges < seuil_jours") == 2
+    assert source.count("jours_juges < seuil_jours") == 1
+    # Le seuil reste ANCRÉ sur la constante : surchargeable, jamais inventé.
+    assert "seuil_jours = int(input_manifest.get(\"minimum_signal_utc_days\")" in source
+    assert "or _MINIMUM_SIGNAL_UTC_DAYS)" in source
+    # Et aucune porte ne juge sur le compte BRUT, qui ignore les journées réellement évaluables.
     assert "alignment[\"summary\"][\"evaluable_utc_days\"] < _MINIMUM" not in source
+    assert "jours_evaluables_juges < _MINIMUM_SIGNAL_UTC_DAYS" not in source, (
+        "une porte qui compare la constante ignore la surcharge du manifeste"
+    )
 # ───────── une tranche n'écrit pas le champion déployé ─────────
 # `runtime/champion_deploye.json` est un chemin UNIQUE et le cliquet labo → moteur. Dix-neuf
 # tranches s'y écraseraient l'une l'autre, et le fichier final porterait un candidat choisi sur

@@ -41,11 +41,21 @@ La seule famille économique active est **Copy-Vault**. Lead-Lag, Cross-Venue/Di
 
 Le marqueur de compatibilité documentaire « Carry est historique et non actif » demeure strictement vrai.
 
-Le capital paper opérationnel de référence est **350 USD**. Le repère quantitatif
-de recherche est **+5 USD nets/jour pour Copy-Vault sur 350 USD paper**, après
-réparations techniques et preuves OOS/forward. Ce repère n'est ni une gate
-automatique ni une promesse de rentabilité : les améliorations mesurées restent
-des preuves de recherche jusqu'à leur certification comptable. La roadmap
+Le capital paper opérationnel est **100 USD**, et il provient d'**une seule
+source** : `PAPER_EQUITY_USD` dans `src/hl_observer/contrat_paper.py`. Recopier
+ce montant ailleurs est interdit : un nombre dupliqué devient faux au prochain
+changement de contrat.
+
+**Aucun objectif chiffré n'est actif.** L'objectif est de maximiser le PnL net
+causal reproductible, sans cible fixe de dollars par jour, sans plafond de profit
+et sans seuil terminal, sous contraintes de risque, coûts, drawdown, exposition,
+liquidité et capacité. Les améliorations mesurées restent des preuves de
+recherche jusqu'à leur certification comptable. Le repère historique de
++5 USD nets/jour, sur 200 ou 350 USD paper, ne survit que comme **référence
+d'affichage**, jamais comme gate ; une preuve produite dans ces anciennes
+conditions ne démontre pas le contrat actuel. Les mesures déjà publiées à ces
+capitaux gardent en revanche leurs chiffres d'origine : on ne réécrit pas une
+mesure, on la date. La roadmap
 technique cumulative V5/776+ dépend de l'implémentation, du câblage, des tests
 et des preuves techniques de ses exigences, pas d'un PnL positif.
 

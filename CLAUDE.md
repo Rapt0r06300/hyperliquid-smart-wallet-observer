@@ -1,6 +1,6 @@
 # CLAUDE.md — Alina Smart Flow
 
-Dernière mise à jour : **2026-11-11**.
+Dernière mise à jour : **2026-11-19**.
 
 Ce fichier est volontairement **court**. Claude Code le charge à chaque session ; les détails permanents communs à tous les agents vivent dans `AGENTS.md` et la spec canonique.
 
@@ -47,10 +47,17 @@ Famille économique active unique : **Copy-Vault**.
 
 `Lead-Lag / Cross-Venue / arbitrage / Carry / Funding Carry / shadow / research-only = DISABLED_BY_SCOPE` pour simulation, labo, replay/backtest, OOS/forward, preuve PnL, certification et scoreboard. Préserver leur code et leurs preuves sans les exécuter. Aucune variable d'environnement ne peut élargir le scope.
 
-Capital paper opérationnel : **350 USD**. Repère de recherche : **>= +5.00 USD
-NET/jour pour Copy-Vault**, après preuves OOS/forward. Ce repère n'est ni une
-gate ni une promesse ; les anciennes références à 200 USD paper sont historiques
-et inactives, et ne peuvent pas assouplir les gates.
+Capital paper opérationnel : **100 USD**. Il vient d'**une seule source**,
+`PAPER_EQUITY_USD` dans `src/hl_observer/contrat_paper.py` : ne jamais recopier
+la valeur dans du code ni dans un test (un nombre recopié devient faux au
+prochain changement de contrat).
+
+**Aucun objectif chiffré n'est actif.** L'objectif est de maximiser le PnL net
+causal reproductible, sans cible fixe, sans plafond de profit ni seuil terminal,
+sous contraintes de risque, coûts, drawdown, exposition, liquidité et capacité.
+Le repère historique **+5 USD NET/jour** n'est qu'une référence d'affichage,
+jamais une gate ; les anciennes références à 200 ou 350 USD paper sont
+historiques et inactives, et ne peuvent pas assouplir les gates.
 
 Les statuts honnêtes restent :
 
@@ -63,7 +70,8 @@ Ne jamais modifier les coûts, les gates ou la méthodologie pour fabriquer un r
 - Travail local directement dans `C:\Users\flo\Desktop\Projet invest` ; aucun worktree.
 - `LANCER_COLLECTEURS_COPY_VAULT.cmd` collecte ; `LANCER_LAB_QUANT_COPY_VAULT.cmd` cherche et archive les améliorations par replay/backtest ; `LANCER_HYPERSMART.cmd` est le moteur avec affichage de simulation.
 - `POUSSER-GITHUB.cmd` réconcilie/pousse le code sans force ; AlinaSync (`ALINA_SYNC_COMPLETE.cmd`) gère les shards SAFE.
-- À la racine, garder ces quatre lanceurs principaux et AlinaSync (`ALINA_SYNC_COMPLETE.cmd` et `.sh`). Les commandes de support sont sous `tools/launchers/`; la portabilité signifie qu'un clone fonctionne depuis son propre chemin.
+- À la racine, garder ces quatre lanceurs, AlinaSync (`ALINA_SYNC_COMPLETE.cmd` et `.sh`) et les appoints **enregistrés** : `Certificateur Coffre Fort.cmd`, `CERTIFIER_EN_CONTINU.cmd`, `SUIVI_COFFRE.cmd`, `RAPPORT-COLLECTEURS.cmd`, `RATTRAPAGE.cmd`, `Noeud-HL.cmd`, `Installer Noeud HL.cmd`. **Tout autre `.cmd` à la racine est interdit** — la liste est fixée par `tests/test_launcher_unifie.py`. Le reste va sous `tools/launchers/`; la portabilité signifie qu'un clone fonctionne depuis son propre chemin.
+- Le funding est **mesuré**, plus supposé : `copy_vault_funding_realise` chiffre le portage réellement payé depuis les règlements horaires observés du coffre. Un règlement manquant reste `UNMEASURABLE` avec sa raison — jamais un zéro favorable.
 - Le labo ne doit jamais fabriquer de PnL. Les candidats restent distincts d'une preuve ; la chaîne canonique OOS/forward/PNL_PROOF décide.
 
 ## Sécurité non négociable

@@ -1,6 +1,6 @@
 # Politique de sécurité — Alina Smart Flow
 
-Dernière mise à jour : **2026-11-11**.
+Dernière mise à jour : **2026-11-19**.
 
 Alina Smart Flow (anciennement HyperSmart) est un moteur de recherche quantitative et de simulation **strictement paper/read-only**. La sécurité du projet ne consiste pas seulement à protéger des secrets : elle protège aussi l'intégrité des données, la causalité des replays et l'impossibilité d'atteindre une exécution réelle.
 
@@ -135,13 +135,34 @@ Interdit notamment :
 - compenser l'échec d'une famille par le profit d'une autre ;
 - transformer `MORE_DATA` ou `UNMEASURABLE` en `PROVEN` sans preuve.
 
-Le capital paper opérationnel de référence est **350 USD**. Le repère quantitatif
-de recherche est **>= +5 USD NET/jour pour Copy-Vault sur 350 USD de capital
-paper**, après les réparations techniques et les preuves OOS/forward requises.
-Ce repère n'est ni une gate automatique ni une promesse de rendement : chaque
-amélioration doit rester traçable, reproductible et soumise aux gates de coûts,
-causalité, OOS et forward. Toute ancienne référence à 200 USD de capital paper
-est historique et inactive.
+Le capital paper opérationnel est **100 USD**, et il provient d'**une seule
+source** : `PAPER_EQUITY_USD` dans `src/hl_observer/contrat_paper.py`. Recopier
+cette valeur dans du code ou un test est interdit : un montant dupliqué devient
+faux au prochain changement de contrat et fait alors accuser le code à tort.
+
+**Aucun objectif chiffré n'est actif.** L'objectif est de maximiser le PnL net
+causal reproductible, sans cible fixe, sans plafond de profit et sans seuil
+terminal de profit, sous contraintes de risque, coûts, drawdown, exposition,
+liquidité et capacité. Chaque amélioration doit rester traçable, reproductible
+et soumise aux gates de coûts, causalité, OOS et forward. Le repère historique
+de +5 USD NET/jour ne survit que comme **référence d'affichage**, jamais comme
+gate. Toute référence à 200 ou 350 USD de capital paper, ou à une cible de
++4/+5 USD par jour, est historique et inactive : une preuve produite dans ces
+conditions ne démontre pas le contrat actuel.
+
+### Mesurer plutôt que supposer
+
+Une grandeur dont la donnée existe doit être **mesurée**, pas déclarée
+inmesurable. Le portage (funding) l'illustre : la seule preuve acceptée était
+« zéro, car aucun règlement traversé », alors que le funding se règle toutes les
+heures — la porte refusait donc structurellement tout candidat, pendant que les
+règlements observés dormaient dans le coffre (`funding_history`). Le carry est
+désormais chiffré depuis ces règlements, en arithmétique exacte, avec sa
+provenance.
+
+Cela ne desserre aucune porte, et l'inverse reste interdit : un règlement
+manquant garde le statut `UNMEASURABLE` avec sa raison. Ne jamais remplacer une
+inconnue par un zéro favorable, ni déduire un coût d'un intervalle supposé.
 
 ## 8. Scope économique effectif
 

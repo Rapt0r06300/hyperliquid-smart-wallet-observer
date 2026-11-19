@@ -1,6 +1,6 @@
 # AGENTS.md — Alina Smart Flow
 
-Dernière mise à jour : **2026-11-11**.
+Dernière mise à jour : **2026-11-19**.
 
 Contrat compact pour tout agent intervenant dans ce dépôt. Les exigences détaillées ne sont pas dupliquées ici : elles vivent dans les documents d’autorité ci-dessous.
 
@@ -40,14 +40,14 @@ Famille active unique : **Copy-Vault**.
 
 Lead-Lag, Cross-Venue Dislocation, arbitrage, Carry/Funding Carry, shadow/research-only et toute famille économique non attribuée : **DISABLED_BY_SCOPE**. Ce verrou couvre simulation UI/moteur principal, labo, replays/backtests, OOS/forward, preuve PnL, certification et scoreboard. Conserver leur code et leurs preuves historiques sans les exécuter ni les promouvoir; aucune variable d'environnement ne peut élargir le scope.
 
-Capital paper opérationnel : **350 USD** ; repère de recherche : au moins **+5 USD net/jour** pour Copy-Vault après preuves OOS/forward. Ce repère n'est ni une gate ni une promesse ; les mentions de **200 USD de capital paper** sont historiques et inactives. États honnêtes : `PROVEN`, `PROMISING`, `MORE_DATA`, `UNMEASURABLE`, `REJECTED`. Aucun résultat ne doit être forcé.
+Capital paper : **100 USD**, source unique `PAPER_EQUITY_USD` (`src/hl_observer/contrat_paper.py`) — jamais recopiée. **Aucun objectif chiffré actif** : maximiser le PnL net causal reproductible, sans cible fixe ni plafond, sous contraintes de risque, coûts, drawdown, exposition, liquidité et capacité. Le repère **+5 USD net/jour** n'est qu'un affichage, jamais une gate ; les mentions de **200 USD de capital paper** et de 350 USD sont historiques et inactives. États honnêtes : `PROVEN`, `PROMISING`, `MORE_DATA`, `UNMEASURABLE`, `REJECTED`. Aucun résultat forcé.
 
 ## Repères opérateur permanents
 
 - Pour le travail local de l'opérateur, utiliser directement `C:\Users\flo\Desktop\Projet invest`. Ne jamais créer, attacher ou utiliser un worktree.
 - Rôles retenus : `LANCER_COLLECTEURS_COPY_VAULT.cmd` = collecte ; `LANCER_LAB_QUANT_COPY_VAULT.cmd` = cerveau replay/backtest et registre durable des améliorations ; `LANCER_HYPERSMART.cmd` = moteur avec simulation visible ; `POUSSER-GITHUB.cmd` = synchronisation prudente du code Git.
 - AlinaSync, appelé localement via `ALINA_SYNC_COMPLETE.cmd`, gère les shards SAFE. Le lanceur Git ne les transfère pas.
-- À la racine ne restent que ces quatre lanceurs principaux et `ALINA_SYNC_COMPLETE.cmd`; `ALINA_SYNC_COMPLETE.sh` y reste pour les clones Unix. Les commandes de support sont dans `tools/launchers/` et leur index est `tools/launchers/README.md`.
+- À la racine : ces quatre, `ALINA_SYNC_COMPLETE.cmd` (+ `.sh`) et les appoints ENREGISTRÉS (certificateur, suivi du coffre, rapport, rattrapage, nœud HL). Tout autre `.cmd` à la racine est interdit — `test_launcher_unifie.py` fixe la liste. Le support va dans `tools/launchers/`.
 - « Portable » signifie qu'un clone du dépôt fonctionne depuis son chemin local ; ne pas confondre cela avec la création d'une archive autonome.
 - Le labo conserve chaque candidat/mesure, même exploratoire ; aucune amélioration n'autorise un PnL inventé. Seule la preuve OOS/forward et comptable canonique peut établir un résultat économique.
 - Le rôle attendu d'un lanceur ne certifie pas son implémentation actuelle : contrôler le HEAD et corriger tout écart au scope Copy-Vault/PAPER avant de le déclarer conforme.

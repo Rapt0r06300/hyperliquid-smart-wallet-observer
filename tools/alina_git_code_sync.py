@@ -134,10 +134,19 @@ MUTEX_WAIT_SECONDS = 20.0
 MUTEX_POLL_SECONDS = 0.25
 RECEIPT_HISTORY_LIMIT = 20
 GIT_SYNC_ENGINE_BUILD = "2026-11-12-compact-fresh-index-v15"
-# A single historical registry was moved out of the repository root. It is
-# publishable only when both paths clean to its exact current HEAD blob.
+# Des fichiers ont ete deplaces hors de la racine du depot. Un deplacement
+# est publiable uniquement si les deux chemins se normalisent vers le blob
+# HEAD exact du fichier source. Sans cette inscription, la suppression a la
+# racine est INVISIBLE pour git status : _root_pathspec se construit depuis
+# iterdir(), ou un fichier supprime n apparait plus. On pousserait alors
+# l ajout sans la suppression, et GitHub garderait les DEUX chemins.
 SAFE_HISTORICAL_RELOCATIONS = {
     "CLAUDE_TASKS.jsonl": "docs/archive/root-history/CLAUDE_TASKS.jsonl",
+    # 19/11/2026 -- SUIVI_LABO.cmd vivait a la racine sans role enregistre, ce
+    # qui laissait test_launcher_unifie rouge. Range dans tools/launchers/ par
+    # decision de l operateur ; deplacement d octets identiques (blob HEAD
+    # e0e30f66ab69a11483f739758756ff306eaa61c5 sous les deux chemins).
+    "SUIVI_LABO.cmd": "tools/launchers/SUIVI_LABO.cmd",
 }
 AUTO_RESOLVABLE_CI_CONFLICTS = {
     ".github/workflows/alina-restore-safe-regression.yml",
