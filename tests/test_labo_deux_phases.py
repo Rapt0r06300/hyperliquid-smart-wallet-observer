@@ -63,10 +63,37 @@ def test_un_carnet_juste_hors_fenetre_est_ecarte() -> None:
     assert audit["ecartes_hors_fenetre"] == 1
 
 
-def test_un_carnet_posterieur_au_signal_est_ecarte() -> None:
-    """Un carnet d'APRES le signal ne peut pas le renseigner : ce serait lire l'avenir."""
+def test_un_carnet_posterieur_au_signal_est_garde_car_l_execution_vient_apres() -> None:
+    """UN CARNET D'APRES LE SIGNAL SERT, et ce n'est pas lire l'avenir.
+
+    Ce test affirmait l'inverse, et c'etait une erreur de ma part (18/11/2026). Le replay cherche
+    TROIS carnets par signal : une reference au plus tard au signal, une ENTREE a partir de
+    `signal + COPY_DELAY_MS` (60 s), et une SORTIE a partir de `entree + horizon` (jusqu'a 1 h).
+
+    La distinction qui compte : la DECISION n'utilise que le passe -- le signal est connu au
+    moment ou il se produit -- mais l'EXECUTION est forcement posterieure, puisqu'on copie avec un
+    delai. Ecarter les carnets posterieurs, c'etait se priver du prix auquel on entre et de celui
+    auquel on sort. Mesure : zero trade sur 4 000 signaux, 3 188 `STALE_OR_MISSING_ENTRY_BOOK`.
+
+    Le lookahead serait d'utiliser un carnet FUTUR pour DECIDER ; ici il ne sert qu'a executer.
+    """
     signal = 1_000_000
-    _, audit = carnets_utiles([_ordre("BTC", signal)], {"BTC": [_carnet(signal + 1)]})
+    gardes, audit = carnets_utiles([_ordre("BTC", signal)], {"BTC": [_carnet(signal + 1)]})
+    assert audit["carnets_gardes"] == 1
+    assert gardes["BTC"][0]["ts_ms"] == signal + 1
+
+
+def test_un_carnet_trop_tard_apres_le_signal_est_ecarte() -> None:
+    """L'AUTRE SENS : au-dela de la fenetre d'execution, un carnet ne sert plus a rien.
+
+    Sans cette borne, la fenetre serait infinie vers l'avant et tout le corpus serait conserve --
+    l'economie de la phase 1 disparaitrait.
+    """
+    from hl_observer.backtesting.copy_vault_labo_deux_phases import _fenetre_apres_signal
+
+    signal = 10_000_000
+    trop_tard = signal + _fenetre_apres_signal() + 1
+    _, audit = carnets_utiles([_ordre("BTC", signal)], {"BTC": [_carnet(trop_tard)]})
     assert audit["carnets_gardes"] == 0
     assert audit["ecartes_hors_fenetre"] == 1
 

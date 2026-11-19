@@ -39,6 +39,13 @@ from collections.abc import Iterable, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from hl_observer.backtesting.copy_vault_coffre_vers_labo import (
+    FAMILLES_DE_CARNETS,
+    FAMILLES_DE_FILLS,
+    _fenetre_apres_signal,
+    carnets_du_coffre,
+    fills_du_coffre,
+)
 from hl_observer.backtesting.copy_vault_signal_alignment import MAX_BOOK_AGE_MS
 
 #: Le nom du manifeste d'une tranche preparee.
@@ -102,11 +109,14 @@ def _flux_jsonl(chemin: Path) -> Iterator[dict[str, Any]]:
                 yield json.loads(ligne)
 
 
+
+
 def carnets_utiles(
     metaordres: Sequence[Mapping[str, Any]],
     carnets: Mapping[str, Sequence[Mapping[str, Any]]],
     *,
     fenetre_ms: int = MAX_BOOK_AGE_MS,
+    fenetre_apres_ms: int | None = None,
 ) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any]]:
     """Ne garde que les carnets qui peuvent servir a un signal, et dit ce qu'il ecarte.
 
@@ -140,10 +150,12 @@ def carnets_utiles(
             sans_signal[str(coin)] = len(liste)
             continue
         retenus: list[dict[str, Any]] = []
+        apres = _fenetre_apres_signal() if fenetre_apres_ms is None else int(fenetre_apres_ms)
         for carnet in liste:
             ts = int(carnet["ts_ms"])
-            # Un carnet sert s'il existe un signal dans [ts, ts + fenetre_ms].
-            i = bisect.bisect_left(instants, ts)
+            # Un carnet sert s'il existe un signal dans [ts - apres, ts + fenetre_ms] : avant lui
+            # pour la reference, apres lui pour l'entree et la sortie.
+            i = bisect.bisect_left(instants, ts - apres)
             if i < len(instants) and instants[i] - ts <= fenetre_ms:
                 retenus.append(dict(carnet))
             else:
@@ -210,99 +222,8 @@ def preparer_tranche(
     return manifeste
 
 
-#: Les familles du coffre qui portent des carnets, de la plus riche a la plus pauvre.
-#: `bbo` et `book_l2` couvrent depuis le 26/10 ; les rubans locaux `runtime/data/*.jsonl` ne
-#: commencent qu'au 17/11 18:35 -- mesure du 18/11/2026. Lire le coffre, c'est la difference entre
-#: une journee de carnets et trois semaines.
-FAMILLES_DE_CARNETS = ("book_l2", "micro_l2", "venue_book", "bbo", "micro_bbo")
 
 
-def carnets_du_coffre(
-    racine: str | Path,
-    *,
-    coins: Sequence[str],
-    debut_ms: int,
-    fin_ms: int,
-    familles: Sequence[str] = FAMILLES_DE_CARNETS,
-    fenetre_ms: int = MAX_BOOK_AGE_MS,
-    instants_par_coin: Mapping[str, Sequence[int]] | None = None,
-) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any]]:
-    """Lit les carnets du COFFRE en flux, et ne garde que ceux a portee d'un signal.
-
-    POURQUOI LE COFFRE ET PAS LES RUBANS LOCAUX. `load_observed_books` lit
-    `runtime/data/*.jsonl`. Mesure du 18/11/2026 : ces rubans commencent au **17/11 18:35**, alors
-    que le coffre porte `bbo` et `book_l2` depuis le **26/10**. Une phase 1 branchee sur les rubans
-    locaux prepare donc du vide pour toutes les tranches anterieures au 17/11 -- et rend
-    honnetement `0/0`, ce qui ressemble a « pas de carnets » alors que la vraie cause est « pas
-    regarde au bon endroit ».
-
-    LE FILTRAGE SE FAIT EN FLUX, jamais apres. On ne materialise que les carnets retenus : c'est ce
-    qui permet de traverser 111 millions de lignes de `bbo` sans les accumuler. Si on chargeait
-    pour filtrer ensuite, l'economie de la phase 1 serait perdue d'avance.
-    """
-    from hl_observer.backtesting import coffre_tranches
-
-    racine = Path(racine)
-    index = racine / "runtime/coffre_certifie/LOCAL_INDEX.json"
-    if not index.exists():
-        return {}, {"status": "COFFRE_ABSENT", "chemin": str(index)}
-
-    brut = json.loads(index.read_text(encoding="utf-8"))
-    shards_tous = brut.get("shards") or brut.get("entrees") or []
-    if isinstance(shards_tous, dict):
-        shards_tous = list(shards_tous.values())
-
-    # Les instants de signal, par coin, pour filtrer au vol.
-    cibles: dict[str, list[int]] = {}
-    if instants_par_coin:
-        cibles = {str(k): sorted(int(x) for x in v) for k, v in instants_par_coin.items()}
-
-    gardes: dict[str, list[dict[str, Any]]] = {}
-    par_famille: dict[str, dict[str, int]] = {}
-    for famille in familles:
-        choix = coffre_tranches.selectionner(
-            shards_tous, famille=famille, coins=list(coins),
-            debut_ms=debut_ms - fenetre_ms, fin_ms=fin_ms)
-        shards = choix.get("shards") or choix.get("retenus") or []
-        if not shards:
-            par_famille[famille] = {"shards": 0, "lus": 0, "gardes": 0}
-            continue
-        horloge = coffre_tranches.horloge_de(famille)
-        lus = retenus = 0
-        for ligne in coffre_tranches.flux(
-            racine, shards, famille=famille, coins=list(coins),
-            debut_ms=debut_ms - fenetre_ms, fin_ms=fin_ms, verifier_sha=False,
-        ):
-            lus += 1
-            coin = str(ligne.get("coin") or ligne.get("symbole") or "")
-            ts = ligne.get(horloge, ligne.get("ts_ms"))
-            if not coin or ts is None:
-                continue
-            ts = int(ts)
-            instants = cibles.get(coin)
-            if instants is not None:
-                i = bisect.bisect_left(instants, ts)
-                if not (i < len(instants) and instants[i] - ts <= fenetre_ms):
-                    continue
-            carnet = dict(ligne)
-            carnet["ts_ms"] = ts
-            carnet.setdefault("coin", coin)
-            carnet["_famille_coffre"] = famille
-            gardes.setdefault(coin, []).append(carnet)
-            retenus += 1
-        par_famille[famille] = {"shards": len(shards), "lus": lus, "gardes": retenus}
-
-    for liste in gardes.values():
-        liste.sort(key=lambda c: int(c["ts_ms"]))
-    audit = {
-        "status": "LU_DEPUIS_LE_COFFRE",
-        "familles": par_famille,
-        "lignes_lues": sum(v["lus"] for v in par_famille.values()),
-        "carnets_gardes": sum(v["gardes"] for v in par_famille.values()),
-        "coins_avec_carnets": len(gardes),
-        "fenetre_ms": int(fenetre_ms),
-    }
-    return gardes, audit
 
 
 #: Le statut de provenance d'un corpus LOCAL certifie. IL NE SE DEGUISE PAS EN SAFE.
@@ -319,120 +240,9 @@ def carnets_du_coffre(
 PROVENANCE_LOCALE = "LOCAL_CERTIFIED"
 
 
-#: Les familles du coffre qui portent des fills du leader.
-#:
-#: `fills_forward` compte 21 591 873 lignes sur 23 journees (13 avril -> 18 novembre), dont 1,4 a
-#: 2,3 millions par jour depuis le 13/11 -- TOUTES marquees `causal_forward_eligible`. Le ruban
-#: local `runtime/data/vault_fills_live.jsonl` ne couvre que 17/11 19:10 -> 18/11 22:06, parce
-#: qu'il ne retient que la source `LIVE_WS`. Le coffre porte en plus `LIVE_POLL`, une collecte par
-#: interrogation active depuis le 13/11 et tout aussi causale : le labo ignorait une source
-#: entiere de signaux valides. Mesure du 18/11/2026 : 2 journees exploitables par le ruban local,
-#: 6 par le coffre.
-FAMILLES_DE_FILLS = ("fills_forward",)
-
-#: Le libelle Hyperliquid -> l'action du protocole. Seules OPEN et ADD sont copiables.
-_ACTION_PAR_LIBELLE = {
-    "open long": "OPEN",
-    "open short": "OPEN",
-    "close long": "CLOSE",
-    "close short": "CLOSE",
-}
 
 
-def fills_du_coffre(
-    racine: str | Path,
-    *,
-    debut_ms: int,
-    fin_ms: int,
-    familles: Sequence[str] = FAMILLES_DE_FILLS,
-) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Lit les fills du COFFRE et les met au format que `cluster_metaorders` attend.
 
-    LE MAPPING EST DERIVE, JAMAIS INVENTE. Un fill du coffre porte deja `ts_ms`, `coin`, `vault`,
-    `px`, `sz`, `observed_at_ms`, `received_at_ms`, `connection_id` et `causal_forward_eligible`.
-    Trois champs manquent, et chacun se CALCULE a partir de ce qui est la :
-
-      * `direction` <- `signe` (±1), l'orientation du fill telle que la plateforme l'a publiee ;
-      * `action` <- `dir` (« Open Long », « Close Short »...), traduit par un tableau explicite.
-        Un libelle inconnu donne `None`, donc l'evenement est ECARTE au lieu d'etre devine ;
-      * `taille_usd` <- `px * sz`, le notionnel du fill.
-
-    Rien n'est suppose : un fill sans prix, sans taille ou sans libelle reconnu est compte dans
-    l'audit et laisse de cote. Inventer une direction ou une action reviendrait a fabriquer des
-    signaux, c'est-a-dire a fabriquer le PnL qu'on cherche a mesurer.
-    """
-    from hl_observer.backtesting import coffre_tranches
-
-    racine = Path(racine)
-    index = racine / "runtime/coffre_certifie/LOCAL_INDEX.json"
-    if not index.exists():
-        return [], {"status": "COFFRE_ABSENT", "chemin": str(index)}
-
-    brut = json.loads(index.read_text(encoding="utf-8"))
-    tous = brut.get("shards") or []
-    if isinstance(tous, dict):
-        tous = list(tous.values())
-
-    entrees: list[dict[str, Any]] = []
-    audit: dict[str, Any] = {
-        "status": "LU_DEPUIS_LE_COFFRE", "lignes_lues": 0, "entrees_rendues": 0,
-        "ecartes_libelle_inconnu": 0, "ecartes_champ_manquant": 0, "familles": {},
-        "actions": {},
-    }
-    for famille in familles:
-        choix = coffre_tranches.selectionner(
-            tous, famille=famille, debut_ms=debut_ms, fin_ms=fin_ms)
-        # `selectionner` rend ses shards sous la cle `retenus`.
-        shards = choix.get("retenus") or choix.get("shards") or []
-        lus = rendus = 0
-        for ligne in coffre_tranches.flux(
-            racine, shards, famille=famille,
-            debut_ms=debut_ms, fin_ms=fin_ms, verifier_sha=False,
-        ):
-            lus += 1
-            action = _ACTION_PAR_LIBELLE.get(str(ligne.get("dir") or "").strip().lower())
-            if action is None:
-                audit["ecartes_libelle_inconnu"] += 1
-                continue
-            if action == "OPEN":
-                # OPEN ou ADD : la distinction NE SE LIT PAS dans `dir`, qui dit « Open Long »
-                # aussi bien pour une ouverture que pour un renforcement. Elle se CALCULE sur
-                # `start_position`, la position du leader AVANT ce fill : non nulle, le fill
-                # renforce une position existante, donc c'est un ADD.
-                #
-                # Sans cette distinction, tous les metaordres sortaient en OPEN -- 514 544 sur
-                # six tranches, zero ADD -- et l'alignement, qui compte les ADD evaluables,
-                # rendait `NO_CAUSAL_L2_AT_OR_BEFORE_SIGNAL_WITHIN_30_SECONDS` alors que 99,4 %
-                # des signaux avaient bien un carnet a portee. Le refus accusait les carnets ; la
-                # cause etait une action manquante.
-                try:
-                    position_avant = float(ligne.get("start_position") or 0.0)
-                except (TypeError, ValueError):
-                    position_avant = 0.0
-                if position_avant != 0.0:
-                    action = "ADD"
-            try:
-                signe = int(ligne["signe"])
-                prix = float(ligne["px"])
-                taille = float(ligne["sz"])
-            except (KeyError, TypeError, ValueError):
-                audit["ecartes_champ_manquant"] += 1
-                continue
-            if signe not in (-1, 1) or prix <= 0 or taille <= 0:
-                audit["ecartes_champ_manquant"] += 1
-                continue
-            entree = dict(ligne)
-            entree["direction"] = signe
-            entree["action"] = action
-            entree["taille_usd"] = prix * taille
-            entrees.append(entree)
-            audit["actions"][action] = audit["actions"].get(action, 0) + 1
-            rendus += 1
-        audit["familles"][famille] = {"shards": len(shards), "lus": lus, "rendus": rendus}
-        audit["lignes_lues"] += lus
-        audit["entrees_rendues"] += rendus
-    entrees.sort(key=lambda e: int(e["ts_ms"]))
-    return entrees, audit
 
 
 def manifeste_de_provenance_locale(
@@ -788,9 +598,12 @@ def charger_tranches_preparees(
             # fois cette nuit que la lecon est la meme : un filtre qui s'applique trop tard ne
             # protege rien.
             retenus = carnets.setdefault(coin, [])
+            apres = _fenetre_apres_signal()
             for carnet in bloc["carnets"]:
                 ts = int(carnet["ts_ms"])
-                i = bisect.bisect_left(instants, ts)
+                # Des DEUX cotes : le replay cherche une reference avant le signal, une entree
+                # apres le delai de copie, et une sortie apres l'horizon.
+                i = bisect.bisect_left(instants, ts - apres)
                 if i < len(instants) and instants[i] - ts <= fenetre_ms:
                     retenus.append(carnet)
 

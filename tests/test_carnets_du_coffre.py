@@ -25,8 +25,17 @@ from pathlib import Path
 from typing import Any
 
 from hl_observer.backtesting import coffre_tranches
-from hl_observer.backtesting import copy_vault_labo_deux_phases as deux_phases
+from hl_observer.backtesting import copy_vault_coffre_vers_labo as deux_phases
 from hl_observer.backtesting.copy_vault_signal_alignment import MAX_BOOK_AGE_MS
+
+
+def _cotation() -> dict[str, Any]:
+    """Les champs que le REPLAY exige d'un carnet : les deux cotes et la capacite.
+
+    Sans eux, `carnets_du_coffre` refuse le carnet -- et c'est voulu : les cinq familles du coffre
+    n'ont pas le meme schema, et le replay levait `KeyError: 'ask'` apres 60 candidats.
+    """
+    return {"bid": 100.0, "ask": 100.1, "capacity_usd": 5_000.0}
 
 
 def _index(tmp_path: Path, shards: list[dict[str, Any]]) -> Path:
@@ -56,11 +65,11 @@ def test_les_carnets_hors_portee_d_un_signal_ne_sont_pas_materialises(
     _index(tmp_path, [{"famille": "book_l2", "ts_min_ms": 0, "ts_max_ms": 10_000_000}])
     signal = 1_000_000
     lignes = [
-        {"coin": "BTC", "ts_ms": signal - 10, "bid": 1.0},                      # garde
-        {"coin": "BTC", "ts_ms": signal - MAX_BOOK_AGE_MS, "bid": 1.0},         # garde (borne)
-        {"coin": "BTC", "ts_ms": signal - MAX_BOOK_AGE_MS - 1, "bid": 1.0},     # ecarte
-        {"coin": "BTC", "ts_ms": signal + 1, "bid": 1.0},                       # ecarte (futur)
-    ]
+        {"coin": "BTC", "ts_ms": signal - 10, **_cotation()},                      # garde
+        {"coin": "BTC", "ts_ms": signal - MAX_BOOK_AGE_MS, **_cotation()},         # garde (borne)
+        {"coin": "BTC", "ts_ms": signal - MAX_BOOK_AGE_MS - 1, **_cotation()},     # ecarte (trop vieux)
+        {"coin": "BTC", "ts_ms": signal + 1, **_cotation()},                       # GARDE : l'entree
+    ]                                                                            # vient apres le signal
 
     monkeypatch.setattr(coffre_tranches, "selectionner",
                         lambda *a, **k: {"shards": [{"id": "s1"}]})
@@ -74,9 +83,12 @@ def test_les_carnets_hors_portee_d_un_signal_ne_sont_pas_materialises(
 
     assert audit["status"] == "LU_DEPUIS_LE_COFFRE"
     assert audit["lignes_lues"] == 4, "les 4 lignes ont bien ete traversees"
-    assert audit["carnets_gardes"] == 2, "seules les 2 a portee du signal sont materialisees"
-    assert [c["ts_ms"] for c in gardes["BTC"]] == [signal - MAX_BOOK_AGE_MS, signal - 10]
-    assert audit["familles"]["book_l2"] == {"shards": 1, "lus": 4, "gardes": 2}
+    # TROIS gardes : les deux references AVANT le signal, et le carnet juste APRES -- celui ou
+    # l'execution aura lieu, puisqu'on copie avec un delai. Seul le carnet trop vieux est ecarte.
+    assert audit["carnets_gardes"] == 3
+    assert [c["ts_ms"] for c in gardes["BTC"]] == [
+        signal - MAX_BOOK_AGE_MS, signal - 10, signal + 1]
+    assert audit["familles"]["book_l2"] == {"shards": 1, "lus": 4, "gardes": 3}
 
 
 def test_l_audit_distingue_les_lignes_lues_des_carnets_gardes(tmp_path: Path, monkeypatch) -> None:
@@ -133,3 +145,32 @@ def test_les_familles_de_carnets_couvrent_le_coffre_reel() -> None:
     assert set(deux_phases.FAMILLES_DE_CARNETS) == {
         "book_l2", "micro_l2", "venue_book", "bbo", "micro_bbo",
     }
+
+
+def test_un_carnet_sans_les_deux_cotes_est_refuse_et_compte(tmp_path: Path, monkeypatch) -> None:
+    """DONNEE INCOMPLETE = REFUS TRACABLE, jamais une mesure qui tombe.
+
+    Les cinq familles de carnets du coffre n'ont pas le meme schema. Un carnet sans `ask` faisait
+    lever `KeyError: 'ask'` au replay, apres 60 candidats explores -- donc apres plusieurs minutes
+    de calcul perdues, et sans dire ce qui manquait. On le refuse et on le COMPTE.
+    """
+    _index(tmp_path, [{"famille": "book_l2", "ts_min_ms": 0, "ts_max_ms": 10_000_000}])
+    signal = 1_000_000
+    lignes = [
+        {"coin": "BTC", "ts_ms": signal - 10, **_cotation()},            # complet
+        {"coin": "BTC", "ts_ms": signal - 11, "bid": 100.0},             # pas d'ask
+        {"coin": "BTC", "ts_ms": signal - 12, "ask": 100.1},             # pas de bid
+        {"coin": "BTC", "ts_ms": signal - 13, "bid": 1.0, "ask": 2.0},   # pas de capacite
+    ]
+    monkeypatch.setattr(coffre_tranches, "selectionner",
+                        lambda *a, **k: {"retenus": [{"id": "s1"}]})
+    monkeypatch.setattr(coffre_tranches, "horloge_de", lambda famille: "ts_ms")
+    monkeypatch.setattr(coffre_tranches, "flux", lambda *a, **k: iter(lignes))
+
+    gardes, audit = deux_phases.carnets_du_coffre(
+        tmp_path, coins=["BTC"], debut_ms=signal - 100_000, fin_ms=signal,
+        familles=("book_l2",), instants_par_coin={"BTC": [signal]})
+
+    assert audit["carnets_gardes"] == 1, "seul le carnet complet est retenu"
+    assert audit["ecartes_champs_manquants"] == 3
+    assert len(gardes["BTC"]) == 1
