@@ -179,7 +179,7 @@ FORBIDDEN_HOSTED_CI_MARKERS = (
 )
 MUTATING_GIT_COMMANDS = {
     "add", "commit", "commit-tree", "fetch", "merge", "rebase", "read-tree",
-    "write-tree", "mktree", "switch", "checkout", "update-ref", "push",
+    "write-tree", "mktree", "switch", "checkout", "update-ref", "symbolic-ref", "push",
 }
 
 
@@ -1617,14 +1617,30 @@ class Synchronizer:
             f"[PROMOTION] Fast-forward local de main depuis {source_branch} "
             f"({source_sha[:12]}); aucun reset, clean ou merge de conflit."
         )
-        switched = False
+        # PROMOTION SANS REECRIRE LE REPERTOIRE DE TRAVAIL.
+        #
+        # `switch main` puis `merge --ff-only` reconstruit l'arbre de travail : sur ce depot, qui
+        # suit 1,9 MILLION de fichiers, la bascule depasse les 900 s de budget et le lanceur rend
+        # NO_GO sur un simple delai -- mesure du 18/11/2026, trois tentatives.
+        #
+        # Or le fast-forward vient d'etre VERIFIE juste au-dessus (`merge-base --is-ancestor`), donc
+        # `main` est un ancetre de HEAD : l'arbre de travail correspond DEJA au commit qu'on veut
+        # promouvoir. Deplacer la reference et repointer HEAD produit exactement le meme etat, sans
+        # toucher un seul fichier. Aucun reset, aucun clean, aucune perte possible : un
+        # fast-forward ne peut pas faire reculer `main`, et `update-ref` echouerait si la valeur
+        # attendue ne correspondait plus.
+        ancienne_tete = self.text("rev-parse", "HEAD")
         try:
-            self.command("switch", "main")
-            switched = True
-            self.command("merge", "--ff-only", source_branch)
+            self.command("update-ref", "refs/heads/main", source_sha, main_sha_text)
+            self.command("symbolic-ref", "HEAD", "refs/heads/main")
         except Exception:
-            if switched:
-                self.command("switch", source_branch, check=False)
+            # On remet HEAD sur la branche source : l'arbre de travail n'a jamais bouge, donc il
+            # n'y a rien d'autre a defaire.
+            self.command("symbolic-ref", "HEAD", f"refs/heads/{source_branch}", check=False)
+            if self.text("rev-parse", "HEAD") != ancienne_tete:
+                raise SyncBlocked(
+                    "Promotion interrompue: HEAD ne pointe plus sur le commit de depart."
+                ) from None
             raise
         promoted_sha = self.text("rev-parse", "HEAD")
         if promoted_sha != source_sha:
