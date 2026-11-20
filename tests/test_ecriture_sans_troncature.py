@@ -24,6 +24,15 @@ RACINE = Path(__file__).resolve().parents[1]
 DOSSIERS = ("src", "tools")
 MODES_QUI_ECRIVENT = ('"w"', "'w'", '"a"', "'a'", '"w+"', "'w+'", '"wb"', "'wb'")
 
+#: Arbres QU'ON NE CORRIGE PAS. `tools/python/` est la distribution Python EMBARQUEE :
+#: 5 896 des 11 075 fichiers balayes au depart venaient de `site-packages`. Un controle
+#: qui echoue sur du code tiers est une fausse alerte que le projet ne peut pas reparer,
+#: et la prochaine mise a jour de dependance l'aurait declenchee.
+HORS_PERIMETRE = ("site-packages", "__pycache__", "node_modules", ".venv")
+
+
+def _hors_perimetre(chemin: Path) -> bool:
+    return any(part in HORS_PERIMETRE for part in chemin.parts)
 
 def ecriture_sans_garde(ligne: str) -> bool:
     """``open(..., mode d ecriture).write(`` hors ``with`` et hors commentaire."""
@@ -41,13 +50,14 @@ def _sources() -> list[Path]:
     for dossier in DOSSIERS:
         base = RACINE / dossier
         if base.is_dir():
-            fichiers.extend(p for p in base.rglob("*.py") if p.is_file())
+            fichiers.extend(p for p in base.rglob("*.py")
+                            if p.is_file() and not _hors_perimetre(p))
     return fichiers
 
 
 def test_aucune_ecriture_ne_tronque_avant_d_evaluer() -> None:
     fichiers = _sources()
-    assert len(fichiers) > 500, (
+    assert len(fichiers) > 2000, (
         f"{len(fichiers)} source(s) : le balayage ne couvre plus le projet")
     fautifs: list[str] = []
     for chemin in fichiers:

@@ -33,6 +33,15 @@ CONTROLES_LEGITIMES = frozenset({9, 10, 13})
 #: Repertoires de code du projet (hors dependances et hors arborescences de donnees).
 DOSSIERS = ("src", "tools", "tests")
 
+#: Arbres QU'ON NE CORRIGE PAS. `tools/python/` est la distribution Python EMBARQUEE :
+#: 5 896 des 11 075 fichiers balayes au depart venaient de `site-packages`. Un controle
+#: qui echoue sur du code tiers est une fausse alerte que le projet ne peut pas reparer,
+#: et la prochaine mise a jour de dependance l'aurait declenchee.
+HORS_PERIMETRE = ("site-packages", "__pycache__", "node_modules", ".venv")
+
+
+def _hors_perimetre(chemin: Path) -> bool:
+    return any(part in HORS_PERIMETRE for part in chemin.parts)
 
 def _controles(octets: bytes) -> list[str]:
     """Les octets de controle interdits presents, en hexadecimal, tries et uniques."""
@@ -45,13 +54,14 @@ def _sources() -> list[Path]:
     for dossier in DOSSIERS:
         base = RACINE / dossier
         if base.is_dir():
-            fichiers.extend(p for p in base.rglob("*.py") if p.is_file())
+            fichiers.extend(p for p in base.rglob("*.py")
+                            if p.is_file() and not _hors_perimetre(p))
     return fichiers
 
 
 def test_aucun_octet_de_controle_dans_le_source_python() -> None:
     fichiers = _sources()
-    assert len(fichiers) > 1000, (
+    assert len(fichiers) > 3000, (
         f"seulement {len(fichiers)} sources trouvees : le balayage ne couvre plus le projet, "
         "donc il ne protege plus rien")
     fautifs: list[str] = []
