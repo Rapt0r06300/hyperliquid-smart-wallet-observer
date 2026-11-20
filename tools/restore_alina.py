@@ -3469,7 +3469,18 @@ def restore_everything(
     seen_windows_release_dirs: set[str] = set()
     unverified_source_assets: list[dict[str, Any]] = []
     unsafe_manifest_release_dirs: set[str] = set()
-    for release in releases:
+    # COMPTER CETTE PHASE (20/11/2026). C etait la DERNIERE phase muette de la chaine : elle
+    # annoncait « VERIFY_RELEASE_INVENTORY releases=5532 » puis ne disait plus rien jusqu au
+    # bout. Un preflight tue par un plafond de 900 s est mort ICI, et rien ne permettait de
+    # savoir s il travaillait ou s il etait bloque -- ni de calibrer ce plafond sur une mesure
+    # plutot que sur une supposition. `ALINA_CATALOG_PARTITIONS` compte deja ainsi, juste
+    # au-dessus ; on suit la meme convention pour que les deux se lisent pareil.
+    _total_releases = len(releases)
+    for _rang_release, release in enumerate(releases, 1):
+        if (_rang_release == 1 or _rang_release % 250 == 0
+                or _rang_release == _total_releases):
+            print(f"ALINA_RELEASE_INVENTORY={_rang_release}/{_total_releases}",
+                  file=sys.stderr, flush=True)
         tag = release.get("tag_name")
         assets = release.get("assets")
         if not isinstance(tag, str) or not tag or tag in seen_tags:
