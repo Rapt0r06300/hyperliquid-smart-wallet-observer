@@ -178,6 +178,8 @@ EXCLUDED_DIRS = {
 
 def code_dirs() -> list[str]:
     """Tous les dossiers de 1er niveau qui contiennent du code Python + la racine elle-meme."""
+    if _CACHE_DOSSIERS:
+        return list(_CACHE_DOSSIERS)
     out = []
     for d in sorted(ROOT.iterdir()):
         if not d.is_dir() or d.name in EXCLUDED_DIRS or d.name.endswith(".egg-info"):
@@ -187,20 +189,26 @@ def code_dirs() -> list[str]:
         except StopIteration:
             continue
         out.append(d.name)
-    return out
+    _CACHE_DOSSIERS[:] = out
+    return list(out)
 
 
 SELF_FILES = {"tools/audit_report.py"}          # l'auditeur contient les motifs interdits : il
                                                 #  ne doit pas se denoncer lui-meme.
 
 
-#: MESURE DU 20/11/2026 : la marche de repertoires coute 52,0 s (tools/ contient la
-#: distribution Python embarquee ET une installation Git complete), alors que LIRE les
-#: 5 429 fichiers retenus ne coute que 0,5 s pour 34,4 Mo. Or `regex_rule` rappelait cette
-#: fonction a CHAQUE regle : 42 regles x 52 s = ~37 MINUTES a enumerer les memes chemins.
-#: Le cache est sain ici : l audit est un processus a usage unique, et les dossiers balayes
-#: ne changent pas pendant son execution (son rapport s ecrit sous runtime/, exclu).
+#: MESURE DU 20/11/2026, APRES UNE PREMIERE EXPLICATION FAUSSE. J avais attribue le cout a
+#: `_py_files` (52 s) et annonce ~37 min pour 42 regles : les deux chiffres etaient mauvais.
+#: Le cout reel est dans `code_dirs()` -- 25,2 s PAR APPEL, parce qu il fait
+#: `next(d.rglob('*.py'))` sur chaque dossier racine, et qu un dossier SANS aucun .py est
+#: parcouru EN ENTIER avant que `next()` abandonne. Or `regex_rule` evalue
+#: `_code_dirs_no_tests()` a chaque regle, DONC AVANT le cache de `_py_files` : 9 regles
+#: bloquantes x 25,2 s = 227 s, pour une batterie mesuree a 258,6 s. Concordant.
+#: LIRE les 5 429 fichiers retenus, lui, ne coute que 0,5 s pour 34,4 Mo.
+#: Les deux caches sont sains : l audit est un processus a usage unique, et les dossiers
+#: balayes ne changent pas pendant son execution (son rapport s ecrit sous runtime/, exclu).
 _CACHE_FICHIERS: dict[tuple, list] = {}
+_CACHE_DOSSIERS: list[str] = []
 
 
 def _py_files(*dirs):
