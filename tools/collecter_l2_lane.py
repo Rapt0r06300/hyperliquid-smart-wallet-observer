@@ -31,6 +31,8 @@ from hl_observer.datasets.coffre_certifie import certifier_book, QUARANTAINE  # 
 from hl_observer.collection.forward_poll_fills import shard_leaders  # noqa: E402 (shard generique)
 from hl_observer.instrument_identity import preserve_native_instrument_symbol  # noqa: E402
 from hl_observer.collection.univers_perps import charger_univers, filtrer_abonnables  # noqa: E402
+from hl_observer.feed_integrity.idle_socket_watchdog import (  # noqa: E402
+    MORT, etat_socket)
 
 WS_URL = "wss://api.hyperliquid.xyz/ws"
 OUT_DEFAUT = Path("runtime") / "data" / "copy_vault_l2_lane.jsonl"
@@ -213,6 +215,31 @@ class LaneL2:
             self.emis_bbo += 1
 
 
+#: SEUIL DE DIAGNOSTIC, PAS DE GARDE CALIBREE. La lecture est deja bornee a 30 s et
+#: `ping_interval=20` fait fermer par la bibliotheque un socket qui ne repond plus. Le
+#: trou qui reste est AUTRE : un socket VIVANT dont la souscription ne livre plus rien,
+#: que ni le keepalive ni le `wait_for` ne peuvent voir. Faute d avoir MESURE le silence
+#: normal d une lane L2, ce seuil est volontairement large et ne declenche qu un
+#: MESSAGE : on observe d abord, on reconnectera quand la mesure le justifiera.
+SILENCE_DIAGNOSTIC_MS = 120_000.0
+
+
+def diagnostic_silence(dernier_message_ms, now_ms,
+                      *, timeout_ms: float = SILENCE_DIAGNOSTIC_MS) -> str | None:
+    """Rend une ligne a imprimer si le socket est juge MORT, sinon None.
+
+    La primitive est fail-closed : un horodatage inconnu est traite comme MORT. On ne
+    coupe RIEN ici -- on rend l anomalie visible, car un flux qui se tait sans se fermer
+    gele la collecte en silence, et un silence ne se distingue pas d un marche calme.
+    """
+    verdict = etat_socket(dernier_message_ms, now_ms, timeout_ms=timeout_ms)
+    if verdict.get("etat") != MORT:
+        return None
+    return ("[l2-lane] FLUX SILENCIEUX : etat=%s raison=%s silence_ms=%s"
+            % (verdict.get("etat"), verdict.get("raison"),
+               verdict.get("silence_ms", "inconnu")))
+
+
 async def _connexion(lane: LaneL2, coins: list[str], socket_id: str, deadline: float) -> None:
     import websockets
 
@@ -231,6 +258,8 @@ async def _connexion(lane: LaneL2, coins: list[str], socket_id: str, deadline: f
                                               "subscription": {"type": "l2Book", "coin": c}}))
                     await asyncio.sleep(0.05)
                 print(f"[l2-lane] socket {socket_id} : {len(coins)} l2Book souscrits", flush=True)
+                dernier_message_ms = int(time.time() * 1000)
+                silence_signale = False
                 while time.monotonic() < deadline:
                     reste = max(0.0, deadline - time.monotonic())
                     try:
@@ -238,8 +267,15 @@ async def _connexion(lane: LaneL2, coins: list[str], socket_id: str, deadline: f
                     except asyncio.TimeoutError:
                         if time.monotonic() >= deadline:
                             return
+                        ligne = diagnostic_silence(dernier_message_ms,
+                                                   int(time.time() * 1000))
+                        if ligne is not None and not silence_signale:
+                            print(ligne, flush=True)   # une fois par episode
+                            silence_signale = True
                         continue
                     recv_ms = int(time.time() * 1000)
+                    dernier_message_ms = recv_ms
+                    silence_signale = False
                     try:
                         msg = json.loads(brut)
                     except ValueError:

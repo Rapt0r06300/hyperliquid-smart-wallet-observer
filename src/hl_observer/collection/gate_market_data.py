@@ -554,7 +554,13 @@ class GatePublicClient:
                     self.ws_url,
                     ping_interval=20,
                     ping_timeout=10,
-                    extra_headers={"X-Gate-Size-Decimal": "1"},
+                    # 20/11/2026 : `extra_headers` a ete RETIRE en websockets 14+ et
+                    # remonte jusqu a `BaseEventLoop.create_connection()`, qui leve
+                    # TypeError. Prouve sur la version INSTALLEE (17.0.1). Ce site est
+                    # dans un `while True` : le collecteur reessayait donc a l infini
+                    # sur une erreur PERMANENTE. Le nouveau nom est
+                    # `additional_headers`.
+                    additional_headers={"X-Gate-Size-Decimal": "1"},
                 ) as socket:
                     for message in subscriptions:
                         await socket.send(json.dumps(message))

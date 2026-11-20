@@ -11,7 +11,11 @@
 # pip-audit finding fixed in pytest 9.0.3.
 pytest>=9.0.3,<10
 httpx>=0.27,<1
-websockets>=10,<11
+# 20/11/2026 : la borne etait <11 alors que l environnement portable epingle 17.0.1 --
+# donc les workflows qui installent CE fichier testaient une API differente de celle
+# qui tourne. `tools/diagnostic_lanceur.py` denoncait deja ce pin perime. Mesure :
+# `extra_headers` (retire en 14+) levait TypeError dans le collecteur Gate.
+websockets>=17,<18
 
 # CCXT reste disponible uniquement via l'extra discovery de pyproject.toml.
 # Il expose des API d'ordre et ne doit jamais entrer dans l'installation

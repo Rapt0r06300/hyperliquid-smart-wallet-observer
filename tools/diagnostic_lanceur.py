@@ -178,10 +178,11 @@ def sonder_tiers() -> list[str]:
     except (ValueError, IndexError):
         pass
     if majeure >= 14:
-        alerte("websockets " + version + " : l'ancienne API (websockets.legacy,")
-        alerte("  extra_headers=..., WebSocketClientProtocol) a ete retiree.")
-        alerte("  requirements.txt epingle encore websockets>=10,<11 : si un")
-        alerte("  collecteur utilise l'ancienne API, il casse a l'execution.")
+        info("websockets " + version + " : l'ancienne API (websockets.legacy,")
+        info("  extra_headers=..., WebSocketClientProtocol) a ete retiree.")
+        info("  requirements.txt demande desormais >=17,<18, aligne sur le pin")
+        info("  portable. Le dernier usage de l'ancienne API (collecteur Gate,")
+        info("  extra_headers) a ete corrige le 20/11/2026 ; un test le verrouille.")
     for chemin in ("legacy", "asyncio.client"):
         try:
             importlib.import_module("websockets." + chemin)
