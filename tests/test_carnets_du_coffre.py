@@ -105,7 +105,8 @@ def test_les_carnets_hors_portee_d_un_signal_ne_sont_pas_materialises(
     assert audit["carnets_gardes"] == 2
     assert signal - MAX_BOOK_AGE_MS - 1 not in [c["ts_ms"] for c in gardes["BTC"]]
     assert [c["ts_ms"] for c in gardes["BTC"]] == [signal - 10, signal + 1]
-    assert audit["familles"]["book_l2"] == {"shards": 1, "lus": 4, "gardes": 2}
+    assert audit["familles"]["book_l2"] == {"shards": 1, "lus": 4, "gardes": 2,
+                                           "abandonnee_sans_champs_de_carnet": False}
 
 
 def test_l_audit_distingue_les_lignes_lues_des_carnets_gardes(tmp_path: Path, monkeypatch) -> None:

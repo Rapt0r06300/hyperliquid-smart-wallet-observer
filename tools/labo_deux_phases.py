@@ -236,11 +236,29 @@ def phase_1(
         retenues = int(carnets_audit.get("carnets_gardes") or audit["carnets_gardes"])
         manifeste["audit_coffre"] = dict(carnets_audit)
         taux = f" ({1 - retenues / lues:.1%} ecartees)" if lues else ""
+        # DIRE POURQUOI ELLES SONT ECARTEES (20/11/2026). « 99,1 % ecartees » sans motif ne
+        # permet pas de distinguer une SELECTION saine -- un carnet ne sert que s il repond a
+        # une ancre de signal -- d une PERTE silencieuse. Le rejet le plus massif n etait meme
+        # pas compte. On affiche desormais les trois motifs, du plus gros au plus petit.
+        motifs = " ; ".join(
+            f"{libelle}={carnets_audit[cle]:,}".replace(",", " ")
+            for cle, libelle in (
+                ("ecartes_sans_coin_ou_horloge", "sans coin ni horloge"),
+                ("ecartes_champs_manquants", "champs bid/ask/capacity manquants"),
+                ("ecartes_aucun_signal_assez_proche", "aucun signal assez proche"),
+                ("ecartes_sans_identite_de_connexion", "sans identite de connexion"),
+                ("ecartes_trop_denses", "budget d ancre plein"),
+                ("ecartes_coin_sans_signal", "coin sans signal"),
+                ("non_explique", "NON EXPLIQUE (anomalie)"),
+            ) if carnets_audit.get(cle)
+        )
         print(
             f"        {manifeste['metaordres']} metaordres | "
             f"{retenues} carnet(s) retenu(s) sur {lues} lue(s){taux}",
             flush=True,
         )
+        if motifs:
+            print(f"        motifs du rejet : {motifs}", flush=True)
         faits.append(manifeste)
         del metaordres, carnets
         gc.collect()

@@ -54,6 +54,15 @@ def _fenetre_apres_signal() -> int:
 #: commencent qu'au 17/11 18:35 -- mesure du 18/11/2026. Lire le coffre, c'est la difference entre
 #: une journee de carnets et trois semaines.
 FAMILLES_DE_CARNETS = ("book_l2", "micro_l2", "venue_book", "bbo", "micro_bbo")
+#: Lignes sondees avant d abandonner une famille qui ne peut rien produire.
+#:
+#: MESURE DU 20/11/2026, sur le coffre reel : `book_l2` rend 100 % de carnets exploitables,
+#: les QUATRE autres 0 % -- `capacity_usd` est absent de 6 000 lignes sur 6 000 pour `bbo`,
+#: `micro_bbo` et `micro_l2`, et `venue_book` n a meme pas `bid`/`ask`. Le labo lisait donc
+#: 195,6 millions de lignes par tranche (bbo 130,8 M + micro_bbo 62,2 M + ...) pour un
+#: resultat strictement nul. On ne RETIRE pas ces familles -- leur schema peut gagner le
+#: champ un jour -- on les SONDE et on les abandonne quand elles ne peuvent rien donner.
+SONDAGE_FAMILLE = 200
 
 #: LES SEULES ACTIONS QUE LA POLITIQUE GELEE SAIT COPIER.
 #:
@@ -266,6 +275,8 @@ def carnets_du_coffre(
     ecartes_sans_signal = 0
     homonymes = 0
     sans_identite = 0
+    ecartes_hors_tolerance = 0
+    sans_coin_ou_horloge = 0
     gardes: dict[str, list[dict[str, Any]]] = {}
     par_famille: dict[str, dict[str, int]] = {}
     for famille in familles:
@@ -278,6 +289,8 @@ def carnets_du_coffre(
             continue
         horloge = coffre_tranches.horloge_de(famille)
         lus = retenus = 0
+        exploitables_vues = 0
+        abandonnee = False
         for ligne in coffre_tranches.flux(
             racine, shards, famille=famille, coins=list(coins),
             debut_ms=debut_ms - fenetre_ms, fin_ms=fin_ms + apres_ms, verifier_sha=False,
@@ -286,6 +299,11 @@ def carnets_du_coffre(
             coin = str(ligne.get("coin") or ligne.get("symbole") or "")
             ts = ligne.get(horloge, ligne.get("ts_ms"))
             if not coin or ts is None:
+                # SECOND REJET MUET (20/11/2026). Une ligne sans coin ou sans l horloge de sa
+                # famille sortait par un `continue` nu. Avec les autres motifs non affiches,
+                # l audit annoncait « 99,1 % ecartees » en n en expliquant que 2,6 % : on ne
+                # pouvait pas distinguer une selection saine d une perte.
+                sans_coin_ou_horloge += 1
                 continue
             ts = int(ts)
             # LES CHAMPS D'ABORD, LE BUDGET ENSUITE. Le replay exige `bid`, `ask` et
@@ -299,7 +317,13 @@ def carnets_du_coffre(
             # dans le plafond.
             if any(ligne.get(champ) is None for champ in ("bid", "ask", "capacity_usd")):
                 incomplets += 1
+                if lus >= SONDAGE_FAMILLE and exploitables_vues == 0:
+                    # Cette famille n a pas le schema d un carnet : la lire jusqu au bout
+                    # coute des millions de lignes pour rien. On l abandonne EN LE DISANT.
+                    abandonnee = True
+                    break
                 continue
+            exploitables_vues += 1
             # ET UNE IDENTITE DE CONNEXION, sans quoi l'episode sera refuse de toute façon.
             #
             # Le replay exige que les trois carnets d'un episode portent une `connection_id` et un
@@ -356,6 +380,13 @@ def carnets_du_coffre(
                     ):
                         proche = j
                 if proche is None:
+                    # LE REJET LE PLUS MASSIF ETAIT MUET (20/11/2026). L audit annoncait
+                    # « 99,1 % ecartees » sans pouvoir dire pourquoi : seuls deux motifs
+                    # mineurs etaient comptes, et celui-ci -- aucun signal assez proche --
+                    # sortait par un `continue` nu. Un rejet massif sans motif empeche de
+                    # distinguer une selection saine d une perte, et c est exactement ce qui
+                    # a coute une nuit sur les fills.
+                    ecartes_hors_tolerance += 1
                     continue
                 # UN CARNET DE CHAQUE COTE DE L'ANCRE, PAR CONNEXION. Le cote compte parce que la
                 # reference se cherche en arriere et l'entree en avant : un budget qui les melange
@@ -432,7 +463,8 @@ def carnets_du_coffre(
                 liste_du_coin[rang_liste] = carnet
                 places[remplace] = (rang_liste, ecart)
                 trop_denses += 1
-        par_famille[famille] = {"shards": len(shards), "lus": lus, "gardes": retenus}
+        par_famille[famille] = {"shards": len(shards), "lus": lus, "gardes": retenus,
+                                "abandonnee_sans_champs_de_carnet": abandonnee}
 
     for liste in gardes.values():
         liste.sort(key=lambda c: int(c["ts_ms"]))
@@ -446,11 +478,18 @@ def carnets_du_coffre(
         "ecartes_trop_denses": trop_denses,
         "ecartes_champs_manquants": incomplets,
         "ecartes_coin_sans_signal": ecartes_sans_signal,
+        "ecartes_aucun_signal_assez_proche": ecartes_hors_tolerance,
         "checkpoint_id_renommes": homonymes,
         "ecartes_sans_identite_de_connexion": sans_identite,
+        "ecartes_sans_coin_ou_horloge": sans_coin_ou_horloge,
         "par_ancre": int(par_ancre),
         "ancres": sum(len(v) for v in cibles.values()),
     }
+    # L AUDIT PROUVE SA PROPRE CONSERVATION. Un audit qui annonce un taux de rejet sans
+    # pouvoir l expliquer ligne a ligne ne vaut rien : c est ainsi qu une PERTE se deguise en
+    # SELECTION. `non_explique` doit rester a zero ; s il bouge, un filtre muet est apparu.
+    audit["non_explique"] = audit["lignes_lues"] - audit["carnets_gardes"] - sum(
+        int(v) for k, v in audit.items() if k.startswith("ecartes_"))
     return gardes, audit
 
 #: Les familles du coffre qui portent des fills du leader.

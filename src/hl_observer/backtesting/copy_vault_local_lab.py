@@ -2853,6 +2853,19 @@ def run_local_campaign(
     # Lecture vide -> `None` -> comportement historique exact (fail-closed), jamais un zéro
     # flatteur. L'audit est DIT : « 0 règlement » et « je n'ai pas su lire » ne se confondent pas.
     # Interrupteur de reproductibilité : COPY_VAULT_FUNDING_MESURE=0 restaure l'ancien verdict.
+    # LA RACINE DOIT ETRE RESOLUE AVANT D ETRE UTILISEE (20/11/2026). `repository_root` est un
+    # parametre qui vaut `None` par defaut, et il n etait normalise QUE ~170 lignes plus bas.
+    # La lecture du funding, juste en dessous, recevait donc `None` et levait un `TypeError`
+    # capture en « LECTURE_IMPOSSIBLE » -- dont le message n etait meme pas affiche. Resultat :
+    # le portage restait INMESURABLE a CHAQUE execution, la porte refusait tout, et le correctif
+    # decrit juste au-dessus (4,3 M de reglements dans le coffre) n a jamais pu servir. Une porte
+    # infranchissable accuse le candidat a la place du code. La resolution plus bas reste en
+    # place et devient simplement idempotente : `Path(deja_un_Path).resolve()` est sans effet.
+    repository_root = (
+        Path(repository_root).resolve()
+        if repository_root is not None
+        else Path(__file__).resolve().parents[3]
+    )
     taux_funding: dict[str, Any] = {}
     audit_funding: dict[str, Any] = {"status": "DESACTIVE_PAR_ENV"}
     if os.environ.get("COPY_VAULT_FUNDING_MESURE", "1").strip().lower() not in {
@@ -2882,7 +2895,13 @@ def run_local_campaign(
            f"({audit_funding.get('status')})"
            if taux_funding else
            f"AUCUN taux utilisable ({audit_funding.get('status')}) — "
-           "le portage restera INMESURABLE, comme avant")
+           "le portage restera INMESURABLE, comme avant"
+           # DIRE LAQUELLE (20/11/2026). Le message de l exception etait capture dans
+           # `audit_funding["erreur"]` mais JAMAIS affiche : on lisait « LECTURE_IMPOSSIBLE »
+           # sans pouvoir savoir si le coffre manque, si une ligne est illisible ou si
+           # c est un defaut de code. Une porte qui refuse tout doit dire pourquoi, sinon
+           # on accuse le candidat au lieu de la porte.
+           + (f" · cause : {audit_funding['erreur']}" if audit_funding.get("erreur") else ""))
     )
     #: Passé tel quel aux trois scorings. ``None`` quand rien n'est lisible : le reçu gelé
     #: retombe alors exactement sur son verdict historique.
