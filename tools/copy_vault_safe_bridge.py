@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+import gzip
 import hashlib
 import json
 import math
@@ -81,6 +82,35 @@ def _read_json(path: Path) -> dict[str, Any]:
     if not isinstance(result, dict):
         raise SafeBridgeError(f"non-object evidence: {path}")
     return result
+
+
+def _jsonl_ouvert(archive, plain):
+    """Le JSONL du shard : depuis l extraction si elle existe, sinon EN FLUX depuis l archive.
+
+    POURQUOI (20/11/2026). L extraction complete du corpus SAFE reclame **2,31 To** quand la
+    machine en offre 705 Go : `unpack_verified_safe` refuse proprement (« insufficient disk for
+    JSONL expansion ... compressed verified corpus preserved ») et le pont restait donc bloque
+    pour toujours. Or le sceau `alina.safe_jsonl_proof.v1` porte LES DEUX empreintes -- celle de
+    l archive ET celle du JSONL -- donc on peut decompresser a la volee et verifier EXACTEMENT
+    les memes preuves, sans ecrire un seul octet. La certification n est pas affaiblie : elle est
+    calculee sur le flux au lieu d un fichier.
+    """
+    if plain.is_file():
+        return plain.open("rb")
+    return gzip.open(archive, "rb")
+
+
+def _jsonl_empreinte(archive, plain) -> tuple[str, int]:
+    """(sha256, octets) du JSONL, sans jamais l ecrire sur disque."""
+    if plain.is_file():
+        return _digest(plain), plain.stat().st_size
+    condense = hashlib.sha256()
+    total = 0
+    with gzip.open(archive, "rb") as flux:
+        for morceau in iter(lambda: flux.read(1 << 20), b""):
+            condense.update(morceau)
+            total += len(morceau)
+    return condense.hexdigest(), total
 
 
 def _safe_paths(recovery: Path, relative: str) -> tuple[Path, Path, Path]:
@@ -470,7 +500,9 @@ def build_safe_copy_workspace(
             for i, (relative, size, sha, stat_identity) in enumerate(registry, 1):
                 processed_shards = i
                 archive, plain, seal_path = _safe_paths(recovery, relative)
-                if not archive.is_file() or not plain.is_file() or not seal_path.is_file():
+                # L extraction (plain) n est plus EXIGEE : le sceau prouve le JSONL, et on sait
+                # le recalculer en flux depuis l archive. Elle reste utilisee si presente.
+                if not archive.is_file() or not seal_path.is_file():
                     raise SafeBridgeError(f"missing registered SAFE shard: {relative}")
                 stat = archive.stat()
                 if (
@@ -478,7 +510,7 @@ def build_safe_copy_workspace(
                     or stat.st_size != size
                 ):
                     raise SafeBridgeError(f"registered SAFE shard was modified: {relative}")
-                with plain.open("rb") as handle:
+                with _jsonl_ouvert(archive, plain) as handle:
                     first = handle.readline()
                 if not first:
                     raise SafeBridgeError(f"empty SAFE shard: {relative}")
@@ -489,15 +521,15 @@ def build_safe_copy_workspace(
                     seal.get("schema") != "alina.safe_jsonl_proof.v1"
                     or seal.get("compressed_sha256") != sha
                     or _digest(archive) != sha
-                    or seal.get("jsonl_sha256") != _digest(plain)
-                    or seal.get("jsonl_bytes") != plain.stat().st_size
+                    or (seal.get("jsonl_sha256"), seal.get("jsonl_bytes"))
+                    != _jsonl_empreinte(archive, plain)
                 ):
                     raise SafeBridgeError(f"SAFE shard byte proof mismatch: {relative}")
                 for identity in (relative, sha, str(seal["jsonl_sha256"])):
                     selection.update(identity.encode("utf-8") + b"\0")
                 rows = admitted_frames = quarantined_frames = 0
                 scope_excluded_frames = admitted_raw_bytes = 0
-                with plain.open("rb") as stream:
+                with _jsonl_ouvert(archive, plain) as stream:
                     for line_number, line in enumerate(stream, 1):
                         rows += 1
                         record = _source_record(line)

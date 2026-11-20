@@ -6,9 +6,11 @@ materialization. Never touches GitHub, private keys, trading, or unselected asse
 """
 from __future__ import annotations
 
+import contextlib
 import gzip
 import hashlib
 import json
+import os
 import shutil
 import sys
 import zlib
@@ -108,9 +110,32 @@ def _catalog_safe_bytes(
     return expected, sorted(families)
 
 
+VAR_SCEAUX_SEULS = "ALINA_SAFE_SEAL_ONLY"
+
+
+def _sceaux_seuls(demande=None) -> bool:
+    """Mode SCEAU SEUL : prouver chaque shard sans ecrire le JSONL de 2,31 To.
+
+    POURQUOI (20/11/2026). L extraction complete reclame 2 541 100 634 405 octets quand la
+    machine en offre 756 833 452 032 : elle ne peut PAS aboutir ici, et le pont Copy-Vault
+    exigeant `SAFE_UNPACK_COMPLETE`, 1 792 577 shards restaient invisibles au labo pour
+    toujours. Ce mode garde TOUTES les verifications -- taille annoncee, validite JSON de
+    chaque ligne, saut de ligne final, re-controle du SHA de l archive -- et ecrit le meme
+    sceau `alina.safe_jsonl_proof.v1`. Il n omet QUE l ecriture du JSONL, que le pont sait
+    desormais relire en flux depuis l archive. Cout disque : ~200 octets par shard au lieu
+    de 1,4 Mo, soit ~360 Mo au total.
+    """
+    if demande is not None:
+        return bool(demande)
+    brut = os.environ.get(VAR_SCEAUX_SEULS, "").strip().lower()
+    return brut in {"1", "true", "oui", "on", "yes"}
+
+
 def expand_safe_corpus(
     destination: Path, *, catalog_sha256: str, catalog_path: Path,
+    seal_only: bool | None = None,
 ) -> dict:
+    sceaux_seuls = _sceaux_seuls(seal_only)
     destination_display = Path(destination).resolve()
     destination = _windows_io_path(destination_display)
     catalog_path = _windows_io_path(Path(catalog_path).absolute())
@@ -191,6 +216,30 @@ def expand_safe_corpus(
         selected_targets.add(target)
         if target.is_symlink() or seal.is_symlink():
             raise SafeUnpackError(f"symlinked unpack target: {target}")
+        # MODE SCEAU SEUL : le sceau existe SANS son JSONL, et c est normal -- c est tout
+        # l interet. Les controles ci-dessous supposent les deux ensemble ; appliques tels
+        # quels, ils mettraient le sceau en QUARANTAINE, donc detruiraient la preuve.
+        # La reprise se fait alors sur le sceau seul : il lie le SHA de l archive au SHA du
+        # JSONL, et le pont re-verifie LES DEUX a la lecture.
+        if sceaux_seuls:
+            if seal.is_file():
+                try:
+                    preuve = json.loads(seal.read_text(encoding="utf-8"))
+                except (OSError, UnicodeError, ValueError) as exc:
+                    raise SafeUnpackError(f"unreadable extracted proof: {seal}") from exc
+                if (preuve.get("schema") != "alina.safe_jsonl_proof.v1"
+                        or preuve.get("compressed_sha256") != compressed_sha):
+                    raise SafeUnpackError(f"stale extracted proof: {seal}")
+                reused += 1
+                continue
+            with source.open("rb") as flux:
+                flux.seek(-4, 2)
+                annonce = int.from_bytes(flux.read(4), "little")
+            if annonce == 0:
+                raise SafeUnpackError(f"invalid or ambiguous gzip ISIZE: {source}")
+            required_bytes += annonce
+            planned.append((source, target, seal, annonce, compressed_sha))
+            continue
         if target.exists() != seal.exists():
             # Interrupted crashes can occur between renaming a JSONL and
             # publishing its independent hash receipt. Never trust or delete
@@ -259,7 +308,13 @@ def expand_safe_corpus(
             seal.replace(archived_seal)
             stale_outputs += 1
     free = shutil.disk_usage(destination).free
-    if required_bytes + RESERVE_BYTES > free:
+    if sceaux_seuls and required_bytes + RESERVE_BYTES > free:
+        print(
+            f"ALINA_UNPACK_SEAL_ONLY files={len(planned)} reused={reused} "
+            f"jsonl_bytes_evites={required_bytes}",
+            file=sys.stderr, flush=True,
+        )
+    if not sceaux_seuls and required_bytes + RESERVE_BYTES > free:
         raise SafeUnpackError(
             f"insufficient disk for JSONL expansion: need {required_bytes + RESERVE_BYTES} "
             f"bytes, free {free}; compressed verified corpus preserved"
@@ -280,7 +335,10 @@ def expand_safe_corpus(
         size = 0
         last = b""
         try:
-            with gzip.open(source, "rb") as inp, tmp.open("xb") as out:
+            # En mode SCEAU SEUL on ne cree aucun fichier : contextlib.nullcontext tient la
+            # place de la sortie, et `out` vaut None -- les verifications, elles, restent toutes.
+            sortie = contextlib.nullcontext() if sceaux_seuls else tmp.open("xb")
+            with gzip.open(source, "rb") as inp, sortie as out:
                 for line in inp:
                     size += len(line)
                     if size > announced_bytes or size > MAX_SINGLE_FILE_BYTES:
@@ -293,7 +351,8 @@ def expand_safe_corpus(
                         raise SafeUnpackError(f"invalid JSONL record: {source}") from exc
                     if not isinstance(event, dict):
                         raise SafeUnpackError(f"non-object JSONL record: {source}")
-                    out.write(line)
+                    if out is not None:
+                        out.write(line)
                     sha.update(line)
                     last = line[-1:]
             if size != announced_bytes or last != b"\n":
@@ -302,7 +361,8 @@ def expand_safe_corpus(
             # catalog-bound SHA check and the end of a long extraction.
             if _hash(source) != compressed_sha:
                 raise SafeUnpackError(f"SAFE gzip modified during extraction: {source}")
-            tmp.replace(target)
+            if not sceaux_seuls:
+                tmp.replace(target)
             _json_atomic(seal, {
                 "schema": "alina.safe_jsonl_proof.v1",
                 "compressed_sha256": compressed_sha,

@@ -270,6 +270,71 @@ def test_bridge_rejects_corrupted_extracted_data(tmp_path: Path) -> None:
         build_safe_copy_workspace(tmp_path)
 
 
+def _sans_extraction(recovery: Path) -> int:
+    """Efface les JSONL extraits : il ne reste que les archives et leurs sceaux."""
+    efface = 0
+    for chemin in (recovery / "usable" / "unpacked").rglob("*.jsonl"):
+        chemin.unlink()
+        efface += 1
+    return efface
+
+
+def test_le_pont_travaille_depuis_les_ARCHIVES_quand_l_extraction_manque(tmp_path: Path) -> None:
+    """LE cas qui bloquait tout (20/11/2026).
+
+    Extraire le corpus SAFE reclame **2,31 To** quand la machine en offre 705 Go :
+    `unpack_verified_safe` refuse proprement et conserve le corpus compresse. Sans ce chemin,
+    le pont ne pouvait JAMAIS convertir, et 1 792 577 shards restaient invisibles au labo.
+    Le sceau portant les deux empreintes, on decompresse en flux et on verifie les memes
+    preuves -- sans ecrire un octet.
+    """
+    recovery = _corpus(tmp_path, [_envelope("copy_vault_fills"), _envelope("copy_vault_l2")])
+    assert _sans_extraction(recovery) == 2
+
+    report = build_safe_copy_workspace(tmp_path)
+
+    assert report["status"] == "SAFE_COPY_WORKSPACE_READY"
+    assert report["selected_shards"] == 2
+    assert report["counts"]["copy_vault_fills"] == 1
+    assert report["counts"]["copy_vault_l2"] == 1
+    workspace = Path(report["workspace"])
+    fill = json.loads((workspace / "runtime/data/vault_fills_live.jsonl").read_text())
+    assert fill["vault"] == "0xabc"
+    # Rien n a ete extrait sur disque au passage : c est tout l interet.
+    assert not list((recovery / "usable" / "unpacked").rglob("*.jsonl"))
+
+
+def test_les_deux_chemins_donnent_le_MEME_resultat(tmp_path: Path, tmp_path_factory) -> None:
+    """Lire l archive ou l extraction doit etre indiscernable : sinon la preuve differe."""
+    avec = tmp_path_factory.mktemp("avec")
+    _corpus(avec, [_envelope("copy_vault_fills"), _envelope("copy_vault_l2")])
+    r_avec = build_safe_copy_workspace(avec)
+
+    sans = tmp_path_factory.mktemp("sans")
+    recovery = _corpus(sans, [_envelope("copy_vault_fills"), _envelope("copy_vault_l2")])
+    _sans_extraction(recovery)
+    r_sans = build_safe_copy_workspace(sans)
+
+    assert r_avec["counts"] == r_sans["counts"]
+    assert r_avec["selected_shards"] == r_sans["selected_shards"]
+    # Plus fort qu un digest de selection : les fichiers PRODUITS doivent etre identiques
+    # octet pour octet. Si lire l archive donnait autre chose que lire l extraction, la
+    # preuve livree au labo differerait selon le disque disponible.
+    assert ({n: o["sha256"] for n, o in r_avec["outputs"].items()}
+            == {n: o["sha256"] for n, o in r_sans["outputs"].items()})
+    assert r_avec["catalog_sha256"] == r_sans["catalog_sha256"]
+
+
+def test_une_archive_corrompue_est_refusee_meme_sans_extraction(tmp_path: Path) -> None:
+    """La certification ne doit pas s affaiblir quand on lit en flux."""
+    recovery = _corpus(tmp_path, [_envelope("copy_vault_fills"), _envelope("copy_vault_l2")])
+    _sans_extraction(recovery)
+    archive = recovery / "usable" / "shards" / "test-release" / "safe-0.jsonl.gz"
+    archive.write_bytes(archive.read_bytes()[:-5] + b"XXXXX")
+    with pytest.raises(SafeBridgeError):
+        build_safe_copy_workspace(tmp_path)
+
+
 def test_bridge_preserves_available_shallow_l2_depth(tmp_path: Path) -> None:
     _corpus(tmp_path, [
         _envelope("copy_vault_fills"), _envelope("copy_vault_l2", shallow=True),
