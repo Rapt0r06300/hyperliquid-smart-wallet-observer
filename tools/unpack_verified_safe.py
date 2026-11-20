@@ -145,6 +145,7 @@ def expand_safe_corpus(
     # or mismatched RESTORE_REPORT/catalog. No stale green report may survive.
     _json_atomic(destination / "UNPACK_REPORT.json", {
         "schema": "alina.safe_unpack_report.v1",
+        "mode": "SEAL_ONLY" if sceaux_seuls else "FULL_JSONL",
         "status": "UNPACK_IN_PROGRESS_NOT_CERTIFIED",
         "catalog_index_sha256": catalog_sha256,
     })
@@ -221,24 +222,23 @@ def expand_safe_corpus(
         # quels, ils mettraient le sceau en QUARANTAINE, donc detruiraient la preuve.
         # La reprise se fait alors sur le sceau seul : il lie le SHA de l archive au SHA du
         # JSONL, et le pont re-verifie LES DEUX a la lecture.
-        if sceaux_seuls:
-            if seal.is_file():
-                try:
-                    preuve = json.loads(seal.read_text(encoding="utf-8"))
-                except (OSError, UnicodeError, ValueError) as exc:
-                    raise SafeUnpackError(f"unreadable extracted proof: {seal}") from exc
-                if (preuve.get("schema") != "alina.safe_jsonl_proof.v1"
-                        or preuve.get("compressed_sha256") != compressed_sha):
-                    raise SafeUnpackError(f"stale extracted proof: {seal}")
-                reused += 1
-                continue
-            with source.open("rb") as flux:
-                flux.seek(-4, 2)
-                annonce = int.from_bytes(flux.read(4), "little")
-            if annonce == 0:
-                raise SafeUnpackError(f"invalid or ambiguous gzip ISIZE: {source}")
-            required_bytes += annonce
-            planned.append((source, target, seal, annonce, compressed_sha))
+        # UN SCEAU VALIDE, SEUL, EST UNE PREUVE -- PAS UNE CORRUPTION.
+        # La regle ci-dessous ne depend PAS du mode, et c est voulu : la bascule automatique
+        # en sceau seul se decide APRES la planification (elle a besoin de `required_bytes`),
+        # donc un `if sceaux_seuls` ici ne s activerait jamais au second passage. Le code
+        # normal voyait alors un sceau orphelin, le prenait pour un plantage entre l ecriture
+        # du JSONL et celle de son recu, et le mettait EN QUARANTAINE -- detruisant la preuve
+        # qu on venait de produire. Mesure du 20/11/2026 : `reused=0` au second passage et un
+        # sceau deplace dans quarantine/unsealed_unpacked/.
+        if not target.exists() and seal.is_file() and not seal.is_symlink():
+            try:
+                preuve = json.loads(seal.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, ValueError) as exc:
+                raise SafeUnpackError(f"unreadable extracted proof: {seal}") from exc
+            if (preuve.get("schema") != "alina.safe_jsonl_proof.v1"
+                    or preuve.get("compressed_sha256") != compressed_sha):
+                raise SafeUnpackError(f"stale extracted proof: {seal}")
+            reused += 1
             continue
         if target.exists() != seal.exists():
             # Interrupted crashes can occur between renaming a JSONL and
@@ -315,9 +315,19 @@ def expand_safe_corpus(
             file=sys.stderr, flush=True,
         )
     if not sceaux_seuls and required_bytes + RESERVE_BYTES > free:
-        raise SafeUnpackError(
-            f"insufficient disk for JSONL expansion: need {required_bytes + RESERVE_BYTES} "
-            f"bytes, free {free}; compressed verified corpus preserved"
+        # BASCULE AUTOMATIQUE ET ANNONCEE (20/11/2026). Refuser ici etait un cul-de-sac : le
+        # pont Copy-Vault exige `SAFE_UNPACK_COMPLETE`, donc 1 792 577 shards restaient
+        # invisibles au labo FAUTE DE PLACE, sans qu aucune action de l operateur ne puisse y
+        # changer quoi que ce soit -- il aurait fallu 2,31 To. On bascule donc en SCEAU SEUL,
+        # qui conserve TOUTES les preuves et n omet que l ecriture du JSONL, desormais relu en
+        # flux par le pont. Ce n est pas une degradation silencieuse : le mode figure dans le
+        # rapport et dans ce message.
+        sceaux_seuls = True
+        print(
+            f"ALINA_UNPACK_SEAL_ONLY_FALLBACK need={required_bytes + RESERVE_BYTES} "
+            f"free={free} files={len(planned)} reused={reused} "
+            "raison=place_insuffisante_preuves_conservees",
+            file=sys.stderr, flush=True,
         )
     print(
         f"ALINA_UNPACK_START files={len(planned)} reused={reused} bytes={required_bytes}",
@@ -384,6 +394,7 @@ def expand_safe_corpus(
     result = {
         "schema": "alina.safe_unpack_report.v1",
         "status": "SAFE_UNPACK_COMPLETE",
+        "mode": "SEAL_ONLY" if sceaux_seuls else "FULL_JSONL",
         "catalog_index_sha256": catalog_sha256,
         "selection_scope": selection_scope,
         "selection_families": catalog_families,

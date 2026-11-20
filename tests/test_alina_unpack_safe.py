@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import collections
 import gzip
 import hashlib
 import json
@@ -45,6 +46,72 @@ def _bind_catalog(root, source, dataset_id):
         "catalog_verification": {"source_index_sha256": _digest(root)},
     }), encoding="utf-8")
 
+
+
+def _disque_insuffisant(monkeypatch):
+    """Fait croire a 1 Ko de libre : la place manque, comme sur la machine reelle."""
+    import shutil
+    Usage = collections.namedtuple("Usage", "total used free")
+    monkeypatch.setattr(shutil, "disk_usage", lambda _p: Usage(10**12, 10**12, 1024))
+
+
+def test_sans_place_on_bascule_en_SCEAU_SEUL_au_lieu_de_refuser(tmp_path, monkeypatch, capsys):
+    """LE cul-de-sac repare (20/11/2026).
+
+    Extraire le corpus reel reclame 2,31 To quand la machine en offre 705 Go. Refuser
+    laissait 1 792 577 shards INVISIBLES au labo, sans qu aucune action de l operateur ne
+    puisse y changer quoi que ce soit. On bascule desormais en sceau seul : toutes les
+    preuves sont conservees, seul le JSONL n est pas ecrit -- le pont le relit en flux.
+    """
+    fixture(tmp_path)
+    _disque_insuffisant(monkeypatch)
+
+    rapport = _expand(tmp_path)
+
+    assert rapport["status"] == "SAFE_UNPACK_COMPLETE"
+    assert rapport["mode"] == "SEAL_ONLY"
+    assert "ALINA_UNPACK_SEAL_ONLY_FALLBACK" in capsys.readouterr().err
+
+
+def test_la_bascule_ecrit_le_sceau_mais_PAS_le_jsonl(tmp_path, monkeypatch):
+    fixture(tmp_path)
+    _disque_insuffisant(monkeypatch)
+    _expand(tmp_path)
+    dossier = tmp_path / "usable" / "unpacked" / "release-one"
+    assert (dossier / "safe.jsonl.alina.json").is_file(), "le sceau doit exister"
+    assert not (dossier / "safe.jsonl").exists(), "le JSONL ne doit PAS etre ecrit"
+
+
+def test_le_sceau_de_la_bascule_porte_les_MEMES_preuves(tmp_path, monkeypatch, tmp_path_factory):
+    """Le sceau doit etre identique a celui du mode complet : sinon la preuve differe."""
+    complet = tmp_path_factory.mktemp("complet")
+    fixture(complet)
+    _expand(complet)
+    ref = json.loads((complet / "usable" / "unpacked" / "release-one"
+                      / "safe.jsonl.alina.json").read_text(encoding="utf-8"))
+
+    fixture(tmp_path)
+    _disque_insuffisant(monkeypatch)
+    _expand(tmp_path)
+    sceau = json.loads((tmp_path / "usable" / "unpacked" / "release-one"
+                        / "safe.jsonl.alina.json").read_text(encoding="utf-8"))
+
+    assert sceau == ref, "le sceau du mode sceau seul doit etre identique au mode complet"
+
+
+def test_la_reprise_en_sceau_seul_ne_met_PAS_le_sceau_en_quarantaine(tmp_path, monkeypatch):
+    """Un sceau sans son JSONL est NORMAL ici ; le code l aurait mis en quarantaine."""
+    fixture(tmp_path)
+    _disque_insuffisant(monkeypatch)
+    _expand(tmp_path)
+    rapport = _expand(tmp_path)   # second passage : il doit REUTILISER
+    assert rapport["status"] == "SAFE_UNPACK_COMPLETE"
+    quarantaine = tmp_path / "quarantine"
+    orphelins = [f for f in quarantaine.rglob("*") if f.is_file()] if quarantaine.exists() else []
+    assert not orphelins, f"le sceau a ete mis en quarantaine : {orphelins}"
+    assert rapport["reused_verified"] >= 1, "le second passage doit REUTILISER le sceau"
+    assert rapport["quarantined_unsealed_outputs"] == 0
+    assert rapport["certified_shards"] >= 1
 
 def _expand(root, *, catalog_sha256=None):
     return expand_safe_corpus(
