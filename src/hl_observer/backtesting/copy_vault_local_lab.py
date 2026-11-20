@@ -4066,6 +4066,42 @@ def _latest_daily(source: Mapping[str, Any]) -> tuple[str | None, float | None]:
     return None, None
 
 
+def _daily_du_segment(source: Mapping[str, Any], segment: str) -> float | None:
+    """Le PnL journalier net d un segment donne, ou None s il est absent/non fini."""
+    row = source.get(segment)
+    if not isinstance(row, Mapping):
+        return None
+    measured = row.get("daily_mean_net_pnl_usd")
+    if measured is None:
+        return None
+    try:
+        value = float(measured)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return value if math.isfinite(value) else None
+
+
+def _segment_commun_le_plus_profond(
+    baseline: Mapping[str, Any], candidat: Mapping[str, Any],
+) -> tuple[str | None, float | None, float | None]:
+    """Le segment le plus profond MESURE DES DEUX COTES, et ses deux chiffres.
+
+    LE DEFAUT CORRIGE (20/11/2026). La comparaison prenait le segment le plus profond
+    de CHAQUE cote, independamment : un candidat evalue jusqu au `forward` face a une
+    baseline arretee a `validation` etait declare NON COMPARABLE, alors que les deux
+    portaient un chiffre de `validation` parfaitement comparable. Pire, le recu
+    publiait alors deux montants issus de segments DIFFERENTS. On compare desormais
+    sur le plus profond segment commun -- jamais des pommes et des poires, et jamais
+    un refus de comparer quand il y a de quoi comparer.
+    """
+    for segment in ("forward", "oos", "validation", "train"):
+        valeur_baseline = _daily_du_segment(baseline, segment)
+        valeur_candidat = _daily_du_segment(candidat, segment)
+        if valeur_baseline is not None and valeur_candidat is not None:
+            return segment, valeur_baseline, valeur_candidat
+    return None, None, None
+
+
 def _improvement_receipt_payload(row: Mapping[str, Any]) -> dict[str, Any]:
     return {
         key: value for key, value in row.items()
@@ -4522,11 +4558,14 @@ def record_frozen_candidate(
         raise OSError("COPY_VAULT_IMPROVEMENT_HISTORY_SYMLINKED")
     baseline_segment, baseline_daily = _latest_daily(current_copy_vault)
     candidate_segment, candidate_daily = _latest_daily(economic_result)
-    comparable = (
-        baseline_daily is not None
-        and candidate_daily is not None
-        and baseline_segment == candidate_segment
-    )
+    # On compare sur le plus profond segment COMMUN aux deux cotes. Sans cela, deux
+    # profondeurs d evaluation differentes se refusaient mutuellement la comparaison.
+    segment_commun, commun_baseline, commun_candidat = (
+        _segment_commun_le_plus_profond(current_copy_vault, economic_result))
+    comparable = segment_commun is not None
+    if comparable:
+        baseline_segment = candidate_segment = segment_commun
+        baseline_daily, candidate_daily = commun_baseline, commun_candidat
     improvement = candidate_daily - baseline_daily if comparable else None
     comparison = (
         dict(economic_result.get("comparison"))
