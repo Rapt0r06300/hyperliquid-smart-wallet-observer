@@ -146,6 +146,10 @@ rem fenetre vide.) Cause de loin la plus frequente : du code local non committe,
 rem qu AlinaSync refuse d ecraser (fail-closed, sans reset ni stash).
 rem DECODER LE CODE, PAS EN SUPPOSER UN SEUL (20/11/2026). Ce bloc annoncait « du code local
 rem non committe » pour TOUS les codes. Releve des echecs reels de primary-sync : NEUF a
+rem 20/11/2026 au soir : un TROISIEME code est apparu, 1073807364 = 0x40010004 =
+rem DBG_TERMINATE_PROCESS, quand une mise a jour de Windows a coupe un prefligh en cours apres
+rem 464 s. Lui aussi n est PAS une panne. Deux des trois codes observes sont donc des arrets :
+rem presumer la panne par defaut etait trompeur dans deux cas sur trois.
 rem exit_code=2 (le refus fail-closed, cette cause-la) et UN a -1073741510, soit 0xC000013A =
 rem STATUS_CONTROL_C_EXIT -- une INTERRUPTION, fenetre fermee ou Ctrl+C. Ce passage-la n avait
 rem pas echoue, et une journee a ete passee a chercher un message d erreur qui n existait pas.
@@ -161,9 +165,15 @@ if not "!RC!"=="0" (
         echo         Cause : Ctrl+C, ou la fenetre a ete fermee pendant le travail.
         echo         A savoir : la restauration et la fusion REPRENNENT ou elles en etaient.
         echo         Remede : relancer, simplement. Rien n est perdu ni corrompu.
+    ) else if "!RC!"=="1073807364" (
+        echo [INTERROMPU] AlinaSync a ete TUE par l arret du systeme ^(0x40010004^).
+        echo         Cause : extinction, redemarrage, ou mise a jour de Windows.
+        echo         A savoir : la restauration et la fusion REPRENNENT ou elles en etaient.
+        echo         Remede : relancer. ^(Verifier aussi .git\index.lock, qu un arret brutal
+        echo                 peut laisser derriere lui ; POUSSER-GITHUB.cmd le signale.^)
     ) else (
         echo [ECHEC] AlinaSync s est arrete avec le code !RC!.
-        echo         Ce code n est pas l un des deux connus ^(2 = refus, -1073741510 = arret^).
+        echo         Code inconnu ^(connus : 2=refus, -1073741510=Ctrl+C, 1073807364=arret^).
         echo         Lire le detail : c est lui qui porte la cause.
     )
     echo         Detail complet : runtime\logs\launchers\ALINA_SYNC_COMPLETE.output.log
