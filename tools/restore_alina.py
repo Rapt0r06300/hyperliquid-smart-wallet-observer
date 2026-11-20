@@ -3620,9 +3620,22 @@ def restore_everything(
         report["report"] = str(report_path)
         return report
 
+    # DEUX PHASES MUETTES, MESUREES PLUTOT QUE DEVINEES (20/11/2026). Entre
+    # `VERIFY_RELEASE_INVENTORY` et `CONSERVATIVE_PREFLIGHT_COMPLETE` il y avait ~200 lignes de
+    # travail SANS une seule annonce, et un preflight y a tourne plus de 20 minutes avant
+    # d etre tue par un plafond de 900 s. J avais d abord accuse la boucle des 5 532 releases :
+    # le compteur ajoute au-dessus l a INNOCENTEE, elle prend 0,2 s. Restaient deux candidats --
+    # le groupement de 1,79 MILLION de lignes, et le scan du clone LFS. On annonce les DEUX :
+    # ce n est qu ainsi qu une prochaine execution designera le vrai coupable.
     raw_rows_by_asset: dict[tuple[str, str], list[Mapping[str, Any]]] = {}
     if profile == "replay-ready":
-        for row in replay_rows:
+        _total_lignes = len(replay_rows)
+        print(f"ALINA_RESTORE_PHASE=GROUP_REPLAY_ROWS rows={_total_lignes}",
+              file=sys.stderr, flush=True)
+        for _rang_ligne, row in enumerate(replay_rows, 1):
+            if _rang_ligne % 250_000 == 0 or _rang_ligne == _total_lignes:
+                print(f"ALINA_GROUP_REPLAY_ROWS={_rang_ligne}/{_total_lignes}",
+                      file=sys.stderr, flush=True)
             key = (
                 str(row.get("release_tag") or ""),
                 str(row.get("release_container_asset") or row.get("release_asset") or ""),
@@ -3635,7 +3648,10 @@ def restore_everything(
         int(row["size_bytes"]) for row in unverified_source_assets
     )
     prune_result: dict[str, Any] = {"assets": 0, "bytes": 0, "failures": []}
+    print("ALINA_RESTORE_PHASE=SCAN_CLONE_LFS", file=sys.stderr, flush=True)
     clone_sources = _clone_lfs_sources(clone_root, repository, releases)
+    print(f"ALINA_RESTORE_PHASE=SCAN_CLONE_LFS_COMPLETE sources={len(clone_sources)}",
+          file=sys.stderr, flush=True)
 
     # Old cached Releases must never be treated as part of the current GitHub
     # inventory or silently reintroduce formerly SAFE local materializations.
@@ -3677,6 +3693,26 @@ def restore_everything(
         pending_download_bytes = 0
         pending_retained_download_bytes = 0
         peak_staged_asset_bytes = 0
+        # LA PHASE MUETTE, ENFIN NOMMEE ET MESUREE (20/11/2026). Entre
+        # VERIFY_RELEASE_INVENTORY et la phase suivante, un preflight a tourne plus de
+        # 82 MINUTES sans une seule ligne de sortie. J ai accuse trois fois de suite la
+        # mauvaise phase : la boucle des 5 532 releases (0,2 s mesuree), le groupement de
+        # 1,79 M de lignes (0,8 s) puis le scan du clone LFS (0,0 s). Le vrai cout est ICI :
+        # ce parcours appelle _asset_ok sur chaque asset present localement, donc un
+        # SHA-256 de bout en bout du corpus -- c est le mode EXACT_SHA_SCAN, et seul
+        # --preflight-only l emprunte (le restore reel passe par le plan conservateur).
+        # Un travail de plusieurs heures DOIT s annoncer : une attente muette ne se
+        # distingue pas d un blocage, donc personne ne la cherche au bon endroit.
+        _total_assets_scan = sum(
+            len(r.get("assets")) for r in releases
+            if isinstance(r.get("assets"), list)
+        )
+        print(
+            f"ALINA_RESTORE_PHASE=EXACT_SHA_SCAN releases={len(releases)} "
+            f"assets={_total_assets_scan}",
+            file=sys.stderr, flush=True,
+        )
+        _assets_vus = 0
         for release in releases:
             tag = str(release.get("tag_name") or "")
             if not tag:
@@ -3686,6 +3722,14 @@ def restore_everything(
                 raise RestoreError(f"symlinked Release directory: {tag}")
             assets = release.get("assets")
             for asset in assets if isinstance(assets, list) else []:
+                _assets_vus += 1
+                if _assets_vus % 100 == 0 or _assets_vus == _total_assets_scan:
+                    print(
+                        f"ALINA_RESTORE_PROGRESS=EXACT_SHA_SCAN "
+                        f"{_assets_vus}/{_total_assets_scan} "
+                        f"pending_bytes={pending_download_bytes}",
+                        file=sys.stderr, flush=True,
+                    )
                 if not isinstance(asset, Mapping):
                     continue
                 name = str(asset.get("name") or "")
@@ -3732,6 +3776,11 @@ def restore_everything(
                     else:
                         pending_retained_download_bytes += remaining
 
+        print(
+            f"ALINA_RESTORE_PHASE=EXACT_SHA_SCAN_COMPLETE assets={_assets_vus} "
+            f"pending_bytes={pending_download_bytes}",
+            file=sys.stderr, flush=True,
+        )
         pending_materialization_bytes = 0
         if profile == "replay-ready":
             pending_materialization_bytes = _pending_catalog_materialization_bytes(

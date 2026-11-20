@@ -4425,4 +4425,67 @@ def test_fast_safe_inventory_changed_asset_sha_fails_closed(monkeypatch):
     )
     with pytest.raises(module.RestoreError, match="asset identity conflicts"):
         list(module.iter_releases("owner/repo", prefer_published_inventory=True))
+def test_le_preflight_annonce_et_compte_son_scan_sha_exact(
+    tmp_path, monkeypatch, capsys,
+):
+    """La phase la plus longue du preflight doit s annoncer ET se compter.
 
+    LE FAIT (20/11/2026). Un preflight a tourne plus de 82 MINUTES sans une seule ligne de
+    sortie, et le registre du harnais lui accordait 900 s en categorie << sur >> : il etait
+    donc tue a chaque passe, et son echec se lisait comme une panne. J ai accuse trois fois
+    de suite la mauvaise phase avant de mesurer -- la boucle des 5 532 releases (0,2 s), le
+    groupement de 1,79 M de lignes (0,8 s), le scan du clone LFS (0,0 s). Le cout reel est le
+    parcours ci-dessous : il SHA-256 chaque asset present localement, soit le corpus entier.
+
+    CE QUE CE TEST TIENT. Une attente muette ne se distingue pas d un blocage : l annonce et
+    le compteur sont ce qui permet de chercher au bon endroit. Le total annonce est compare
+    au nombre REEL d assets, donc un compteur qui derive echoue ici au lieu de mentir.
+    """
+    module = _module()
+    premier = b"safe-shard-un"
+    second = b"safe-shard-deux"
+    release = {"tag_name": "data-v2-deux", "assets": [
+        _asset("un.jsonl.gz", "https://example.invalid/un", premier),
+        _asset("deux.jsonl.gz", "https://example.invalid/deux", second),
+    ]}
+    monkeypatch.setattr(module, "iter_releases", lambda *_a, **_kw: iter([release]))
+    index_path = tmp_path / "DATA_INDEX.json"
+    index_path.write_text(json.dumps({"shards": [{
+        "dataset_id": "safe-un", "quality_status": "SAFE",
+        "replay_compatible": True, "validation_allowed": True,
+        "asset_verified": True, "release_tag": "data-v2-deux",
+        "release_asset": "un.jsonl.gz",
+        "release_remote_size": len(premier),
+        "release_remote_digest": "sha256:" + hashlib.sha256(premier).hexdigest(),
+        "bytes": len(premier), "sha256": hashlib.sha256(premier).hexdigest(),
+    }]}), encoding="utf-8")
+    metrics_path = tmp_path / "DATA_METRICS.json"
+    metrics_path.write_text(json.dumps({
+        "schema_version": "alina.data_metrics.v4",
+        "source_index_sha256": hashlib.sha256(index_path.read_bytes()).hexdigest(),
+        "totals": {"TOTAL_SHARDS": 1},
+    }), encoding="utf-8")
+
+    module.restore_everything(
+        "owner/repo", tmp_path / "restored", catalog_path=index_path,
+        metrics_path=metrics_path, profile="replay-ready", preflight_only=True,
+    )
+
+    erreurs = capsys.readouterr().err
+    # LE TOTAL N EST PAS len(release["assets"]). Le second asset n est pas au catalogue :
+    # l inventaire est deja ELAGUE A LA SELECTION bien avant ce parcours, et le compteur
+    # annonce donc ce qui sera REELLEMENT scanne. On ne code pas le chiffre en dur : on relie
+    # deux annonces independantes, si bien qu une derive de l une OU de l autre echoue ici.
+    marqueur = "SAFE_PLAN_READY shards="
+    assert marqueur in erreurs, "la selection ne s annonce plus :" + chr(10) + erreurs
+    annonce = erreurs.split(marqueur, 1)[1].split(chr(10), 1)[0]
+    attendus = int(annonce.split("release_assets=", 1)[1].strip())
+    assert attendus >= 1, "zero asset selectionne : le test passerait sans rien prouver"
+    assert f"ALINA_RESTORE_PHASE=EXACT_SHA_SCAN releases=1 assets={attendus}" in erreurs, (
+        "le preflight n annonce pas le mode qui lui coute des heures :" + chr(10) + erreurs)
+    assert f"ALINA_RESTORE_PHASE=EXACT_SHA_SCAN_COMPLETE assets={attendus}" in erreurs, (
+        "le parcours ne dit pas qu il a fini, ni combien d assets il a vus :"
+        + chr(10) + erreurs)
+    assert "ALINA_RESTORE_PHASE=PREFLIGHT_MATERIALIZED_SAFE_SHARDS" in erreurs, (
+        "la phase suivante s annoncait DEJA : si elle disparait, la nouvelle annonce ci-dessus "
+        "ne prouve plus qu on est bien sur le chemin EXACT_SHA_SCAN")

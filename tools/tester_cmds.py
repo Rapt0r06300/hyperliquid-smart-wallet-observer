@@ -13,6 +13,7 @@ proprement.
 Usage :
     python tools/tester_cmds.py --categorie sur     # rapides/surs (defaut)
     python tools/tester_cmds.py --categorie long    # collecteur/labo/moteur (30 min each)
+    python tools/tester_cmds.py --categorie lourd   # preflight AlinaSync (~85 min, mesure)
     python tools/tester_cmds.py --categorie tous
     python tools/tester_cmds.py --seul SUIVI_COFFRE  # un seul par son nom
     python tools/tester_cmds.py --categorie long --minutes 5   # plafond court pour un smoke
@@ -31,13 +32,27 @@ from pathlib import Path
 RACINE = Path(__file__).resolve().parents[1]
 LOGDIR = RACINE / "runtime" / "logs" / "cmd"
 
-# Registre : nom, fichier .cmd, args, timeout_s, categorie ('sur'|'long'|'danger')
-# 'long' = service continu -> plafonne puis arret propre des collecteurs.
+# Registre : nom, fichier .cmd, args, timeout_s, categorie ('sur'|'long'|'lourd'|'danger')
+# 'long'  = service continu -> plafonne puis ARRET PROPRE DES COLLECTEURS.
+# 'lourd' = travail fini mais tres long (heures) -> plafond ATTENDU, collecteurs
+#           INTOUCHES, jamais dans la passe rapide. A lancer par l operateur.
 REGISTRE: list[tuple[str, str, list[str], float, str]] = [
     ("SUIVI_COFFRE",          "SUIVI_COFFRE.cmd",                  [],            45,   "sur"),
     ("RAPPORT_COLLECTEURS",   "RAPPORT-COLLECTEURS.cmd",           [],           150,   "sur"),
     ("Certificateur_data",    "Certificateur Coffre Fort.cmd",     ["--data"],   360,   "sur"),
-    ("ALINA_SYNC_preflight",  "ALINA_SYNC_COMPLETE.cmd", ["--preflight-only"], 900,  "sur"),
+    # 20/11/2026 -- MESURE, PAS ESTIMATION. Cette entree etait classee `sur` avec
+    # 900 s. Or `--preflight-only` est le SEUL chemin qui emprunte le mode
+    # EXACT_SHA_SCAN de restore_alina : il verifie en SHA-256 chaque asset present
+    # localement, soit 21 407 assets sur 520 releases. Debit mesure apres le chemin
+    # rapide : 2,66 asset/s sur une fenetre de 1 000 assets, soit ~117 MINUTES
+    # (7 020 s) -- concordant avec un passage reel reste 82 min dans cette boucle sans
+    # produire une seule ligne. Un plafond de 900 s la tuait donc A CHAQUE PASSE, et
+    # son echec se lisait comme une panne. Le plafond retenu est ~2x le pire cas
+    # MESURE : une garde calibree au ras de la mesure n a pas de marge du tout.
+    # Elle ne pouvait pas non plus passer en `long` : cette categorie ARRETE LES
+    # COLLECTEURS apres le test, ce qui couperait une collecte en cours pour un
+    # travail qui n a rien d un service. D ou `lourd`.
+    ("ALINA_SYNC_preflight",  "ALINA_SYNC_COMPLETE.cmd", ["--preflight-only"], 14400,  "lourd"),
     ("COLLECTEUR",            "LANCER_COLLECTEURS_COPY_VAULT.cmd", [],          1800,   "long"),
     ("LABO",                  "LANCER_LAB_QUANT_COPY_VAULT.cmd",   ["once"],    1800,   "long"),
     ("MOTEUR_HYPERSMART",     "LANCER_HYPERSMART.cmd",             [],          1800,   "long"),
@@ -264,6 +279,45 @@ def _arreter_collecteurs_propre() -> str:
         return f"arret propre ECHEC : {e!r}"
 
 
+def plafond_attendu(categorie: str) -> bool:
+    """Categories dont le plafond est le DENOUEMENT PREVU, non un echec."""
+    return categorie in ("long", "lourd")
+
+
+def doit_arreter_les_collecteurs(categorie: str) -> bool:
+    """EFFET DESTRUCTIF : cet arret TUE les collecteurs en cours.
+
+    Reserve aux services continus, qu on ne peut pas laisser tourner apres leur
+    test. Un travail `lourd` n est PAS un service : lui appliquer cet arret
+    couperait une collecte de donnees irremplacable pour un simple test de lanceur.
+    """
+    return categorie == "long"
+
+
+def etat_du_resultat(resultat: dict) -> str:
+    """OK / PLAFOND / A VOIR -- et surtout : ne JAMAIS confondre les deux derniers.
+
+    LE DEFAUT (20/11/2026). Le verdict etait `code in (0, "SKIP")`, or un timeout rend
+    `code = None`. Les quatre entrees de categorie `long` sont PLAFONNEES PAR CONCEPTION
+    ("plafonne puis arret propre") : elles ressortaient donc toutes "A VOIR" a chaque passe,
+    exactement comme une vraie panne. Un outil de surveillance qui crie au loup sur le
+    comportement attendu apprend a l operateur a ignorer ses alertes -- c est pire que pas
+    d outil, et c est la troisieme fois que ce projet se fait avoir par la meme famille.
+
+    CE QUI RESTE INTACT. Un plafond n excuse rien d autre : une seule ligne CRITIQUE suffit a
+    rendre "A VOIR", et un plafond atteint par une commande de categorie `sur` reste "A VOIR"
+    -- une commande dite sure DOIT se terminer. "PLAFOND" n est pas "OK" non plus : l etat est
+    distinct, donc l operateur voit que le travail a ete coupe, jamais qu il a abouti.
+    """
+    critiques = int(resultat["comptes"]["CRITIQUE"])
+    if critiques == 0 and resultat["code"] in (0, "SKIP"):
+        return "OK"
+    if critiques == 0 and resultat.get("tue") and plafond_attendu(
+            str(resultat.get("categorie") or "")):
+        return "PLAFOND"
+    return "A VOIR"
+
+
 def tester_un(nom: str, fichier: str, args: list[str], timeout: float, categorie: str) -> dict:
     LOGDIR.mkdir(parents=True, exist_ok=True)
     ts = time.strftime("%Y%m%dT%H%M%S")
@@ -339,7 +393,7 @@ def tester_un(nom: str, fichier: str, args: list[str], timeout: float, categorie
     dt = time.time() - t0
 
     note_arret = ""
-    if categorie == "long":
+    if doit_arreter_les_collecteurs(categorie):
         note_arret = _arreter_collecteurs_propre()
 
     comptes_out, lignes_out = scanner(sortie)
@@ -372,7 +426,7 @@ def tester_un(nom: str, fichier: str, args: list[str], timeout: float, categorie
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--categorie", default="sur", choices=["sur", "long", "danger", "tous"])
+    ap.add_argument("--categorie", default="sur", choices=["sur", "long", "lourd", "danger", "tous"])
     ap.add_argument("--seul", default=None, help="tester un seul .cmd par son nom de registre")
     ap.add_argument("--minutes", type=float, default=None, help="plafond temps (minutes) pour cette passe")
     a = ap.parse_args(argv)
@@ -403,8 +457,8 @@ def main(argv: list[str] | None = None) -> int:
     lignes = [f"SOMMAIRE DES TESTS .cmd — {time.strftime('%Y-%m-%d %H:%M:%S')}", "=" * 70]
     for r in resultats:
         c = r["comptes"]
-        etat = "OK" if (c["CRITIQUE"] == 0 and r["code"] in (0, "SKIP")) else "A VOIR"
-        lignes.append(f"[{etat:6}] {r['nom']:22} exit={str(r['code']):6} "
+        etat = etat_du_resultat(r)
+        lignes.append(f"[{etat:7}] {r['nom']:22} exit={str(r['code']):6} "
                       f"dur={r['duree']:5.0f}s  CRIT={c['CRITIQUE']} ERR={c['ERREUR']} AVERT={c['AVERT']}"
                       f"  -> {r['log'].name}")
     with somm.open("a", encoding="utf-8") as fh:  # append : on garde l'historique

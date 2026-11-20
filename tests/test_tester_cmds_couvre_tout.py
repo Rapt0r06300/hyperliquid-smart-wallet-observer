@@ -46,7 +46,12 @@ def test_le_registre_ne_vise_que_des_fichiers_qui_EXISTENT():
 def test_chaque_entree_a_une_categorie_connue():
     harnais = _harnais()
     for nom, fichier, args, timeout, categorie in harnais.REGISTRE:
-        assert categorie in {"sur", "long", "danger"}, f"{nom} : categorie {categorie!r}"
+        # `lourd` ajoutee le 20/11/2026 : un travail FINI mais de plusieurs heures.
+        # `ALINA_SYNC_preflight` y est passee -- 85 min mesurees de scan SHA-256 -- car
+        # `sur` la tuait a 900 s et `long` aurait ARRETE LES COLLECTEURS apres chaque
+        # test. Une quatrieme categorie, pas un timeout gonfle dans la passe rapide.
+        assert categorie in {"sur", "long", "lourd", "danger"}, (
+            f"{nom} : categorie {categorie!r}")
         assert isinstance(args, list), nom
         assert timeout >= 0, nom
         if categorie == "danger":

@@ -177,3 +177,98 @@ def test_aucun_motif_ne_contient_de_caractere_de_controle() -> None:
     for motif in motifs:
         egares = sorted({c for c in motif if ord(c) < 32})
         assert not egares, f"caractere(s) de controle dans un motif : {[hex(ord(c)) for c in egares]}"
+# ------------------------------------------------- un plafond prevu n'est pas un echec
+
+
+def _resultat(code, *, tue=False, categorie="sur", critiques=0, erreurs=0):
+    return {"nom": "X", "code": code, "tue": tue, "categorie": categorie, "duree": 1.0,
+            "comptes": {"CRITIQUE": critiques, "ERREUR": erreurs, "AVERT": 0}}
+
+
+def test_un_service_plafonne_ne_se_lit_plus_comme_une_panne() -> None:
+    """LE DEFAUT : un timeout rend ``code = None``, donc les quatre entrees ``long`` --
+    plafonnees PAR CONCEPTION -- ressortaient toutes « A VOIR », comme une vraie panne."""
+    assert T.etat_du_resultat(
+        _resultat(None, tue=True, categorie="long")) == "PLAFOND"
+
+
+def test_plafond_ne_vaut_pas_termine() -> None:
+    """« PLAFOND » doit rester DISTINCT de « OK » : le travail a ete coupe, pas abouti."""
+    assert T.etat_du_resultat(_resultat(0)) == "OK"
+    assert T.etat_du_resultat(
+        _resultat(None, tue=True, categorie="long")) != "OK"
+
+
+def test_une_commande_dite_sure_doit_se_terminer() -> None:
+    """La moitie qui compte (1/2) : un plafond sur une categorie ``sur`` reste une alerte.
+
+    C'est exactement le cas d'``ALINA_SYNC_preflight``, classee ``sur`` avec 900 s alors
+    qu'elle scanne le corpus en SHA-256 : l'indulgence ne doit PAS s'etendre a elle.
+    """
+    assert T.etat_du_resultat(
+        _resultat(None, tue=True, categorie="sur")) == "A VOIR"
+
+
+def test_un_plafond_n_avale_jamais_une_ligne_critique() -> None:
+    """La moitie qui compte (2/2) : une seule CRITIQUE suffit, plafond ou pas."""
+    assert T.etat_du_resultat(
+        _resultat(None, tue=True, categorie="long", critiques=1)) == "A VOIR"
+
+
+def test_un_echec_avant_le_plafond_reste_un_echec() -> None:
+    """Sortir en code 2 SANS avoir ete tue n'a rien d'attendu, meme en categorie ``long``."""
+    assert T.etat_du_resultat(
+        _resultat(2, tue=False, categorie="long")) == "A VOIR"
+
+
+def test_skip_reste_accepte() -> None:
+    """Les entrees ``danger`` rendent ``"SKIP"`` : ne pas les transformer en alerte."""
+    assert T.etat_du_resultat(_resultat("SKIP", categorie="danger")) == "OK"
+
+
+# ------------------------------------- un travail lourd n'est ni un service ni un echec
+
+
+def test_un_travail_lourd_plafonne_est_attendu() -> None:
+    """`ALINA_SYNC_preflight` dure ~85 min MESUREES : son plafond est le denouement prevu."""
+    assert T.etat_du_resultat(
+        _resultat(None, tue=True, categorie="lourd")) == "PLAFOND"
+
+
+def test_un_travail_lourd_ne_tue_jamais_les_collecteurs() -> None:
+    """LE PIEGE EVITE (20/11/2026). Reclasser le preflight en `long` aurait semble naturel
+    -- et aurait ARRETE LES COLLECTEURS a chaque test, coupant une collecte de donnees
+    irremplacable pour un simple test de lanceur. L'arret reste reserve aux services.
+    """
+    assert T.doit_arreter_les_collecteurs("long") is True
+    assert T.doit_arreter_les_collecteurs("lourd") is False
+    assert T.doit_arreter_les_collecteurs("sur") is False
+    assert T.doit_arreter_les_collecteurs("danger") is False
+
+
+def test_la_passe_rapide_reste_rapide() -> None:
+    """La garde structurelle qui aurait attrape le defaut du jour.
+
+    `ALINA_SYNC_preflight` sejournait en categorie `sur` avec un plafond de 900 s pour un
+    travail de 85 minutes : la passe dite rapide ne pouvait que le tuer, a chaque fois.
+    Une passe rapide ne contient donc RIEN qui depasse 10 minutes.
+    """
+    rapides = [(nom, t) for nom, _f, _a, t, cat in T.REGISTRE if cat == "sur"]
+    assert len(rapides) >= 4, (
+        f"{len(rapides)} entree(s) rapide(s) : la regle ne couvre plus la passe")
+    trop_longs = [(nom, t) for nom, t in rapides if t > 600]
+    assert not trop_longs, (
+        "plafond > 10 min dans la passe RAPIDE (a reclasser en `lourd`) : " + str(trop_longs))
+
+
+def test_le_preflight_alinasync_est_classe_sur_sa_duree_mesuree() -> None:
+    """Le defaut precis du 20/11/2026, verrouille : categorie ET plafond."""
+    entrees = [r for r in T.REGISTRE if r[0] == "ALINA_SYNC_preflight"]
+    assert len(entrees) == 1, "entree ALINA_SYNC_preflight introuvable"
+    _nom, _fichier, _args, timeout, categorie = entrees[0]
+    assert categorie == "lourd", (
+        f"categorie {categorie!r} : un scan SHA-256 de 85 min n a sa place ni dans la "
+        "passe rapide ni parmi les services continus")
+    assert timeout >= 10800, (
+        f"plafond {timeout} s : ~117 min (7 020 s) MESUREES, et une garde se calibre sur le "
+        "pire cas mesure AVEC marge -- sinon elle tue le travail qu elle doit surveiller")
