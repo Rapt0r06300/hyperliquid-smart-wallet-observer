@@ -50,8 +50,27 @@ def remplir_en_parallele(root: str | Path, budget_s: float | None, max_essais: i
             _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
         code = _GABARIT.format(root=str(root), strat=strat, me=max_essais, bs=budget_s, out=str(out))
         fh = open(log, "w", encoding="utf-8")
-        proc = _sp.Popen([_sys.executable, "-c", code], stdout=fh, stderr=_sp.STDOUT,
-                         start_new_session=True)
+        # MEME FAMILLE QUE rattrapage_complet.py, CORRIGEE LE MEME JOUR (20/11/2026), mais
+        # ici MULTIPLIEE PAR LA BOUCLE : le journal etait ouvert AVANT `Popen`, et les
+        # descripteurs deja ouverts sont retenus dans `lances`. Si la creation d un
+        # processus echoue -- commande absente, ou machine saturee ou Windows ne peut plus
+        # creer de processus -- la fonction sort en levant et PLUS AUCUN des journaux
+        # precedents n est ferme. Sous Windows un descripteur ouvert maintient un VERROU :
+        # la passe suivante ne pourrait plus ecrire dans ces journaux, et c est justement
+        # sur une machine saturee qu on a le plus besoin de leurs traces. Fermer la copie
+        # du parent est sans danger pour les enfants deja lances : ils ont la leur.
+        try:
+            proc = _sp.Popen([_sys.executable, "-c", code], stdout=fh, stderr=_sp.STDOUT,
+                             start_new_session=True)
+        except BaseException:
+            for _journal in [fh] + [x[4] for x in lances]:
+                try:
+                    _journal.close()
+                except OSError:
+                    import logging as _lg
+                    _lg.getLogger(__name__).debug(
+                        "fermeture du journal impossible", exc_info=True)
+            raise
         lances.append((strat, proc, out, log, fh))
     print("=== %d modules cherches EN PARALLELE (sous-processus isoles, tuables) ==="
           % len(lances), flush=True)
