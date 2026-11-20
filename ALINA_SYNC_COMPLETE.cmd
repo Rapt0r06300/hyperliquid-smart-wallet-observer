@@ -144,11 +144,28 @@ rem le rappelle ici en clair. (tee_console a ete essaye puis RETIRE : sans son �
 rem bascule en mode tuyau et attend une saisie, ce qui figeait le lanceur sur une
 rem fenetre vide.) Cause de loin la plus frequente : du code local non committe,
 rem qu AlinaSync refuse d ecraser (fail-closed, sans reset ni stash).
+rem DECODER LE CODE, PAS EN SUPPOSER UN SEUL (20/11/2026). Ce bloc annoncait « du code local
+rem non committe » pour TOUS les codes. Releve des echecs reels de primary-sync : NEUF a
+rem exit_code=2 (le refus fail-closed, cette cause-la) et UN a -1073741510, soit 0xC000013A =
+rem STATUS_CONTROL_C_EXIT -- une INTERRUPTION, fenetre fermee ou Ctrl+C. Ce passage-la n avait
+rem pas echoue, et une journee a ete passee a chercher un message d erreur qui n existait pas.
 if not "!RC!"=="0" (
     echo.
-    echo [ECHEC] AlinaSync s est arrete avec le code !RC!.
-    echo         Cause habituelle : du CODE local non committe. AlinaSync ne l ecrase jamais.
-    echo         Remede : lancer POUSSER-GITHUB.cmd, puis relancer AlinaSync.
+    if "!RC!"=="2" (
+        echo [ECHEC] AlinaSync a REFUSE de synchroniser ^(code 2^).
+        echo         Cause : du CODE local non committe. AlinaSync ne l ecrase jamais,
+        echo                 et ne fait ni reset ni stash : c est voulu.
+        echo         Remede : lancer POUSSER-GITHUB.cmd, PUIS relancer AlinaSync.
+    ) else if "!RC!"=="-1073741510" (
+        echo [INTERROMPU] AlinaSync a ete ARRETE, il n a pas echoue ^(0xC000013A^).
+        echo         Cause : Ctrl+C, ou la fenetre a ete fermee pendant le travail.
+        echo         A savoir : la restauration et la fusion REPRENNENT ou elles en etaient.
+        echo         Remede : relancer, simplement. Rien n est perdu ni corrompu.
+    ) else (
+        echo [ECHEC] AlinaSync s est arrete avec le code !RC!.
+        echo         Ce code n est pas l un des deux connus ^(2 = refus, -1073741510 = arret^).
+        echo         Lire le detail : c est lui qui porte la cause.
+    )
     echo         Detail complet : runtime\logs\launchers\ALINA_SYNC_COMPLETE.output.log
     echo.
 )

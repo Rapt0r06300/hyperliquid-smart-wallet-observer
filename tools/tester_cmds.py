@@ -55,6 +55,14 @@ REGISTRE: list[tuple[str, str, list[str], float, str]] = [
 
 # Env : NO_PAUSE (pas de blocage) + MAX verbosite pour faire remonter un max d'erreurs.
 ENV_NO_PAUSE = {
+    # CV_NO_OPEN : LE BLOCAGE DE 60 MINUTES (20/11/2026). `RAPPORT-COLLECTEURS.cmd` finit en
+    # 19 s puis fait `start "" notepad ...` sur ses deux rapports -- et il garde CORRECTEMENT
+    # ces ouvertures derriere `CV_NO_OPEN`. C est le harnais qui ne posait pas la variable.
+    # Notepad herite alors du tuyau de sortie et ne le ferme JAMAIS : le lecteur attend un EOF
+    # qui n arrive pas, et la passe sure restait bloquee la, apres deux lanceurs sur douze,
+    # pendant une heure, en ouvrant des fenetres sur le bureau de l operateur. Un lanceur sain
+    # rendu intestable par l outil cense le tester.
+    "CV_NO_OPEN": "1",
     "CV_NO_PAUSE": "1", "HYPERSMART_PUSH_NO_PAUSE": "1",
     "ALINA_QUANT_NO_PAUSE": "1", "HYPERSMART_NO_PAUSE": "1",
     "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8",
@@ -63,6 +71,28 @@ ENV_NO_PAUSE = {
     "ALINA_DEBUG": "1", "ALINA_VERBOSE": "1", "CV_VERBOSE": "1",  # si les outils les respectent
 }
 
+#: Une ligne qui s annonce elle-meme comme un AVERTISSEMENT Python.
+#:
+#: 20/11/2026 — le certificateur ressortait « CRITIQUE=1 » pour cette seule ligne :
+#:
+#:     ResourceWarning: Enable tracemalloc to get the object allocation traceback
+#:
+#: Le mot `traceback` y apparait dans un CONSEIL, pas dans une trace. C est le troisieme
+#: faux positif de la meme famille en un jour (apres « 0 refus » et le champ `operation`
+#: nomme « ...critical-files... ») : le detecteur lisait du TEXTE D AIDE comme un
+#: diagnostic. La regle est principielle plutot que par mot-clef — `XxxWarning: ` est la
+#: facon dont Python declare un avertissement — et elle s applique AVANT les motifs, sans
+#: quoi CRITIQUE, qui vient en premier, gagnerait toujours.
+#:
+#: ⚠ Elle ne masque RIEN : la ligne reste comptee, en AVERT. Un vrai
+#: « Traceback (most recent call last): » ne porte aucun `Warning: ` et reste CRITIQUE.
+_AVERTISSEMENT_PYTHON = re.compile(r'\b\w*Warning: ')
+
+#: Une ligne de journal de lanceur qui declare sa propre reussite. Les deux champs sont
+#: exiges ENSEMBLE : un `status="SUCCESS"` seul pourrait accompagner un code de sortie non nul,
+#: et ce desaccord-la doit rester visible plutot que d etre masque.
+_SUCCES_DECLARE = re.compile(r'status="SUCCESS"(?=.*exit_code="0")', re.I)
+
 # Motifs d'erreur AGRESSIFS (on veut le MAX : grosses ET petites). 1re categorie qui matche gagne.
 MOTIFS = [
     ("CRITIQUE", re.compile(
@@ -70,7 +100,16 @@ MOTIFS = [
         r"n['’]est pas reconnu|is not recognized|ModuleNotFound|ImportError|SyntaxError|"
         r"NameError|AttributeError|KeyError|TypeError|ValueError|IndexError|RuntimeError|"
         r"ZeroDivision|RecursionError|MemoryError|OSError|WinError|\berrno\b|"
-        r"ALINA_\w*FAIL|\bNO_GO\b|\brefus|\bassert(ion)?\b", re.I)),
+        # UN COMPTEUR A ZERO EST UNE BONNE NOUVELLE (20/11/2026). `\brefus` classait
+        # « [candles] 1d termine : 157 bougies | 0 refus encaisse(s) » en CRITIQUE : un
+        # message de REUSSITE, et c est l ABSENCE de refus qui le declenchait. SUIVI_COFFRE
+        # ressortait ainsi avec « CRITIQUE=5 » en sortant en code 0 -- un outil de
+        # surveillance qui crie au loup apprend a l operateur a l ignorer. Les deux
+        # lookbehinds sont de largeur fixe (zero + espace, puis « aucun ») donc « 10 refus »
+        # et « 150 refus » restent attrapes : on ne remplace pas un faux positif par un
+        # faux negatif, qui serait bien pire. Verifie dans les DEUX sens par
+        # `tests/test_tester_cmds_motifs.py`.
+        r"ALINA_\w*FAIL|\bNO_GO\b|(?<!\b0 )(?<!aucun )\brefus|\bassert(ion)?\b", re.I)),
     ("ERREUR", re.compile(
         r"\bERRE?URS?\b|\bERRORS?\b|\bFAIL(ED|URE|S)?\b|\bexception\b|"
         r"returncode=[1-9]|exit code [1-9]|non[- ]?zero exit|"
@@ -91,7 +130,7 @@ def _tri_partage():
     16/11/2026 — LE VERDICT DU HARNAIS ETAIT ILLISIBLE. Les cinq lanceurs de la passe sure
     ressortaient « A VOIR » avec 5 a 12 lignes CRITIQUE chacun, et aucune n'etait reelle :
 
-    * `[candles] 1d termine : ... | 0 refus encaisse(s)` -> attrape par `refus` ;
+    * `[candles] 1d termine : ... | 0 refus encaisse(s)` -> attrape par le motif `refus` ;
     * `log_schema="3" ... operation="python-version-dependencies-critical"` -> par `CRITICAL`,
       alors que la ligne porte `status="SUCCESS"` et date du 12/11 ;
     * les rapports qui PARLENT d'erreurs (RAPPORT-COLLECTEURS imprime le journal d'erreurs) ->
@@ -122,6 +161,11 @@ def scanner(texte: str) -> tuple[dict[str, int], dict[str, list[str]]]:
     for ln in texte.splitlines():
         # Filtre partage : bruit attendu, compteurs a zero, lignes de succes, routine WS.
         if _CLASSER is not None and _CLASSER(ln) is None:
+            continue
+        if _AVERTISSEMENT_PYTHON.search(ln):
+            comptes["AVERT"] += 1
+            if len(lignes["AVERT"]) < 40:
+                lignes["AVERT"].append(ln.rstrip())
             continue
         for k, rx in MOTIFS:
             if rx.search(ln):
@@ -172,6 +216,25 @@ def scanner_logs_projet(depuis_ts: float, *, max_par_fichier: int = 60,
             continue
         lignes: list[str] = []
         for ln in data.splitlines():
+            # UNE REUSSITE DECLAREE N EST PAS UNE PANNE (20/11/2026). Le schema des lanceurs
+            # porte son verdict en clair : `status="SUCCESS"` avec `exit_code="0"`. Son champ
+            # `operation` contient des NOMS de controles -- « ...critical-files-watchdog... » --
+            # et le classifieur lisait cette ETIQUETTE comme un message d erreur. Mesure :
+            # SUIVI_COFFRE annoncait « CRITIQUE=5 » en sortant en code 0.
+            #
+            # ⚠ POURQUOI PAS LE FILTRE PARTAGE `_CLASSER` ICI : il vient de
+            # `rapport_collecteurs` et rend `None` pour tout ce qu il NE CONNAIT PAS comme
+            # evenement de collecteur. Essaye le 20/11 : il avalait `ALINA_SYNC_FAIL`, LA
+            # panne qui bloquait la synchronisation ce jour-la. « Inoffensif » et « je n ai
+            # pas su lire » ne se confondent pas, et un faux negatif sur une vraie panne est
+            # bien pire que le faux positif qu on corrige. Regle ETROITE, donc, et explicite.
+            if _SUCCES_DECLARE.search(ln):
+                continue
+            if _AVERTISSEMENT_PYTHON.search(ln):
+                comptes["AVERT"] += 1
+                if len(lignes) < max_par_fichier:
+                    lignes.append(f"[AVERT] {ln.strip()[:220]}")
+                continue
             for k, rx in MOTIFS:
                 if rx.search(ln):
                     comptes[k] += 1
