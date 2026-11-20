@@ -216,9 +216,24 @@ def executer(commande: list[str], *, root: Path, surveiller_memoire=True,
     if journal is not None:
         journal.parent.mkdir(parents=True, exist_ok=True)
         sortie_journal = journal.open("a", encoding="utf-8", errors="replace")
-    proc = subprocess.Popen(commande, cwd=str(root), env=env, stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT, text=True, encoding="utf-8",
-                            errors="replace", bufsize=1)
+    # LE JOURNAL EST DEJA OUVERT QUAND ON LANCE LE PROCESSUS (20/11/2026). Son `close()` vit
+    # dans le `finally` plus bas, mais celui-ci ne couvre PAS la creation du processus : si
+    # `Popen` leve -- commande absente, ou machine saturee ou Windows ne parvient plus a CREER
+    # un processus -- la fonction sortait en laissant le descripteur a la merci du ramasse-
+    # miettes. Observe en vrai ce jour-la, pendant le certificateur :
+    #
+    #     rattrapage_complet.py:466: ResourceWarning: unclosed file <_io.TextIOWrapper name=5>
+    #
+    # Sous Windows un descripteur qui traine maintient un VERROU sur le journal, et la tache
+    # suivante ne peut plus y ecrire. On ferme donc avant de propager, sans rien avaler.
+    try:
+        proc = subprocess.Popen(commande, cwd=str(root), env=env, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+                                errors="replace", bufsize=1)
+    except BaseException:
+        if sortie_journal is not None:
+            sortie_journal.close()
+        raise
     try:
         for ligne in proc.stdout or ():
             texte = ligne.rstrip("\n")

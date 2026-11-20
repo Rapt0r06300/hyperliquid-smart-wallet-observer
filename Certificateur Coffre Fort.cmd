@@ -67,7 +67,16 @@ echo.
 call "%CV_ROOT%tools\launcher_log.cmd" "Certificateur Coffre Fort" START preflight "certification-request" ""
 
 rem Ouvre l'ecran de suivi (%% avancement, debit, ETA) dans une fenetre separee.
-if exist "%CV_ROOT%SUIVI_COFFRE.cmd" start "" "%CV_ROOT%SUIVI_COFFRE.cmd"
+rem
+rem CV_NO_OPEN : la MEME garde que RAPPORT-COLLECTEURS.cmd applique deja (20/11/2026). Pour
+rem un humain cette fenetre est utile ; pour un harnais non interactif elle est nuisible deux
+rem fois : elle s ouvre sur le bureau sans que personne l ait demandee, et la console fille
+rem HERITE du tuyau de sortie, donc le lecteur du harnais attend un EOF qui tarde. Mesure du
+rem jour sur RAPPORT-COLLECTEURS, qui faisait la meme chose avec notepad : la passe est restee
+rem bloquee 60 MINUTES. Rien ne change pour l operateur, qui ne definit pas cette variable.
+if /I not "%CV_NO_OPEN%"=="1" (
+  if exist "%CV_ROOT%SUIVI_COFFRE.cmd" start "" "%CV_ROOT%SUIVI_COFFRE.cmd"
+)
 
 rem --- ETAPE 1 : COMPLETER. Une tache a la fois, garde memoire active, une ligne par coin a
 rem     l'ecran. L'ordre est calcule (jours-coins gagnes par seconde de requete), pas devine. ---
