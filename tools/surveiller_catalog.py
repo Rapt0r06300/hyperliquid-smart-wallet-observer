@@ -55,6 +55,11 @@ FILTRE = 0x0001 | 0x0002 | 0x0008 | 0x0010  # noms de fichier, de repertoire, ta
 SECONDES_ENTRE_DEUX_PHOTOS = 5.0
 
 
+#: Compteurs d ecriture du dernier instantane : {pid: (ecritures, instant)}. Sert a classer
+#: par activite RECENTE.
+_PRECEDENT: dict[int, tuple[int, float]] = {}
+
+
 def _photographier_processus(psutil_mod=None) -> list[dict]:
     """Les processus vivants, tries par ecritures disque -- le coupable ecrit, par definition."""
     if psutil_mod is None:
@@ -84,7 +89,23 @@ def _photographier_processus(psutil_mod=None) -> list[dict]:
             })
         except Exception:       # noqa: BLE001 - un processus peut mourir pendant le scan
             continue
-    vus.sort(key=lambda p: (-p["ecritures"], -p["octets_ecrits"]))
+    # CLASSER PAR ACTIVITE RECENTE, PAS CUMULEE (defaut constate en production le
+    # 20/11/2026). Trier sur les ecritures depuis le DEMARRAGE remonte les processus systeme
+    # anciens -- OVRServer a 131 036 557 ecritures, SearchIndexer 55 857 672 -- et ENTERRE le
+    # coupable, qui vient de naitre et n en a que quelques milliers. On compare donc chaque
+    # compteur a l instantane precedent : ce qui compte est qui ecrit MAINTENANT.
+    maintenant = time.time()
+    for p in vus:
+        avant = _PRECEDENT.get(p["pid"])
+        p["ecritures_recentes"] = (
+            p["ecritures"] - avant[0] if avant and p["ecritures"] >= 0 and avant[0] >= 0 else -1)
+        p["jeune"] = p["depuis_s"] < 120.0
+    _PRECEDENT.clear()
+    _PRECEDENT.update({p["pid"]: (p["ecritures"], maintenant) for p in vus})
+    # Un processus JEUNE sans historique est un suspect de premier plan : on le remonte.
+    vus.sort(key=lambda p: (-(p["ecritures_recentes"] if p["ecritures_recentes"] >= 0
+                              else (10 ** 9 if p["jeune"] else -1)),
+                            -p["ecritures"]))
     return vus[:12]
 
 
