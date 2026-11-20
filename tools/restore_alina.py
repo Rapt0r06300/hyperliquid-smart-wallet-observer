@@ -3699,8 +3699,14 @@ def restore_everything(
         # mauvaise phase : la boucle des 5 532 releases (0,2 s mesuree), le groupement de
         # 1,79 M de lignes (0,8 s) puis le scan du clone LFS (0,0 s). Le vrai cout est ICI :
         # ce parcours appelle _asset_ok sur chaque asset present localement, donc un
-        # SHA-256 de bout en bout du corpus -- c est le mode EXACT_SHA_SCAN, et seul
-        # --preflight-only l emprunte (le restore reel passe par le plan conservateur).
+        # SHA-256 de bout en bout du corpus : c est le mode EXACT_SHA_SCAN.
+        # QUAND L EMPRUNTE-T-ON ? Le plan conservateur qui l evite rend None des qu un
+        # plafond de telechargement existe, et `--max-download-gib` vaut 8 PAR DEFAUT.
+        # Donc : --preflight-only -> toujours ici ; --unlimited-download -> plan
+        # conservateur ; tout le reste -> ici aussi. Ce scan est sur le chemin de
+        # presque toute operation, pas seulement du preflight. (La clause
+        # `not preflight_only` du garde reste utile a l API Python, dont le plafond
+        # vaut None par defaut : un test existant en depend.)
         # Un travail de plusieurs heures DOIT s annoncer : une attente muette ne se
         # distingue pas d un blocage, donc personne ne la cherche au bon endroit.
         _total_assets_scan = sum(

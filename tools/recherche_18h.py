@@ -474,8 +474,19 @@ def boucle(root: Path, *, intervalle_s: float = 60.0, max_cycles: int | None = N
             try:
                 travail = _executer_travail(root, ident, rundir)
             except Exception as e:  # noqa: BLE001 — un échec de travail est journalisé, la boucle survit (watchdog)
-                (rundir / "logs" / "erreurs.jsonl").open("a", encoding="utf-8").write(
-                    json.dumps({"ts_ms": int(time.time() * 1000), "phase": phase, "erreur": str(e)[:200]}) + "\n")
+                # 20/11/2026 : si CETTE ecriture echouait (dossier absent, disque
+                # plein), son exception remplacait l erreur d origine et la boucle
+                # censee survivre mourait sans qu on sache pourquoi. On protege la
+                # journalisation, et on ne l avale pas en silence pour autant.
+                _journal = rundir / "logs" / "erreurs.jsonl"
+                try:
+                    _journal.parent.mkdir(parents=True, exist_ok=True)
+                    with _journal.open("a", encoding="utf-8") as flux:
+                        flux.write(json.dumps({"ts_ms": int(time.time() * 1000),
+                                               "phase": phase,
+                                               "erreur": str(e)[:200]}) + "\n")
+                except OSError as _echec_journal:
+                    print(f"[AVERT] erreur NON journalisee ({_echec_journal!r}) : {e!r}", flush=True)
         battre_coeur(rundir, {"phase": phase, "elapsed_h": round(elapsed / 3600.0, 3), "cycle": cycles,
                               **_compteurs(rundir)})
         cycles += 1

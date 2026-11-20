@@ -108,5 +108,9 @@ else:
 out={"measurable":len(meas),"train":len(train),"test":len(test),
      "rows":[{"exit":x,"entry":e,"train":a,"test":b} for x,e,a,b in rows],
      "robust":[{"exit":x,"entry":e,"train":a,"test":b} for x,e,a,b in robust]}
-open("runtime/scenarios/segment_analysis.json","w").write(json.dumps(out,indent=2))
+# `open(p, "w")` TRONQUE des l ouverture : si json.dumps echouait, le resultat
+# precedent etait detruit et remplace par un fichier VIDE. On serialise d abord.
+texte = json.dumps(out, indent=2)
+with open("runtime/scenarios/segment_analysis.json", "w", encoding="utf-8") as flux:
+    flux.write(texte)
 print("\n-> runtime/scenarios/segment_analysis.json")

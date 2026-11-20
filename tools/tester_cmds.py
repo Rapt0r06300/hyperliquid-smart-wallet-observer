@@ -41,8 +41,8 @@ REGISTRE: list[tuple[str, str, list[str], float, str]] = [
     ("RAPPORT_COLLECTEURS",   "RAPPORT-COLLECTEURS.cmd",           [],           150,   "sur"),
     ("Certificateur_data",    "Certificateur Coffre Fort.cmd",     ["--data"],   360,   "sur"),
     # 20/11/2026 -- MESURE, PAS ESTIMATION. Cette entree etait classee `sur` avec
-    # 900 s. Or `--preflight-only` est le SEUL chemin qui emprunte le mode
-    # EXACT_SHA_SCAN de restore_alina : il verifie en SHA-256 chaque asset present
+    # 900 s. Or `--preflight-only` emprunte TOUJOURS le mode EXACT_SHA_SCAN de
+    # restore_alina : il verifie en SHA-256 chaque asset present
     # localement, soit 21 407 assets sur 520 releases. Debit mesure apres le chemin
     # rapide : 2,66 asset/s sur une fenetre de 1 000 assets, soit ~117 MINUTES
     # (7 020 s) -- concordant avec un passage reel reste 82 min dans cette boucle sans

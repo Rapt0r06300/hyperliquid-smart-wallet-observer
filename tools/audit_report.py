@@ -2865,7 +2865,14 @@ def write_report():
     try:
         REPORT.parent.mkdir(parents=True, exist_ok=True)
         tmp = str(REPORT) + ".tmp"
-        io.open(tmp, "w", encoding="utf-8").write(build_report())
+        # 20/11/2026 : `io.open(...).write(...)` fermait le fichier APRES
+        # l instruction, et une exception levee a la FERMETURE (disque plein, quota)
+        # est ignoree par Python. `os.replace` publiait alors un rapport TRONQUE
+        # comme s il etait complet. Le contenu est aussi construit AVANT l ouverture :
+        # un `build_report()` qui echoue ne doit pas laisser de .tmp vide derriere lui.
+        contenu = build_report()
+        with io.open(tmp, "w", encoding="utf-8") as flux:
+            flux.write(contenu)
         os.replace(tmp, REPORT)                       # ecriture atomique : jamais de fichier tronque
     except Exception as e:                                              # noqa: BLE001
         print(f"   [!] impossible d'ecrire le rapport : {e}", flush=True)

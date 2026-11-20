@@ -492,7 +492,15 @@ def executer_cycle(root: Path, rundir: Path, *, cycle: int, code_sha: str,
             progress_callback=_prog_pipeline,
         )   # AF-P3 : UN portefeuille pour tout le run
     except Exception as e:  # noqa: BLE001 — un cycle qui échoue est journalisé, la boucle continue
-        (rundir / "errors.csv").open("a", encoding="utf-8").write("%d,%s\n" % (cycle, str(e)[:160].replace(",", ";")))
+        # 20/11/2026 : journaliser une erreur ne doit jamais pouvoir REMPLACER cette
+        # erreur. Si l ecriture echoue, on le dit au lieu de perdre les deux.
+        _journal = rundir / "errors.csv"
+        try:
+            _journal.parent.mkdir(parents=True, exist_ok=True)
+            with _journal.open("a", encoding="utf-8") as flux:
+                flux.write("%d,%s\n" % (cycle, str(e)[:160].replace(",", ";")))
+        except OSError as _echec_journal:
+            print(f"[AVERT] erreur NON journalisee ({_echec_journal!r}) : {e!r}", flush=True)
         resume = {"erreur": str(e)[:160]}
     interrompu = interrompu or bool(stop_event is not None and stop_event.is_set())
     # PT-7 : ne persiste comme « vues » que les variantes ayant atteint un résultat TERMINAL (préregistrées).
