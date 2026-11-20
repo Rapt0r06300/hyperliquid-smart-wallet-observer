@@ -191,8 +191,37 @@ def scanner(texte: str) -> tuple[dict[str, int], dict[str, list[str]]]:
     return comptes, lignes
 
 
+def empreinte_logs_projet() -> dict[str, int]:
+    """La TAILLE de chaque log du projet AVANT le run.
+
+    LE DEFAUT MESURE (20/11/2026). `scanner_logs_projet` filtrait les FICHIERS par
+    date de modification, puis lisait 600 Ko de QUEUE de chacun. Un journal
+    append-only comme `runtime/logs/launchers/ALINA_SYNC_COMPLETE.log` suffisait donc
+    a rejouer TOUT son passe des qu une seule ligne y etait ajoutee : un passage du
+    preflight a rapporte **128 erreurs**, datees du 14/11, 16/11, 19/11 et du matin du
+    20/11 -- c est-a-dire les refus deja connus et deja expliques. Le compte ne pouvait
+    que croitre, a jamais, et un controle qui crie au loup apprend a l operateur a
+    l ignorer. On ne lira desormais que les octets AJOUTES pendant le run.
+    """
+    base = RACINE / "runtime" / "logs"
+    tailles: dict[str, int] = {}
+    if not base.exists():
+        return tailles
+    try:
+        fichiers = list(base.rglob("*.log"))
+    except OSError:
+        return tailles
+    for chemin in fichiers:
+        try:
+            tailles[str(chemin.resolve())] = chemin.stat().st_size
+        except OSError:
+            continue
+    return tailles
+
+
 def scanner_logs_projet(depuis_ts: float, *, max_par_fichier: int = 60,
-                        tail_octets: int = 600_000):
+                        tail_octets: int = 600_000,
+                        tailles_avant: dict[str, int] | None = None):
     """Scanne runtime/logs/*.log MODIFIES pendant le run pour un MAX d'erreurs.
 
     C'est la que vivent les vraies erreurs des collecteurs (pas dans le stdout).
@@ -222,10 +251,23 @@ def scanner_logs_projet(depuis_ts: float, *, max_par_fichier: int = 60,
             continue
         if st.st_mtime < depuis_ts - 2:   # modifie pendant ce run seulement
             continue
+        # Seuls les octets AJOUTES pendant le run. Un fichier absent de l empreinte a
+        # ete CREE pendant le run : tout son contenu est neuf, donc on part de 0.
+        depart = 0
+        if tailles_avant is not None:
+            try:
+                depart = int(tailles_avant.get(str(p.resolve()), 0))
+            except OSError:
+                depart = 0
+            if st.st_size <= depart:
+                continue                      # rien n a ete ajoute
+        else:
+            depart = max(0, st.st_size - tail_octets)
+        # Plafond de lecture conserve : un ajout enorme ne doit pas tout charger.
+        depart = max(depart, st.st_size - tail_octets)
         try:
             with p.open("rb") as fh:
-                if st.st_size > tail_octets:
-                    fh.seek(-tail_octets, os.SEEK_END)
+                fh.seek(depart)
                 data = fh.read().decode("utf-8", "replace")
         except OSError:
             continue
@@ -320,6 +362,8 @@ def etat_du_resultat(resultat: dict) -> str:
 
 def tester_un(nom: str, fichier: str, args: list[str], timeout: float, categorie: str) -> dict:
     LOGDIR.mkdir(parents=True, exist_ok=True)
+    # Empreinte AVANT tout lancement : la reference de << ce qui est neuf >>.
+    tailles_avant = empreinte_logs_projet()
     ts = time.strftime("%Y%m%dT%H%M%S")
     log = LOGDIR / f"{nom}__{ts}.log"
     cible = RACINE / fichier
@@ -397,7 +441,7 @@ def tester_un(nom: str, fichier: str, args: list[str], timeout: float, categorie
         note_arret = _arreter_collecteurs_propre()
 
     comptes_out, lignes_out = scanner(sortie)
-    logs_proj, comptes_proj = scanner_logs_projet(t0)
+    logs_proj, comptes_proj = scanner_logs_projet(t0, tailles_avant=tailles_avant)
     comptes = {k: comptes_out[k] + comptes_proj[k] for k in comptes_out}
     pied = ["", "=" * 70,
             f"fin        : exit={code}{'  (PLAFOND TEMPS -> arret)' if tue else ''}",

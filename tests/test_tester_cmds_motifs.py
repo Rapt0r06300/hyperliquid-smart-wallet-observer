@@ -272,3 +272,63 @@ def test_le_preflight_alinasync_est_classe_sur_sa_duree_mesuree() -> None:
     assert timeout >= 10800, (
         f"plafond {timeout} s : ~117 min (7 020 s) MESUREES, et une garde se calibre sur le "
         "pire cas mesure AVEC marge -- sinon elle tue le travail qu elle doit surveiller")
+
+
+# ------------------------- un journal append-only ne doit pas rejouer son PASSE
+
+
+def _journal(tmp_path, nom, contenu):
+    chemin = tmp_path / "runtime" / "logs" / "launchers" / nom
+    chemin.parent.mkdir(parents=True, exist_ok=True)
+    chemin.write_text(contenu, encoding="utf-8")
+    return chemin
+
+
+def _scanner(monkeypatch, tmp_path, tailles_avant):
+    monkeypatch.setattr(T, "RACINE", tmp_path)
+    import time as _t
+    return T.scanner_logs_projet(_t.time() - 3600, tailles_avant=tailles_avant)
+
+
+def test_les_erreurs_ANCIENNES_ne_sont_plus_recomptees(tmp_path, monkeypatch) -> None:
+    """LE DEFAUT MESURE : un passage du preflight a rapporte 128 erreurs, toutes datees
+    des jours precedents. Le filtre portait sur la DATE DU FICHIER, puis lisait 600 Ko de
+    queue : un journal append-only rejouait tout son passe des qu une ligne y etait
+    ajoutee. Le compte ne pouvait que croitre, a jamais.
+    """
+    passe = "ALINA_SYNC_FAIL: git merge failed (exit 1)" + chr(10)
+    journal = _journal(tmp_path, "ALINA_SYNC_COMPLETE.log", passe * 5)
+    avant = {str(journal.resolve()): journal.stat().st_size}
+    with journal.open("a", encoding="utf-8") as fh:
+        fh.write("tout va bien, rien a signaler" + chr(10))
+    trouve, comptes = _scanner(monkeypatch, tmp_path, avant)
+    assert comptes["CRITIQUE"] == 0 and comptes["ERREUR"] == 0, (
+        f"erreurs du PASSE recomptees : {comptes} / {trouve}")
+
+
+def test_une_erreur_AJOUTEE_pendant_le_run_est_vue(tmp_path, monkeypatch) -> None:
+    """La moitie qui compte : borner la lecture ne doit JAMAIS rendre muet sur du neuf."""
+    journal = _journal(tmp_path, "ALINA_SYNC_COMPLETE.log", "historique calme" + chr(10))
+    avant = {str(journal.resolve()): journal.stat().st_size}
+    with journal.open("a", encoding="utf-8") as fh:
+        fh.write("ALINA_SYNC_FAIL: git merge failed (exit 1)" + chr(10))
+    trouve, comptes = _scanner(monkeypatch, tmp_path, avant)
+    assert sum(comptes.values()) >= 1, (
+        f"une erreur AJOUTEE pendant le run est passee inapercue : {comptes}")
+
+
+def test_un_journal_CREE_pendant_le_run_est_lu_en_entier(tmp_path, monkeypatch) -> None:
+    """Absent de l empreinte = cree pendant le run : tout son contenu est neuf."""
+    _journal(tmp_path, "nouveau.log", "ALINA_SYNC_FAIL: git merge failed" + chr(10))
+    trouve, comptes = _scanner(monkeypatch, tmp_path, {})
+    assert sum(comptes.values()) >= 1, (
+        f"un journal cree pendant le run a ete ignore : {comptes}")
+
+
+def test_sans_empreinte_le_comportement_reste_celui_d_avant(tmp_path, monkeypatch) -> None:
+    """Appelee sans empreinte, la fonction garde son ancien comportement (queue bornee) :
+    le correctif ne change que le chemin du harnais, qui lui en fournit toujours une.
+    """
+    _journal(tmp_path, "vieux.log", "ALINA_SYNC_FAIL: git merge failed" + chr(10))
+    _trouve, comptes = _scanner(monkeypatch, tmp_path, None)
+    assert sum(comptes.values()) >= 1
