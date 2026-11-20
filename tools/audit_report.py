@@ -163,8 +163,14 @@ def _run(cmd, timeout=3600):
 
 # Dossiers JAMAIS scannes (donnees, artefacts, dependances). Tout le reste est AUTO-DECOUVERT :
 # un nouveau paquet cree a la racine sera pris en compte SANS toucher a ce script.
+# `site-packages` : LA DISTRIBUTION PYTHON EMBARQUEE (20/11/2026). `tools/python/` contient
+# 5 896 fichiers tiers, et aucune partie de leur chemin n etait exclue. Mesure sur la regle
+# `datetime.now() sans fuseau` : 107 signalements, dont 12 seulement dans le code du projet
+# -- 89 % de bruit qu on ne peut PAS corriger, et qui change a chaque mise a jour de
+# dependance. Un controle noye dans du bruit tiers apprend a l operateur a l ignorer.
 EXCLUDED_DIRS = {
     ".git", ".github", "runtime", "logs", "data", "archive", "docs", "config",
+    "site-packages",
     ".venv", "venv", "node_modules", "__pycache__", ".pytest_cache", ".ruff_cache",
     ".mypy_cache", "build", "dist", "htmlcov",
 }
@@ -188,8 +194,20 @@ SELF_FILES = {"tools/audit_report.py"}          # l'auditeur contient les motifs
                                                 #  ne doit pas se denoncer lui-meme.
 
 
+#: MESURE DU 20/11/2026 : la marche de repertoires coute 52,0 s (tools/ contient la
+#: distribution Python embarquee ET une installation Git complete), alors que LIRE les
+#: 5 429 fichiers retenus ne coute que 0,5 s pour 34,4 Mo. Or `regex_rule` rappelait cette
+#: fonction a CHAQUE regle : 42 regles x 52 s = ~37 MINUTES a enumerer les memes chemins.
+#: Le cache est sain ici : l audit est un processus a usage unique, et les dossiers balayes
+#: ne changent pas pendant son execution (son rapport s ecrit sous runtime/, exclu).
+_CACHE_FICHIERS: dict[tuple, list] = {}
+
+
 def _py_files(*dirs):
     """Sans argument -> AUTO-DECOUVERTE (tout le code du projet, y compris les nouveaux paquets)."""
+    _cle = tuple(dirs)
+    if _cle in _CACHE_FICHIERS:
+        return list(_CACHE_FICHIERS[_cle])
     if not dirs:
         dirs = tuple(code_dirs())
     out = []
@@ -200,8 +218,10 @@ def _py_files(*dirs):
                     if not set(f.parts) & EXCLUDED_DIRS]
     if not dirs or set(dirs) == set(code_dirs()):
         out += [f for f in ROOT.glob("*.py")]          # scripts .py poses a la racine
-    return sorted({f for f in out
-                   if _rel(f).replace(os.sep, "/") not in SELF_FILES})
+    _resultat = sorted({f for f in out
+                        if _rel(f).replace(os.sep, "/") not in SELF_FILES})
+    _CACHE_FICHIERS[_cle] = _resultat
+    return list(_resultat)
 
 
 def _rel(p):
@@ -1253,7 +1273,11 @@ c_print_prod = regex_rule(
 
 c_naive_datetime = regex_rule(
     "datetime.now() sans fuseau (bug d'horodatage)",
-    r"datetime\.now\(\s*\)", why="un timestamp sans TZ fausse la fraicheur des signaux")
+    r"datetime\.now\(\s*\)", why="un timestamp sans TZ fausse la fraicheur des signaux",
+    # 9 des 12 occurrences du projet etaient des `.strftime(...)` : un horodatage FORMATE
+    # pour l affichage ou un nom de fichier ne fausse aucune fraicheur de signal. Ne restent
+    # signalees que les lignes qui PRODUISENT un instant (`.timestamp()`, arithmetique).
+    line_exclude=("strftime",))
 
 c_abs_path = regex_rule(
     "Chemins absolus en dur (casse sur une autre machine)",

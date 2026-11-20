@@ -187,6 +187,12 @@ def _get_with_bounded_retries(url: str, *, headers: dict[str, str], **kwargs: An
     after a 429/5xx is an error, not an empty or complete dataset.
     """
 
+    # DURCISSEMENT DU 20/11/2026 (pas un bug observe). Les deux appelants actuels passent
+    # `timeout=DEFAULT_TIMEOUT`, mais la signature `**kwargs` laisse un futur appelant
+    # l'omettre -- et un appel HTTPS sans delai d'attente ne revient JAMAIS. Un collecteur
+    # fige ne se distingue pas d'un collecteur lent : c'est exactement la panne muette
+    # qu'on a passe la journee a traquer ailleurs.
+    kwargs.setdefault("timeout", DEFAULT_TIMEOUT)
     last_error: requests.RequestException | None = None
     for attempt in range(MAX_TRANSIENT_ATTEMPTS):
         try:

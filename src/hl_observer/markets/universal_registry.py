@@ -6,7 +6,7 @@ import json
 import os
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -274,7 +274,11 @@ class UniversalMarketRegistry:
         if observed_at_ms is None and markets:
             observed_at_ms = _iso_ms(getattr(markets[0], "discovered_at", None))
         if observed_at_ms is None:
-            observed_at_ms = int(datetime.now().timestamp() * 1000)
+            # 20/11/2026 : un instant sans fuseau est NAIF, donc interprete en heure
+            # LOCALE par `.timestamp()`. Pendant un changement d heure, l heure locale
+            # est ambigue : l horodatage d observation pouvait etre faux d UNE HEURE,
+            # et il est compare a des horodatages de marche. L UTC ne connait pas ce cas.
+            observed_at_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
         return self.apply_snapshot(
             (
                 {

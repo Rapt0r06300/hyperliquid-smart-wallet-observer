@@ -433,7 +433,10 @@ def _section_sante(data_dir: Path) -> list[str]:
 
 
 def generer(root: Path, *, fenetre_h: float = FENETRE_H_DEFAUT) -> Path:
-    now = datetime.datetime.now().timestamp()
+    # 20/11/2026 : cet instant sert a mesurer l AGE des journaux (fenetre de N heures).
+    # Un instant sans fuseau est naif, donc lu en heure LOCALE : pendant un changement
+    # d heure, l age pouvait sauter d UNE HEURE et sortir des journaux de la fenetre.
+    now = datetime.datetime.now(datetime.timezone.utc).timestamp()
     data_dir = root / "runtime" / "data"
     logs_dir = root / "runtime" / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
