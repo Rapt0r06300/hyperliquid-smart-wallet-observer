@@ -217,8 +217,19 @@ def synchronize_main(root: Path, *, update: bool = True) -> str:
     # et une divergence reelle passe toujours par `merge --ff-only`, qui echoue plutot que
     # de rattraper l'historique par un rebase automatique.
     if head != remote_sha:
+        # PREVENIR AVANT LE SILENCE (demande de l operateur, 20/11/2026). `git merge` n ecrit
+        # RIEN tant qu il n a pas fini, et sur ce depot de 1,9 M de fichiers suivis il brule
+        # ~848 s de CPU : l ecran reste fige 15 a 30 minutes. Sans cet avertissement, rien ne
+        # distingue « ca fusionne » de « c est plante » -- et on finit par l interrompre, ce
+        # qui est arrive aujourd hui (exit 143, fusion tuee a mi-chemin).
+        print(
+            f"ALINA_SYNC_PHASE=MERGE_START depuis={head[:12]} vers={remote_sha[:12]} "
+            "attendu=15_a_30_min ecran_muet=normal_git_merge_n_affiche_rien",
+            file=sys.stderr, flush=True,
+        )
         _git(root, "merge", "--ff-only", "refs/remotes/origin/main")
         head = _git(root, "rev-parse", "HEAD")
+        print("ALINA_SYNC_PHASE=MERGE_COMPLETE", file=sys.stderr, flush=True)
     if head != remote_sha:
         raise SyncError("main is not identical to the fetched origin/main")
     return head

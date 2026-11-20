@@ -197,7 +197,19 @@ def expand_safe_corpus(
     reused = 0
     quarantined_unsealed = 0
     required_bytes = 0
-    for source in sources:
+    # UN ECRAN FIGE NE DIT PAS S IL TRAVAILLE (demande de l operateur, 20/11/2026).
+    # Cette planification re-hache les 133 Go d archives AVANT la premiere ligne de sortie :
+    # mesure du jour, plus de 30 minutes de silence complet, pendant lesquelles il est
+    # impossible de distinguer « ca verifie » de « c est plante ». On a passe la nuit sur
+    # cette ambiguite. Un battement regulier coute trois lignes et la supprime.
+    _total_a_planifier = len(sources)
+    for _rang, source in enumerate(sources, 1):
+        if _rang == 1 or _rang % 25_000 == 0 or _rang == _total_a_planifier:
+            print(
+                f"ALINA_UNPACK_PLANNING={_rang}/{_total_a_planifier} "
+                f"deja_scelles={reused} (verification des empreintes, aucune ecriture)",
+                file=sys.stderr, flush=True,
+            )
         if source.is_symlink() or source.parent.is_symlink() or not source.is_file():
             raise SafeUnpackError(f"unsafe source: {source}")
         catalog_identity = expected_gz.get(source)
