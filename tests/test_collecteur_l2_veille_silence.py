@@ -61,3 +61,48 @@ def test_la_primitive_du_projet_est_bien_celle_utilisee() -> None:
     from hl_observer.feed_integrity import idle_socket_watchdog as W
     assert C.etat_socket is W.etat_socket, (
         "le collecteur n'appelle plus la primitive du projet : un doublon aurait ete cree")
+
+
+# ----------------------------- un abonnement ENVOYE n'est pas un abonnement ACQUITTE
+
+
+def _reponse(coin, type_abonnement="l2Book", methode="subscribe"):
+    return {"channel": "subscriptionResponse",
+            "data": {"method": methode,
+                     "subscription": {"type": type_abonnement, "coin": coin}}}
+
+
+def test_un_acquittement_l2_est_reconnu() -> None:
+    """LE FAUX SUCCES CORRIGE : le journal annoncait << N l2Book souscrits >> alors qu il
+    ne prouvait QUE l envoi. Un abonnement refuse ou perdu ne se voyait nulle part, et la
+    lane collectait zero carnet sur ce coin EN SILENCE. L accuse de reception etait meme
+    recu puis JETE par le filtre `channel != l2Book`.
+    """
+    assert C.acquittement_l2(_reponse("btc")) == "BTC"
+    assert C.acquittement_l2(_reponse("ETH")) == "ETH"
+
+
+def test_ce_qui_n_est_pas_un_acquittement_l2_est_refuse() -> None:
+    """La moitie qui compte : confondre une autre trame avec un ACK rendrait l etat faux."""
+    assert C.acquittement_l2(_reponse("BTC", type_abonnement="userFills")) is None
+    assert C.acquittement_l2(_reponse("BTC", methode="unsubscribe")) is None
+    assert C.acquittement_l2({"channel": "l2Book", "data": {}}) is None
+    assert C.acquittement_l2({"channel": "subscriptionResponse"}) is None
+    assert C.acquittement_l2(_reponse(None)) is None
+    assert C.acquittement_l2(None) is None
+    assert C.acquittement_l2("pas un dictionnaire") is None
+
+
+def test_l_etat_des_abonnements_est_celui_du_projet() -> None:
+    """Le cablage doit utiliser la primitive `feed_integrity`, pas une copie locale.
+
+    Et elle est fail-closed : un ACK sans demande prealable n active RIEN.
+    """
+    from hl_observer.feed_integrity import subscription_ack_state as S
+    assert C.EtatAbonnements is S.EtatAbonnements
+    etat = C.EtatAbonnements()
+    assert etat.acquitter("BTC")["ok"] is False, "un ACK sans demande a active un canal"
+    etat.demander("BTC")
+    assert etat.est_actif("BTC") is False, "demande != actif"
+    etat.acquitter("BTC")
+    assert etat.actifs() == {"BTC"}

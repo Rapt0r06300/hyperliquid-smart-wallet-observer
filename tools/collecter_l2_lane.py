@@ -33,6 +33,8 @@ from hl_observer.instrument_identity import preserve_native_instrument_symbol  #
 from hl_observer.collection.univers_perps import charger_univers, filtrer_abonnables  # noqa: E402
 from hl_observer.feed_integrity.idle_socket_watchdog import (  # noqa: E402
     MORT, etat_socket)
+from hl_observer.feed_integrity.subscription_ack_state import (  # noqa: E402
+    EtatAbonnements)
 
 WS_URL = "wss://api.hyperliquid.xyz/ws"
 OUT_DEFAUT = Path("runtime") / "data" / "copy_vault_l2_lane.jsonl"
@@ -224,6 +226,24 @@ class LaneL2:
 SILENCE_DIAGNOSTIC_MS = 120_000.0
 
 
+def acquittement_l2(msg) -> str | None:
+    """Le coin acquitte par une reponse d abonnement l2Book, ou None.
+
+    Meme convention que `wallets/user_fills_live.user_fills_subscription_ack` :
+    canal `subscriptionResponse`, methode `subscribe`, type d abonnement attendu.
+    """
+    if not isinstance(msg, dict) or msg.get("channel") != "subscriptionResponse":
+        return None
+    data = msg.get("data")
+    if not isinstance(data, dict) or data.get("method") != "subscribe":
+        return None
+    abonnement = data.get("subscription")
+    if not isinstance(abonnement, dict) or abonnement.get("type") != "l2Book":
+        return None
+    coin = abonnement.get("coin")
+    return str(coin).upper() if coin else None
+
+
 def diagnostic_silence(dernier_message_ms, now_ms,
                       *, timeout_ms: float = SILENCE_DIAGNOSTIC_MS) -> str | None:
     """Rend une ligne a imprimer si le socket est juge MORT, sinon None.
@@ -253,13 +273,21 @@ async def _connexion(lane: LaneL2, coins: list[str], socket_id: str, deadline: f
                 # Une identité PAR connexion WebSocket : deux carnets de connexions différentes ne
                 # prouvent pas la continuité du flux entre eux.
                 connexion_id = "l2-lane-" + uuid.uuid4().hex
+                abonnements = EtatAbonnements()
                 for c in coins:
+                    abonnements.demander(str(c).upper())
                     await ws.send(json.dumps({"method": "subscribe",
                                               "subscription": {"type": "l2Book", "coin": c}}))
                     await asyncio.sleep(0.05)
-                print(f"[l2-lane] socket {socket_id} : {len(coins)} l2Book souscrits", flush=True)
+                # FAUX SUCCES CORRIGE (20/11/2026) : ce message annoncait
+                # << souscrits >> alors qu il ne prouvait QUE l envoi. Un abonnement
+                # refuse ou perdu ne se voyait nulle part -- la lane collectait zero
+                # carnet sur ce coin, en silence. L etat devient ACTIF seulement sur
+                # acquittement explicite de la venue (primitive du projet).
+                print(f"[l2-lane] socket {socket_id} : {len(coins)} l2Book DEMANDES (acquittements attendus)", flush=True)
                 dernier_message_ms = int(time.time() * 1000)
                 silence_signale = False
+                acquittes_signale = False
                 while time.monotonic() < deadline:
                     reste = max(0.0, deadline - time.monotonic())
                     try:
@@ -270,6 +298,12 @@ async def _connexion(lane: LaneL2, coins: list[str], socket_id: str, deadline: f
                         ligne = diagnostic_silence(dernier_message_ms,
                                                    int(time.time() * 1000))
                         if ligne is not None and not silence_signale:
+                            manquants = sorted(
+                                {str(c).upper() for c in coins} - abonnements.actifs())
+                            if manquants:
+                                ligne += (" | abonnements JAMAIS acquittes : %d/%d %s"
+                                          % (len(manquants), len(coins),
+                                             manquants[:8]))
                             print(ligne, flush=True)   # une fois par episode
                             silence_signale = True
                         continue
@@ -279,6 +313,14 @@ async def _connexion(lane: LaneL2, coins: list[str], socket_id: str, deadline: f
                     try:
                         msg = json.loads(brut)
                     except ValueError:
+                        continue
+                    coin_acquitte = acquittement_l2(msg)
+                    if coin_acquitte is not None:
+                        abonnements.acquitter(coin_acquitte)
+                        if (not acquittes_signale
+                                and len(abonnements.actifs()) == len(coins)):
+                            print(f"[l2-lane] socket {socket_id} : {len(coins)}/{len(coins)} l2Book ACQUITTES", flush=True)
+                            acquittes_signale = True
                         continue
                     if not isinstance(msg, dict) or msg.get("channel") != "l2Book":
                         continue
