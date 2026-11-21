@@ -234,3 +234,108 @@ def test_la_regle_est_bien_branchee_dans_le_plan_bloquant():
     assert "c_interpreteur_conforme_aux_requirements," in source, (
         'la regle n est pas listee dans `plan` : elle ne tournera jamais'
     )
+
+
+# ------------------------------------------------- le GARDE n'est plus accuse (discriminant AST)
+def test_un_litteral_exchange_examine_n_est_pas_un_chemin_d_execution():
+    """Mesure du 21/11/2026 : la regle 13 rougissait sur le seul garde du depot.
+
+    `if "/exchange" in url` EXAMINE la chaine ; une chaine assignee, concatenee ou
+    passee a une requete l'EMPLOIE. Seul le second cas est une porte.
+    """
+    m = _audit()
+    assert m._lignes_exchange_utilisees(
+        'if "/exchange" in url.casefold():\n    raise ValueError("refuse")\n') == set()
+    assert m._lignes_exchange_utilisees('if "/exchange" not in url:\n    pass\n') == set()
+    assert m._lignes_exchange_utilisees('URL = "/exchange"\n') == {1}
+    assert m._lignes_exchange_utilisees(
+        'import urllib.request\nurllib.request.urlopen(BASE + "/exchange")\n') == {2}
+    # Un tuple d'URL n'est pas un garde : il reste signale (conservateur).
+    assert m._lignes_exchange_utilisees('AUTORISEES = ("/exchange",)\n') == {1}
+
+
+def test_un_fichier_inanalysable_compte_toutes_les_occurrences():
+    """Fail-closed : ne pas savoir lire n'est pas une raison de declarer propre."""
+    m = _audit()
+    assert m._lignes_exchange_utilisees('def f(:\n    "/exchange"\n') is None
+
+
+def test_la_regle_13_rougit_toujours_sur_un_vrai_emploi(tmp_path, monkeypatch):
+    """Sans ce test, le discriminant pourrait rendre la regle aveugle."""
+    m = _audit()
+    piege = tmp_path / "faux_module.py"
+    piege.write_text('URL = "/exchange"\n', encoding="utf-8")
+    monkeypatch.setattr(m, "_py_files", lambda *dirs: [piege])
+    monkeypatch.setattr(m, "_rel", lambda p: p.name)
+    verdict = m.c_no_real_exec()
+    assert not verdict.ok, "un vrai emploi de /exchange n a pas fait rougir la regle"
+    assert any("faux_module.py:1" in e for e in verdict.errors), verdict.errors
+
+    garde = tmp_path / "faux_garde.py"
+    garde.write_text('if "/exchange" in url:\n    raise ValueError("refuse")\n', encoding="utf-8")
+    monkeypatch.setattr(m, "_py_files", lambda *dirs: [garde])
+    verdict = m.c_no_real_exec()
+    assert verdict.ok, verdict.errors
+
+
+# ------------------------------------- la suppression bornee et archivee n'est plus accusee
+_COMPACTAGE = '''
+def compacter(self):
+    lignes = self.lire()
+    chemin = self._write_archive(lignes)
+    self.cx.execute("DELETE FROM seen_events WHERE row_sequence <= ?", (1,))
+    return chemin
+'''
+
+
+def _ligne_du_delete(source: str) -> int:
+    for numero, ligne in enumerate(source.split("\n"), start=1):
+        if "DELETE FROM" in ligne:
+            return numero
+    raise AssertionError("aucun DELETE dans la source de test")
+
+
+@pytest.mark.parametrize(
+    ("transformation", "attendu", "nom"),
+    [
+        (lambda s: s, True, "archive AVANT + WHERE"),
+        (lambda s: s.replace(" WHERE row_sequence <= ?", ""), False, "sans WHERE"),
+        (lambda s: s.replace("    chemin = self._write_archive(lignes)\n", ""),
+         False, "sans archivage"),
+    ],
+)
+def test_le_discriminant_de_suppression_verifie_les_deux_conditions(transformation, attendu, nom):
+    """Archiver AVANT et borner : les deux, sinon la ligne reste signalee."""
+    m = _audit()
+    source = transformation(_COMPACTAGE)
+    assert m._suppression_archivee_et_bornee(source, _ligne_du_delete(source)) is attendu, nom
+
+
+def test_une_archive_posterieure_ne_protege_rien():
+    """Archiver APRES avoir supprime ne sauve rien : l'ordre est la propriete."""
+    m = _audit()
+    source = ('def compacter(self):\n'
+              '    self.cx.execute("DELETE FROM seen_events WHERE row_sequence <= ?", (1,))\n'
+              '    return self._write_archive([])\n')
+    assert m._suppression_archivee_et_bornee(source, 2) is False
+
+
+def test_une_source_inanalysable_reste_signalee():
+    """Fail-closed : ne pas savoir lire ne vaut pas un laissez-passer."""
+    m = _audit()
+    assert m._suppression_archivee_et_bornee("def f(:\n  'DELETE FROM seen_events WHERE x'\n", 2) is False
+
+
+def test_la_regle_du_ledger_rougit_toujours_sur_une_table_videe(tmp_path, monkeypatch):
+    """Le discriminant ne doit pas rendre la regle aveugle a une vraie perte seche."""
+    m = _audit()
+    piege = tmp_path / "faux_ledger.py"
+    piege.write_text('def purge(cx):\n    cx.execute("DELETE FROM event_ledger")\n', encoding="utf-8")
+    monkeypatch.setattr(m, "_py_files", lambda *dirs: [piege])
+    monkeypatch.setattr(m, "_rel", lambda p: p.name)
+    verdict = m.c_ledger_append_only()
+    assert not verdict.ok, "une table videe sans archivage n a pas fait rougir la regle"
+
+    piege.write_text(_COMPACTAGE, encoding="utf-8")
+    verdict = m.c_ledger_append_only()
+    assert verdict.ok, verdict.errors

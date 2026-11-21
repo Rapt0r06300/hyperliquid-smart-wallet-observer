@@ -638,20 +638,63 @@ def c_secrets():
 
 
 # =============================================================== execution reelle
+def _lignes_exchange_utilisees(source: str) -> set[int] | None:
+    """Lignes ou le litteral /exchange est UTILISE, et non EXAMINE pour refuser.
+
+    MESURE DU 21/11/2026 -- cette regle rougissait sur UN seul site :
+    `src/hl_observer/ops/validation_portable.py:311`, c'est-a-dire
+    `if "/exchange" in url.casefold()` : le GARDE qui refuse l'endpoint, jamais un
+    appel vers lui. Le detecteur lisait une etiquette (la chaine) la ou seul compte
+    son emploi -- la meme faute que les trois faux positifs corriges le meme jour
+    (nom de fichier, chaine citee en exemple, signature ecrite dans pytest.raises).
+
+    Discriminant de CONTENU : un litteral membre d'une comparaison `in` / `not in`
+    est examine ; partout ailleurs il est employe (assigne, concatene, passe a une
+    requete) et reste signale. Un fichier inanalysable rend None, et l'appelant
+    compte alors TOUTES les occurrences : fail-closed, jamais de zero favorable.
+    La propriete elle-meme est prouvee par execution par `c_exchange_url_refusee`,
+    qui donne /exchange au validateur et exige un refus sans aucun appel reseau.
+    """
+    try:
+        arbre = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return None
+    examines: set[int] = set()
+    for noeud in ast.walk(arbre):
+        if not isinstance(noeud, ast.Compare):
+            continue
+        if not any(isinstance(op, (ast.In, ast.NotIn)) for op in noeud.ops):
+            continue
+        for membre in [noeud.left, *noeud.comparators]:
+            if (isinstance(membre, ast.Constant) and isinstance(membre.value, str)
+                    and "/exchange" in membre.value):
+                examines.add(membre.lineno)
+    return {
+        noeud.lineno
+        for noeud in ast.walk(arbre)
+        if isinstance(noeud, ast.Constant) and isinstance(noeud.value, str)
+        and "/exchange" in noeud.value and noeud.lineno not in examines
+    }
+
+
 def c_no_real_exec():
     c = Check("13. Aucun chemin d'execution reelle (hors tests/mocks)")
-    danger = [(r"['\"]/exchange['\"]", "endpoint d'execution /exchange"),
-              (r"\.sign_typed_data\(|\.sign_transaction\(|eth_account", "signature reelle"),
-              (r"place_mainnet_order|send_real_order|submit_order\(", "envoi d'ordre reel")]
+    # 3e element : le motif cherche un LITTERAL dont l'emploi est verifiable par AST.
+    danger = [(r"['\"]/exchange['\"]", "endpoint d'execution /exchange", True),
+              (r"\.sign_typed_data\(|\.sign_transaction\(|eth_account", "signature reelle", False),
+              (r"place_mainnet_order|send_real_order|submit_order\(", "envoi d'ordre reel", False)]
     hits = []
     for p in _py_files("src", *[d for d in code_dirs() if d not in ("src", "tests", "tools")]):
         rel = _rel(p).lower()
         if any(s in rel for s in ("test", "mock", "fake", "safety_audit", "mainnet_guard", "disabled")):
             continue
         txt = p.read_text(encoding="utf-8", errors="replace")
-        for pat, label in danger:
+        utilisees = _lignes_exchange_utilisees(txt)
+        for pat, label, litteral in danger:
             for m in re.finditer(pat, txt):
                 line = txt[:m.start()].count("\n") + 1
+                if litteral and utilisees is not None and line not in utilisees:
+                    continue  # litteral EXAMINE par `in` / `not in` : c'est le garde
                 hits.append(f"{_rel(p)}:{line} {label}")
     return c.finish(f"{len(hits)} chemin(s) dangereux", _trim(hits))
 
@@ -1292,8 +1335,59 @@ def _code_dirs_no_tests():
     return [d for d in code_dirs() if d != "tests"]
 
 
+def _suppression_archivee_et_bornee(txt: str, line: int) -> bool:
+    """Vrai si la suppression SQL de cette ligne archive d'abord et reste bornee.
+
+    MESURE DU 21/11/2026 -- la regle « le LEDGER D'EVENEMENTS ne doit jamais etre
+    supprime » rougissait sur `realtime/durable_dedup.py:239` :
+    `DELETE FROM seen_events WHERE row_sequence <= ?`. `seen_events` n'est pas le
+    ledger : c'est la fenetre vivante de deduplication, et son compactage ARCHIVE
+    les lignes evincees avant de les supprimer. Le motif ne matchait que
+    l'homonymie du mot « event ».
+
+    Le paragraphe ci-dessus ne suffit pas : on le VERIFIE dans l'arbre. Deux
+    conditions, toutes deux necessaires :
+      * la requete porte un `WHERE` (suppression bornee, pas une table videe) ;
+      * la fonction englobante appelle un archiveur AVANT cette ligne.
+    Si quelqu'un retire l'archivage, deplace l'appel apres la suppression ou
+    enleve le `WHERE`, la regle textuelle rougit de nouveau. Un fichier
+    inanalysable rend False : on ne sait pas, donc on signale (fail-closed).
+    """
+    try:
+        arbre = ast.parse(txt)
+    except (SyntaxError, ValueError):
+        return False
+    englobante = None
+    for noeud in ast.walk(arbre):
+        if not isinstance(noeud, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        fin = noeud.end_lineno or noeud.lineno
+        if noeud.lineno <= line <= fin and (
+                englobante is None or noeud.lineno > englobante.lineno):
+            englobante = noeud
+    if englobante is None:
+        return False
+    bornee = False
+    for noeud in ast.walk(englobante):
+        if (isinstance(noeud, ast.Constant) and isinstance(noeud.value, str)
+                and noeud.lineno <= line <= (noeud.end_lineno or noeud.lineno)
+                and "DELETE FROM" in noeud.value.upper()
+                and "WHERE" in noeud.value.upper()):
+            bornee = True
+    if not bornee:
+        return False
+    for noeud in ast.walk(englobante):
+        if not isinstance(noeud, ast.Call) or noeud.lineno >= line:
+            continue
+        cible = noeud.func
+        nom = cible.attr if isinstance(cible, ast.Attribute) else getattr(cible, "id", "")
+        if "archive" in nom.lower():
+            return True
+    return False
+
+
 def regex_rule(title, pattern, *, why="", blocking=False, dirs=None, exclude=(),
-               line_exclude=(), flags=0):
+               line_exclude=(), flags=0, discriminant=None):
     """Controle par expression reguliere.
 
     `line_exclude` : si la LIGNE contient un de ces mots, on ignore. Indispensable pour ne pas
@@ -1322,6 +1416,10 @@ def regex_rule(title, pattern, *, why="", blocking=False, dirs=None, exclude=(),
                 if "audit:fixture" in src_line.lower():
                     continue
                 if line_exclude and any(w.lower() in src_line.lower() for w in line_exclude):
+                    continue
+                # DISCRIMINANT DE CONTENU (21/11/2026) : contrairement a `line_exclude`, qui
+                # lit une etiquette sur la ligne, celui-ci verifie une PROPRIETE dans l'arbre.
+                if discriminant is not None and discriminant(txt, line):
                     continue
                 hits.append(f"{rel}:{line} {src_line.strip()[:90]}")
         msg = f"{len(hits)} occurrence(s)" + (f" -- {why}" if why else "")
@@ -2442,6 +2540,9 @@ c_ledger_append_only = regex_rule(
     "Le LEDGER D'EVENEMENTS ne doit jamais etre supprime ni reecrit",
     r"(?:DELETE\s+FROM|UPDATE)\s+\w*(?:ledger|event)",
     why="un ledger qui se reecrit ne prouve plus rien", blocking=True, flags=re.I,
+    # Une suppression BORNEE et PRECEDEE d'un archivage n'est pas une reecriture : verifie
+    # dans l'arbre, pas cru sur parole (`c_dedup_archive_avant_suppression` le prouve aussi).
+    discriminant=_suppression_archivee_et_bornee,
     # AFFINE : la 1re version matchait `UPDATE paper_trades` (une table de POSITIONS qu'on marque
     # 'CLOSED' -- parfaitement legitime) et un COMMENTAIRE. Seul le LEDGER D'EVENEMENTS est
     # concerne par la regle d'append-only.

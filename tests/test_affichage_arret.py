@@ -58,3 +58,25 @@ def test_selecteur_ignore_hors_projet_et_pids_invalides():
         (301, None),                                              # cmdline manquante
     ]
     assert aff._pids_collecteurs_a_tuer(procs, self_pid=SELF, racine=R) == []
+
+
+def test_selecteur_voit_les_ouvriers_bornes():
+    """MESURE DU 21/11/2026 : ~30 `run_bounded_collector.py` tournaient et le
+
+    balayage n'en voyait AUCUN. Ils ne se sont arretes que par l'invalidation du
+    bail ; ce test interdit que l'angle mort revienne.
+    """
+    procs = [
+        (401, f'python.exe "{R}\\tools\\run_bounded_collector.py" --root "{R}" --name bbo-collector'),
+        (402, f'python.exe "{R}\\tools\\run_bounded_collector.py" --root "{R}" --name l2-leaders'),
+    ]
+    assert aff._pids_collecteurs_a_tuer(procs, self_pid=SELF, racine=R) == [401, 402]
+
+
+def test_selecteur_epargne_une_passe_de_tests():
+    """Une suite pytest du projet n'est pas un collecteur : la tuer couterait 31 min."""
+    procs = [
+        (501, f'"{R}\\tools\\python\\python.exe" -m pytest tests -n 4 --dist loadfile'),
+        (502, f'"{R}\\tools\\python\\python.exe" -u -c "import sys;exec(eval(sys.stdin.readline()))"'),
+    ]
+    assert aff._pids_collecteurs_a_tuer(procs, self_pid=SELF, racine=R) == []

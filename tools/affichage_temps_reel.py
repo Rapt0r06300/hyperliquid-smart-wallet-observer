@@ -151,6 +151,14 @@ _nettoyage_fait = False
 _MARQUEURS_COLLECTEUR = (
     "watch_economic_collectors", "collecter_", "explorer_autonome",
     "poll_leaders", "_run_supervisor", "_run_poll", "_run_explorer", "_run_asset_ctx",
+    # MESURE DU 21/11/2026 -- ANGLE MORT TROUVE EN CONDITIONS REELLES. 20 familles
+    # etaient actives, portees par ~30 processus `tools/run_bounded_collector.py`
+    # (lances par `ops/bounded_collection.py`, qui les reconnait lui-meme sous ce
+    # nom). AUCUN marqueur de cette liste ne matchait : le `taskkill` de dernier
+    # recours voyait zero collecteur. Ils se sont arretes grace a l'invalidation du
+    # bail, pas grace a ce balayage -- donc un ouvrier sourd au bail, ou un bail
+    # recree, n'aurait ete arrete par rien.
+    "run_bounded_collector",
 )
 # Jamais tuer ceci même si le chemin projet matche (pas des collecteurs) :
 # l'écran lui-même, le scellage détaché, la sync, le labo.
