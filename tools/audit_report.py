@@ -211,6 +211,39 @@ _CACHE_FICHIERS: dict[tuple, list] = {}
 _CACHE_DOSSIERS: list[str] = []
 
 
+#: Fichiers que l audit n a PAS PU LIRE, avec la raison. Rempli par _arbre().
+_ILLISIBLES: dict[str, str] = {}
+
+
+def _arbre(chemin):
+    """Parse un fichier, ou ENREGISTRE son illisibilite et rend None.
+
+    POURQUOI CETTE FABRIQUE (21/11/2026). Quatorze regles AST de ce fichier portaient le
+    MEME bloc : `try: ast.parse(...) except Exception: continue`. Un fichier qui ne parse
+    pas etait donc silencieusement exempte de TOUTES les regles statiques, et le rapport
+    affichait << 0 occurrence >> sans dire qu un fichier avait ete saute. C est un zero
+    qui veut dire << je n ai pas su lire >>, c est-a-dire le pire des faux verts : il vient
+    du controle lui-meme.
+
+    MESURE QUI L A TROUVE : `tests/test_testnet_mode_controlled.py` portait un BOM UTF-8.
+    pytest l executait sans broncher (le decodeur de source de Python retire le BOM) mais
+    `ast.parse` d un texte lu en "utf-8" refusait le U+FEFF restant. Un fichier de test sur
+    un absolu du contrat etait donc VIVANT et invisible a tout l audit, sans aucun signal.
+
+    DEUX CORRECTIFS, PAS UN. La lecture passe en "utf-8-sig" -- exactement ce que fait le
+    decodeur de Python -- donc un BOM ne rend plus un fichier invisible. Et tout echec
+    restant est ENREGISTRE puis rapporte par c_fichiers_illisibles(), qui rougit : une
+    exemption peut rester necessaire, elle ne peut plus etre muette.
+    """
+    try:
+        return ast.parse(chemin.read_text(encoding="utf-8-sig", errors="replace"))
+    except SyntaxError as exc:
+        _ILLISIBLES[_rel(chemin)] = "SyntaxError ligne %s: %s" % (exc.lineno, exc.msg)
+    except Exception as exc:                                           # noqa: BLE001
+        _ILLISIBLES[_rel(chemin)] = "%s: %s" % (type(exc).__name__, exc)
+    return None
+
+
 def _py_files(*dirs):
     """Sans argument -> AUTO-DECOUVERTE (tout le code du projet, y compris les nouveaux paquets)."""
     _cle = tuple(dirs)
@@ -278,9 +311,8 @@ def c_circular():
     c = Check("3. Imports circulaires", blocking=False)
     graph = {}
     for p in _py_files("src"):
-        try:
-            tree = ast.parse(p.read_text(encoding="utf-8", errors="replace"))
-        except Exception:                                              # noqa: BLE001
+        tree = _arbre(p)          # None => illisible, DEJA enregistre
+        if tree is None:
             continue
         mod = _rel(p)[4:-3].replace(os.sep, ".").replace("/", ".")
         deps = set()
@@ -314,9 +346,8 @@ def c_arity():
     sys.path.insert(0, str(SRC))
     problems, checked, skipped = [], 0, 0
     for path in _py_files("src", "tests"):
-        try:
-            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
-        except Exception:                                              # noqa: BLE001
+        tree = _arbre(path)          # None => illisible, DEJA enregistre
+        if tree is None:
             continue
         imported = {}
         for node in ast.walk(tree):
@@ -407,9 +438,8 @@ def c_silent_except():
     c = Check("6. Exceptions avalees (un bug peut passer inapercu 48h)", blocking=False)
     bad = []
     for p in _py_files("src"):
-        try:
-            tree = ast.parse(p.read_text(encoding="utf-8", errors="replace"))
-        except Exception:                                              # noqa: BLE001
+        tree = _arbre(p)          # None => illisible, DEJA enregistre
+        if tree is None:
             continue
         for n in ast.walk(tree):
             if isinstance(n, ast.ExceptHandler):
@@ -629,9 +659,8 @@ def c_test_dupes():
     c = Check("16. Doublons de noms de tests (un test peut en masquer un autre)", blocking=False)
     seen, dupes = {}, []
     for p in _py_files("tests"):
-        try:
-            tree = ast.parse(p.read_text(encoding="utf-8", errors="replace"))
-        except Exception:                                              # noqa: BLE001
+        tree = _arbre(p)          # None => illisible, DEJA enregistre
+        if tree is None:
             continue
         local = {}
         for n in tree.body:
@@ -881,9 +910,8 @@ def c_tests_without_assert():
     c = Check("25. Tests SANS assertion (faux vert : le test ne verifie RIEN)", blocking=False)
     bad = []
     for p in _py_files("tests"):
-        try:
-            tree = ast.parse(p.read_text(encoding="utf-8", errors="replace"))
-        except Exception:                                              # noqa: BLE001
+        tree = _arbre(p)          # None => illisible, DEJA enregistre
+        if tree is None:
             continue
         for n in ast.walk(tree):
             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name.startswith("test_"):
@@ -1209,9 +1237,8 @@ def c_eval_exec():
         rel = _rel(p).replace(os.sep, "/")
         if "audit_report" in rel:
             continue
-        try:
-            arbre = ast.parse(p.read_text(encoding="utf-8", errors="replace"))
-        except SyntaxError:
+        arbre = _arbre(p)         # None => illisible, DEJA enregistre
+        if arbre is None:
             continue
         for n in ast.walk(arbre):
             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in ("eval", "exec"):
@@ -1305,9 +1332,8 @@ def c_long_functions():
     c = Check("Fonctions trop longues (> 120 lignes : intestables)", blocking=False)
     bad = []
     for p in _py_files(*_code_dirs_no_tests()):
-        try:
-            tree = ast.parse(p.read_text(encoding="utf-8", errors="replace"))
-        except Exception:                                              # noqa: BLE001
+        tree = _arbre(p)          # None => illisible, DEJA enregistre
+        if tree is None:
             continue
         for n in ast.walk(tree):
             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -1321,9 +1347,8 @@ def c_too_many_args():
     c = Check("Fonctions a trop de parametres (> 8)", blocking=False)
     bad = []
     for p in _py_files(*_code_dirs_no_tests()):
-        try:
-            tree = ast.parse(p.read_text(encoding="utf-8", errors="replace"))
-        except Exception:                                              # noqa: BLE001
+        tree = _arbre(p)          # None => illisible, DEJA enregistre
+        if tree is None:
             continue
         for n in ast.walk(tree):
             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -1338,9 +1363,8 @@ def c_complexity():
     bad = []
     BR = (ast.If, ast.For, ast.While, ast.Try, ast.BoolOp, ast.IfExp, ast.ExceptHandler)
     for p in _py_files(*_code_dirs_no_tests()):
-        try:
-            tree = ast.parse(p.read_text(encoding="utf-8", errors="replace"))
-        except Exception:                                              # noqa: BLE001
+        tree = _arbre(p)          # None => illisible, DEJA enregistre
+        if tree is None:
             continue
         for n in ast.walk(tree):
             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -1355,9 +1379,8 @@ def c_duplicate_bodies():
     import hashlib
     seen, dupes = {}, []
     for p in _py_files(*_code_dirs_no_tests()):
-        try:
-            tree = ast.parse(p.read_text(encoding="utf-8", errors="replace"))
-        except Exception:                                              # noqa: BLE001
+        tree = _arbre(p)          # None => illisible, DEJA enregistre
+        if tree is None:
             continue
         for n in ast.walk(tree):
             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -1378,9 +1401,8 @@ def c_module_docstrings():
     for p in _py_files("src"):
         if _rel(p).endswith("__init__.py"):
             continue
-        try:
-            tree = ast.parse(p.read_text(encoding="utf-8", errors="replace"))
-        except Exception:                                              # noqa: BLE001
+        tree = _arbre(p)          # None => illisible, DEJA enregistre
+        if tree is None:
             continue
         if not ast.get_docstring(tree):
             bad.append(f"{_rel(p)} : aucune docstring de module")
@@ -1401,9 +1423,10 @@ def c_duplicate_module_names():
 
 # ---------------------------------------------------------------- ARCHITECTURE
 def _imports_of(path):
-    try:
-        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
-    except Exception:                                                  # noqa: BLE001
+    # Un fichier illisible paraitrait n IMPORTER RIEN : il deviendrait invisible aux
+    # regles de couches et d orphelins. On enregistre donc l echec au lieu de le taire.
+    tree = _arbre(path)
+    if tree is None:
         return set()
     out = set()
     for n in ast.walk(tree):
@@ -1471,9 +1494,8 @@ def c_no_io_at_import():
               blocking=False)
     bad = []
     for p in _py_files(*_code_dirs_no_tests()):
-        try:
-            tree = ast.parse(p.read_text(encoding="utf-8", errors="replace"))
-        except Exception:                                              # noqa: BLE001
+        tree = _arbre(p)          # None => illisible, DEJA enregistre
+        if tree is None:
             continue
         for n in tree.body:                              # niveau MODULE uniquement
             for x in ast.walk(n):
@@ -1747,9 +1769,8 @@ def c_big_classes():
     c = Check("Classes trop grosses (> 400 lignes)", blocking=False)
     bad = []
     for p in _py_files(*_code_dirs_no_tests()):
-        try:
-            tree = ast.parse(p.read_text(encoding="utf-8", errors="replace"))
-        except Exception:                                              # noqa: BLE001
+        tree = _arbre(p)          # None => illisible, DEJA enregistre
+        if tree is None:
             continue
         for n in ast.walk(tree):
             if isinstance(n, ast.ClassDef):
@@ -1777,9 +1798,8 @@ def c_init_with_logic():
     for p in _py_files(*_code_dirs_no_tests()):
         if not _rel(p).endswith("__init__.py"):
             continue
-        try:
-            tree = ast.parse(p.read_text(encoding="utf-8", errors="replace"))
-        except Exception:                                              # noqa: BLE001
+        tree = _arbre(p)          # None => illisible, DEJA enregistre
+        if tree is None:
             continue
         heavy = [n for n in tree.body
                  if isinstance(n, (ast.FunctionDef, ast.ClassDef, ast.For, ast.While, ast.If))]
@@ -1801,9 +1821,8 @@ def c_type_hints():
     c = Check("Taux de fonctions annotees (types)", blocking=False)
     total = annotated = 0
     for p in _py_files("src"):
-        try:
-            tree = ast.parse(p.read_text(encoding="utf-8", errors="replace"))
-        except Exception:                                              # noqa: BLE001
+        tree = _arbre(p)          # None => illisible, DEJA enregistre
+        if tree is None:
             continue
         for n in ast.walk(tree):
             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -3219,6 +3238,18 @@ def c_sante_runtime():
     return c.finish(resume, None, warns)
 
 
+def c_fichiers_illisibles():
+    """Un fichier que l audit ne sait pas lire est exempte de TOUTES les regles AST."""
+    c = Check("Aucun fichier illisible par l'audit (un fichier saute est exempte de tout)")
+    for _f in _py_files():
+        _arbre(_f)                       # remplit _ILLISIBLES ; resultat ignore ici
+    erreurs = ["%s  ->  %s" % (f, raison) for f, raison in sorted(_ILLISIBLES.items())]
+    return c.finish(
+        "%d fichier(s) illisible(s) sur %d" % (len(_ILLISIBLES), len(_py_files())),
+        erreurs,
+    )
+
+
 def main():
     import atexit
     import signal
@@ -3239,6 +3270,7 @@ def main():
 
     plan = [
         # --- INTEGRITE DU CODE ---
+        c_fichiers_illisibles,
         c_compile, c_imports, c_all_imports, c_circular, c_arity, c_dead_imports,
         c_lazy_import, c_star_import, c_empty_files, c_init_with_logic,
         c_duplicate_module_names, c_module_docstrings, c_type_hints,

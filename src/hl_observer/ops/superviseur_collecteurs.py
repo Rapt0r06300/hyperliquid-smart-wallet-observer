@@ -137,8 +137,15 @@ def rss_par_collecteur(*, psutil_mod=None, mon_pid: int | None = None) -> dict[s
     exclus = {moi}
     try:
         exclus |= {int(a.pid) for a in psutil_mod.Process(moi).parents()}
-    except Exception:                             # noqa: BLE001
-        pass
+    except Exception as exc:                      # noqa: BLE001
+        # 21/11/2026 : l avalement est CONSERVE (une enumeration d ancetres qui echoue ne
+        # doit pas faire tomber la mesure de RAM), mais il n est plus MUET. La consequence
+        # d un echec ici est precise : les PID ancetres ne sont pas exclus, donc le
+        # superviseur peut se compter lui-meme -- exactement le piege que le docstring
+        # ci-dessus dit eviter. Un compteur qui monte est une piste ; `pass` n en est
+        # jamais une. Meme forme qu a la ligne ~339 de ce fichier.
+        from hl_observer.ops.echec_silencieux import noter
+        noter("ops/superviseur_collecteurs.py:ancetres", exc)
     par_script = {str(c["script"]).replace(chr(92), "/").rsplit("/", 1)[-1]: c["nom"]
                   for c in REGISTRE}
     out: dict[str, float] = {}

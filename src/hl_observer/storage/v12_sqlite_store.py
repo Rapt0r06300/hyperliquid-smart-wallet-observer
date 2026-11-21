@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any
@@ -75,14 +77,34 @@ class V12SQLiteStore:
                 conn.execute(ddl)
             conn.commit()
 
-    def connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def connect(self) -> Iterator[sqlite3.Connection]:
+        """Ouvre, valide ou annule, puis FERME -- les trois, a chaque operation.
+        # CORRECTIF DU 21/11/2026 -- `with sqlite3.connect(p) as c:` VALIDE la
+        # transaction mais ne FERME JAMAIS la connexion (prouve sur Python 3.14.2 /
+        # sqlite 3.50.4). Cette fabrique etait appelee a CHAQUE operation et son
+        # resultat consomme par `with ...`, donc une connexion fuyait par operation :
+        # sous Windows le fichier reste verrouille et, en WAL, chaque connexion
+        # survivante retient le journal. `closing()` ferme mais ne valide pas : il faut
+        # donc LES DEUX. La forme retenue garde `with connection:` AUTOUR du yield, ce
+        # qui preserve exactement le commit/rollback que le site d appel fournissait
+        # avant -- seule la fermeture est ajoutee.
+        # Note sur `:memory:` : chaque `sqlite3.connect(":memory:")` cree une base
+        # PRIVEE a la connexion, donc cette classe n a jamais pu servir en memoire
+        # d un appel a l autre -- fermer ne retire rien. Verifie le 21/11 : aucun
+        # appelant (UI, pipeline, tests) ne passe `:memory:`, tous passent un fichier.
+        """
         conn = sqlite3.connect(str(self.path))
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA busy_timeout=60000")
-        if self.path != Path(":memory:"):
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA synchronous=NORMAL")
-        return conn
+        try:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA busy_timeout=60000")
+            if self.path != Path(":memory:"):
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA synchronous=NORMAL")
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
     def upsert_wallet_score(self, score: Any, *, updated_at_ms: int) -> None:
         payload = _payload(score)

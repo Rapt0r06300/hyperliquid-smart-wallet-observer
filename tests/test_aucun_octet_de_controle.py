@@ -25,6 +25,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 RACINE = Path(__file__).resolve().parents[1]
 
 #: Les seuls octets de controle admis dans du texte : tabulation, LF, CR.
@@ -90,3 +92,47 @@ def test_la_regle_accepte_tabulation_et_fins_de_ligne() -> None:
     """La moitie qui compte : du code normal ne doit JAMAIS etre signale."""
     assert _controles(b"def f():\n\treturn 1\r\n") == []
     assert _controles(('MOTIF = r"' + chr(92) + 'bexit_code"').encode()) == []
+
+
+# ---------------------------------------------------------------------------
+# AJOUT DU 21/11/2026 — LE BOM, QUE CE CONTROLE NE VOYAIT PAS
+# ---------------------------------------------------------------------------
+# Ce fichier annoncait « 0 octet de controle sur 5 179 fichiers » et c'etait vrai :
+# la marque d'ordre des octets (EF BB BF) n'est PAS un octet de controle C0, donc
+# elle passait sous le radar. Or `tests/test_testnet_mode_controlled.py` en portait
+# une, et cela suffisait a le rendre invisible a tout l'audit statique :
+# `ast.parse` d'un texte lu en "utf-8" refuse le U+FEFF restant, alors que pytest
+# l'executait sans broncher (le decodeur de source de Python retire le BOM).
+# Un controle qui rend « 0 » sur une classe qu'il ne regarde pas est rassurant a tort.
+
+#: La marque d'ordre des octets UTF-8. Inutile en UTF-8, et elle casse les outils.
+BOM_UTF8 = b"\xef\xbb\xbf"
+
+
+def test_aucune_marque_d_ordre_des_octets_dans_le_source_python() -> None:
+    fichiers = _sources()
+    assert len(fichiers) > 3000, f"balayage trop etroit ({len(fichiers)})"
+    fautifs = [str(c.relative_to(RACINE)) for c in fichiers
+               if c.read_bytes()[:3] == BOM_UTF8]
+    assert not fautifs, (
+        "marque d'ordre des octets (BOM) en tete de fichier Python -- `ast.parse` d'une "
+        "lecture en \"utf-8\" la refuse, donc l'outillage statique SAUTE le fichier en "
+        "silence alors que pytest l'execute :\n  " + "\n  ".join(fautifs))
+
+
+def test_la_regle_attrape_un_BOM_et_prouve_le_degat(tmp_path) -> None:
+    """Les deux moities : la regle detecte le BOM, ET le BOM casse bien ast.parse."""
+    import ast
+
+    avec = tmp_path / "avec.py"
+    avec.write_bytes(BOM_UTF8 + b"X = 1\n")
+    sans = tmp_path / "sans.py"
+    sans.write_bytes(b"X = 1\n")
+
+    assert avec.read_bytes()[:3] == BOM_UTF8
+    assert sans.read_bytes()[:3] != BOM_UTF8
+
+    # Le degat est reel, pas theorique.
+    with pytest.raises(SyntaxError):
+        ast.parse(avec.read_text(encoding="utf-8", errors="replace"))
+    ast.parse(sans.read_text(encoding="utf-8", errors="replace"))

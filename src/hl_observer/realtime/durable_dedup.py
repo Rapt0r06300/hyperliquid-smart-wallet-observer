@@ -13,6 +13,8 @@ import json
 import os
 import sqlite3
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
@@ -68,7 +70,23 @@ class DurableEventDedup:
         self._archive_sequence = 0
         self._initialize()
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
+        """Ouvre, valide ou annule, puis FERME -- les trois, a chaque operation.
+        # CORRECTIF DU 21/11/2026 -- `with sqlite3.connect(p) as c:` VALIDE la
+        # transaction mais ne FERME JAMAIS la connexion (prouve sur Python 3.14.2 /
+        # sqlite 3.50.4). Cette fabrique etait appelee a CHAQUE operation et son
+        # resultat consomme par `with ...`, donc une connexion fuyait par operation :
+        # sous Windows le fichier reste verrouille et, en WAL, chaque connexion
+        # survivante retient le journal. `closing()` ferme mais ne valide pas : il faut
+        # donc LES DEUX. La forme retenue garde `with connection:` AUTOUR du yield, ce
+        # qui preserve exactement le commit/rollback que le site d appel fournissait
+        # avant -- seule la fermeture est ajoutee.
+        # Ici `isolation_level=None` avec des `BEGIN IMMEDIATE`/`COMMIT` ecrits en
+        # SQL : le `with` n etait pas decoratif, c est lui qui fournissait le ROLLBACK
+        # si le corps levait entre le BEGIN et le COMMIT. Le conserver est obligatoire.
+        """
+        connection: sqlite3.Connection | None = None
         try:
             connection = sqlite3.connect(
                 self.database_path,
@@ -78,11 +96,18 @@ class DurableEventDedup:
             connection.execute("PRAGMA journal_mode=WAL")
             connection.execute("PRAGMA synchronous=FULL")
             connection.execute("PRAGMA foreign_keys=ON")
-            return connection
         except sqlite3.DatabaseError as exc:
+            if connection is not None:
+                with suppress(sqlite3.Error):
+                    connection.close()
             raise DurableDedupCorruption(
                 f"cannot open durable dedup store: {self.database_path}"
             ) from exc
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     def _initialize(self) -> None:
         try:

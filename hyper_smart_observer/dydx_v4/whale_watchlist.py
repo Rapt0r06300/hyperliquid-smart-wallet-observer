@@ -20,6 +20,8 @@ PAPER SIMULATION ONLY. Toutes les positions sont fictives.
 
 from __future__ import annotations
 
+from contextlib import closing
+
 import logging
 import sqlite3
 import threading
@@ -127,8 +129,15 @@ class WhaleWatchlist:
     # ── DB ────────────────────────────────────────────────────────────────────
 
     def _init_db(self) -> None:
+        # CORRECTIF DU 21/11/2026 (les 4 sites de ce fichier). `with sqlite3.connect(p)
+        # as c:` VALIDE la transaction mais ne FERME JAMAIS la connexion (prouve sur
+        # Python 3.14.2 / sqlite 3.50.4) ; `closing()` ferme mais ne valide pas. Il faut
+        # donc LES DEUX, dans cet ordre : les contextes sortent a l envers, donc `conn`
+        # valide d abord, puis `closing` ferme. _save_scores et _save_candidates sont
+        # appeles a chaque rafraichissement (toutes les 30 min, plus les decouvertes),
+        # donc une connexion fuyait par appel et le fichier restait verrouille.
         try:
-            with sqlite3.connect(str(self._db_path)) as conn:
+            with closing(sqlite3.connect(str(self._db_path))) as conn, conn:
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS whale_scores (
                         address TEXT PRIMARY KEY,
@@ -160,7 +169,7 @@ class WhaleWatchlist:
     def _load_from_db(self) -> None:
         """Charger depuis SQLite au démarrage (wallets scorés + candidats connus)."""
         try:
-            with sqlite3.connect(str(self._db_path)) as conn:
+            with closing(sqlite3.connect(str(self._db_path))) as conn, conn:
                 rows = conn.execute(
                     "SELECT address, subaccount_number, total_pnl_usdc, win_rate, "
                     "profit_factor, trade_count, composite_score, last_trade_ms, "
@@ -193,7 +202,7 @@ class WhaleWatchlist:
 
     def _save_scores(self, scores: list[WhaleScore]) -> None:
         try:
-            with sqlite3.connect(str(self._db_path)) as conn:
+            with closing(sqlite3.connect(str(self._db_path))) as conn, conn:
                 conn.executemany("""
                     INSERT OR REPLACE INTO whale_scores
                     (address, subaccount_number, total_pnl_usdc, win_rate, profit_factor,
@@ -212,7 +221,7 @@ class WhaleWatchlist:
     def _save_candidates(self, addresses: list[str], source: str) -> None:
         try:
             now_ms = int(time.time() * 1000)
-            with sqlite3.connect(str(self._db_path)) as conn:
+            with closing(sqlite3.connect(str(self._db_path))) as conn, conn:
                 conn.executemany("""
                     INSERT OR IGNORE INTO whale_candidates (address, discovered_at_ms, source)
                     VALUES (?, ?, ?)

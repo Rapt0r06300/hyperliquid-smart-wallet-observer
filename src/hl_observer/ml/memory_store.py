@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 DEFAULT_DB = "runtime/ml/ia_memory.sqlite3"
@@ -38,11 +40,27 @@ class IAMemory:
         Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         self._init()
 
-    def _conn(self) -> sqlite3.Connection:
+    @contextmanager
+    def _conn(self) -> Iterator[sqlite3.Connection]:
+        """Ouvre, valide ou annule, puis FERME -- les trois, a chaque operation.
+        # CORRECTIF DU 21/11/2026 -- `with sqlite3.connect(p) as c:` VALIDE la
+        # transaction mais ne FERME JAMAIS la connexion (prouve sur Python 3.14.2 /
+        # sqlite 3.50.4). Cette fabrique etait appelee a CHAQUE operation et son
+        # resultat consomme par `with ...`, donc une connexion fuyait par operation :
+        # sous Windows le fichier reste verrouille et, en WAL, chaque connexion
+        # survivante retient le journal. `closing()` ferme mais ne valide pas : il faut
+        # donc LES DEUX. La forme retenue garde `with connection:` AUTOUR du yield, ce
+        # qui preserve exactement le commit/rollback que le site d appel fournissait
+        # avant -- seule la fermeture est ajoutee.
+        """
         c = sqlite3.connect(self.path, timeout=10)
-        c.execute("PRAGMA journal_mode=WAL")       # résiste aux arrêts brutaux
-        c.execute("PRAGMA synchronous=NORMAL")
-        return c
+        try:
+            c.execute("PRAGMA journal_mode=WAL")       # résiste aux arrêts brutaux
+            c.execute("PRAGMA synchronous=NORMAL")
+            with c:
+                yield c
+        finally:
+            c.close()
 
     def _init(self) -> None:
         with self._conn() as c:

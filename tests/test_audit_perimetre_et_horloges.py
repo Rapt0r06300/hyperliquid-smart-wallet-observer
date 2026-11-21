@@ -22,6 +22,8 @@ import sys
 import time
 from pathlib import Path
 
+import pytest
+
 RACINE = Path(__file__).resolve().parents[1]
 
 
@@ -117,3 +119,91 @@ def test_le_cache_distingue_les_perimetres_demandes() -> None:
         f"`src` seul ({len(src_seul)}) devrait etre plus petit que tout ({len(tout)})")
     assert all("src" in p.parts for p in src_seul), (
         "le cache a rendu des fichiers hors du perimetre demande")
+
+
+# ============================================================================
+# EXTENSION DU 21/11/2026 — UN FICHIER QUE L'AUDIT NE SAIT PAS LIRE
+# ============================================================================
+# Quinze sites de `tools/audit_report.py` portaient le meme bloc :
+#     try: tree = ast.parse(p.read_text(encoding="utf-8", errors="replace"))
+#     except Exception: continue
+# Un fichier qui ne parse pas etait donc exempte de TOUTES les regles AST, et le
+# rapport affichait « 0 occurrence » sans dire qu'un fichier avait ete saute : un
+# zero qui veut dire « je n'ai pas su lire », produit par le controle lui-meme.
+#
+# CE QUI L'A REVELE : `tests/test_testnet_mode_controlled.py` portait un BOM UTF-8.
+# pytest l'executait (10 tests collectes — le decodeur de source de Python retire le
+# BOM) mais `ast.parse` d'un texte lu en "utf-8" refusait le U+FEFF restant. Un test
+# portant sur un absolu du contrat etait VIVANT et invisible a tout l'audit.
+#
+# Deux correctifs : lecture en "utf-8-sig" (ce que fait Python lui-meme), et tout
+# echec restant est ENREGISTRE dans `_ILLISIBLES` puis rapporte par une regle qui
+# rougit. Une exemption peut rester necessaire ; elle ne peut plus etre muette.
+
+_BOM = b"\xef\xbb\xbf"
+
+
+def test_un_BOM_ne_rend_plus_un_fichier_invisible(tmp_path) -> None:
+    fichier = tmp_path / "avec_bom.py"
+    fichier.write_bytes(_BOM + b"X = 1\n")
+    arbre = _module_audit()._arbre(fichier)
+    assert arbre is not None, "un BOM suffit encore a faire disparaitre un fichier"
+
+
+def test_le_defaut_existait_bien_avec_utf_8_simple(tmp_path) -> None:
+    """Discrimination : sans "utf-8-sig", le meme fichier est bien illisible.
+
+    Sans ce test, le precedent passerait meme si la lecture n'avait jamais ete le
+    probleme — on ne saurait pas qu'on a corrige quelque chose de reel.
+    """
+    import ast as _ast
+
+    fichier = tmp_path / "avec_bom.py"
+    fichier.write_bytes(_BOM + b"X = 1\n")
+    with pytest.raises(SyntaxError):
+        _ast.parse(fichier.read_text(encoding="utf-8", errors="replace"))
+    _ast.parse(fichier.read_text(encoding="utf-8-sig", errors="replace"))   # ne leve pas
+
+
+def test_un_fichier_vraiment_illisible_est_ENREGISTRE(tmp_path) -> None:
+    """Le point essentiel : sauter un fichier reste permis, le taire ne l'est plus."""
+    module = _module_audit()
+    fichier = tmp_path / "casse.py"
+    fichier.write_text("def f(:\n", encoding="utf-8")
+    avant = dict(module._ILLISIBLES)
+    try:
+        assert module._arbre(fichier) is None
+        nouveaux = set(module._ILLISIBLES) - set(avant)
+        assert nouveaux, "fichier saute sans laisser de trace dans _ILLISIBLES"
+        raison = module._ILLISIBLES[next(iter(nouveaux))]
+        assert "SyntaxError" in raison, raison
+    finally:
+        module._ILLISIBLES.clear()
+        module._ILLISIBLES.update(avant)
+
+
+def test_aucun_parse_silencieux_ne_revient_dans_l_audit() -> None:
+    """LE CLIQUET. 15 sites muets -> 0. Toute reintroduction rougit ici."""
+    texte = (RACINE / "tools" / "audit_report.py").read_text(encoding="utf-8")
+    muets = texte.count('ast.parse(p.read_text(encoding="utf-8"') \
+        + texte.count('ast.parse(path.read_text(encoding="utf-8"')
+    assert muets == 0, (
+        f"{muets} site(s) relisent en \"utf-8\" sans passer par _arbre() : un fichier "
+        "illisible y redeviendrait invisible et muet")
+
+
+def test_le_projet_entier_est_lisible_par_l_audit() -> None:
+    """Si un fichier devient illisible, on le sait ICI et pas par un zero rassurant."""
+    module = _module_audit()
+    avant = dict(module._ILLISIBLES)
+    try:
+        module._ILLISIBLES.clear()
+        for chemin in _fichiers_audites():
+            module._arbre(chemin)
+        assert not module._ILLISIBLES, (
+            "fichier(s) que l'audit ne sait pas lire -- donc exempte(s) de toutes ses "
+            "regles AST :\n  " + "\n  ".join(
+                f"{f} -> {r}" for f, r in sorted(module._ILLISIBLES.items())))
+    finally:
+        module._ILLISIBLES.clear()
+        module._ILLISIBLES.update(avant)

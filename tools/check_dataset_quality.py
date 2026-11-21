@@ -13,6 +13,24 @@ try:
 except ModuleNotFoundError:
     from partitioned_data_index import iter_index_rows
 
+# REFUS SUR SI LES ASSERTS SONT DESACTIVES (21/11/2026). Toute la verification de
+# cette porte -- 36 asserts, 19 sites d appel dans .github/workflows -- repose sur
+# `assert` : SHA de chaque recu SAFE, `self_hosted_forbidden`, `user_pc_forbidden`,
+# `proof_of_pnl_allowed is False`, l identite du depot et les 4 compteurs de classes.
+# `python -O` (ou PYTHONOPTIMIZE) SUPPRIME ces instructions a la compilation, mais PAS
+# le print(... OK) final : la porte afficherait alors un succes AFFIRMATIF et sortirait
+# 0 sur des donnees contradictoires. Mesure du 21/11 sur la forme exacte de cette porte
+# (donnees contradictoires) : sans -O exit=1 ; avec -O exit=0 et sortie verte.
+# Aucun PYTHONOPTIMIZE n est pose dans le projet aujourd hui -- le defaut est donc
+# LATENT, et c est precisement pourquoi il faut une garde : rien ne le detecterait.
+# `__debug__` est une constante de COMPILATION, donc ce test survit a -O (verifie :
+# exit=1 avec le message ci-dessous). Un refus bruyant, jamais un zero favorable.
+if not __debug__:
+    raise SystemExit(
+        "REFUS: asserts desactives (python -O / PYTHONOPTIMIZE). Cette porte ne "
+        "verifie plus rien dans ce mode ; relancer sans -O."
+    )
+
 parser = argparse.ArgumentParser(description="Validate the canonical dataset policy")
 parser.add_argument(
     "--catalog-only",
