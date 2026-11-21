@@ -1641,8 +1641,26 @@ def c_toolkit_pure():
             #     chiffres deja mesures -- c'est une decision d'architecture ;
             #   * une VIOLATION DE COUCHES : `src/` qui importe `tools/`. Le toolkit ne
             #     s'importe alors plus sans la racine du depot sur sys.path. Un seul site
-            #     d'import dans src/ est concerne, et les deux modules vises sont stdlib pur :
-            #     c'est une correction locale, pas une reecriture.
+            #     d'import dans src/ est concerne, et les deux modules vises sont stdlib pur.
+            #     MESURE DU 21/11/2026 -- << CORRECTION LOCALE >> ETAIT FAUX. Deplacer
+            #     `tools/partitioned_data_index.py` et `tools/copy_vault_continuity.py`
+            #     sous `src/hl_observer/dataset/` (seul paquet dont l'__init__ est un
+            #     docstring nu, donc sans effet de bord a l'import) coute bien plus que
+            #     deux lignes :
+            #       * 51 fichiers referencent ces deux modules ;
+            #       * 31 d'entre eux utilisent un DOUBLE import en repli
+            #         (`from tools.X import f` puis `from X import f`), donc un simple
+            #         module de re-export doit fonctionner sous LES DEUX noms ;
+            #       * `tests/test_partitioned_data_index.py` fait deux fois
+            #         `monkeypatch.setattr(module, ...)` sur l'OBJET module
+            #         `tools.partitioned_data_index` : un re-export casse l'intention
+            #         du test (il patcherait la facade, pas la fonction appelee) ;
+            #       * `partitioned_data_index` est aussi un point d'entree CLI
+            #         (`if __name__ == "__main__": raise SystemExit(main())`).
+            #     Le seul montage qui preserve les trois contraintes est l'alias de
+            #     module (`sys.modules[__name__] = module_reel`), dont la semantique
+            #     doit etre prouvee avant d'etre posee. Donc : correction REELLE mais
+            #     non triviale, a faire avec la suite complete comme juge.
             # On compte toujours les deux (le rouge reste entier), mais on dit lequel est
             # lequel : un diagnostic indifferencie fait prendre une decision pour l'autre.
             if root in ("tools", "hyper_smart_observer"):

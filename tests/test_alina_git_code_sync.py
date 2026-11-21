@@ -1939,14 +1939,19 @@ def test_terminate_process_tree_reports_success_in_utf8_mode() -> None:
     assert done.stdout.decode("ascii", errors="replace").strip() == "(True, [])"
 
 
-def test_le_merge_ff_a_son_propre_budget_et_pas_celui_des_lectures() -> None:
+def test_l_adoption_ne_balaye_plus_l_index_entier() -> None:
     """Le fast-forward est une MUTATION de l arbre, pas une lecture locale.
 
     Le 21/11/2026 deux executions du lanceur ont rendu NO_GO a 901,2 s sur
     l etape << Adopter GitHub main en avance rapide >>, la seconde sur une
-    machine au repos. La meme commande, chronometree hors lanceur, a abouti
-    en 7 249 s avec le code 0 : le budget tuait une operation qui marche.
-    Ce test interdit le retour au budget des lectures locales.
+    machine au repos. La meme commande chronometree hors lanceur a abouti en
+    7 249 s avec le code 0 : le budget tuait une operation qui MARCHE.
+
+    La cause de fond n etait pas le budget : `merge --ff-only` rafraichit les
+    1 940 030 entrees d index alors que le chemin de rejeu adoptait les memes
+    commits en 6,8 s sans y toucher. Faire MOINS de travail coutait 1000x plus
+    cher. Ce test interdit le retour en arriere, et exige que tout
+    `merge --ff-only` reintroduit porte au moins le budget mesure.
     """
     import ast
 
@@ -1959,32 +1964,78 @@ def test_le_merge_ff_a_son_propre_budget_et_pas_celui_des_lectures() -> None:
     assert budget <= 86400, 'un budget non borne masquerait un vrai blocage'
 
     source = Path(sync_module.__file__).read_text(encoding='utf-8')
-    appels = []
-    for noeud in ast.walk(ast.parse(source)):
+    arbre = ast.parse(source)
+
+    merges = []
+    adoptions = []
+    for noeud in ast.walk(arbre):
         if not isinstance(noeud, ast.Call):
             continue
         cible = noeud.func
-        if not (isinstance(cible, ast.Attribute) and cible.attr == 'command'):
+        if not isinstance(cible, ast.Attribute):
+            continue
+        if cible.attr == '_adopter_tete_sans_balayage':
+            adoptions.append(noeud.lineno)
+            continue
+        if cible.attr != 'command':
             continue
         litteraux = [a.value for a in noeud.args
                      if isinstance(a, ast.Constant)]
-        if litteraux[:2] != ['merge', '--ff-only']:
-            continue
-        delais = [mc.value for mc in noeud.keywords if mc.arg == 'timeout']
-        appels.append((noeud.lineno, delais))
+        if litteraux[:2] == ['merge', '--ff-only']:
+            delais = [mc.value for mc in noeud.keywords if mc.arg == 'timeout']
+            merges.append((noeud.lineno, delais))
 
-    assert appels, 'aucun appel merge --ff-only trouve : test devenu aveugle'
-    for ligne, delais in appels:
+    assert len(adoptions) >= 3, (
+        'les trois appelants attendus (rejeu + deux adoptions en avance'
+        f' rapide) ne passent plus par le chemin borne : {adoptions}'
+    )
+    for ligne, delais in merges:
         assert len(delais) == 1, (
             f'ligne {ligne} : merge --ff-only sans timeout explicite'
             ' retombe sur LOCAL_READ_TIMEOUT_SECONDS (900 s) :'
-            ' faux NO_GO'
+            ' faux NO_GO a 901 s sur une operation de 7 249 s'
         )
         nom = delais[0]
         assert isinstance(nom, ast.Name) and (
             nom.id == 'WORKTREE_MERGE_TIMEOUT_SECONDS'
         ), f'ligne {ligne} : budget du merge non calibre sur la mesure'
 
+
+def test_l_adoption_rapide_refuse_une_collision_protegee_sans_passer_par_git() -> None:
+    """Le refus venait de GIT, pas du lanceur -- il doit etre a nous.
+
+    Mesure du 21/11/2026 : l ancien chemin echouait sur le message de git
+    << Your local changes to the following files would be overwritten by
+    merge >>. Sans le merge, cette garde disparaissait et l adoption
+    reussissait en silence en laissant l index sur la version distante et
+    l arbre sur la version locale. C est la corruption de `catalog/`
+    constatee le 19/11/2026. La garde doit etre explicite dans le code.
+    """
+    import ast
+
+    source = Path(sync_module.__file__).read_text(encoding='utf-8')
+    methode = None
+    for noeud in ast.walk(ast.parse(source)):
+        if (isinstance(noeud, ast.FunctionDef)
+                and noeud.name == '_adopter_tete_sans_balayage'):
+            methode = noeud
+    assert methode is not None, 'le chemin borne d adoption a disparu'
+
+    corps = ast.get_source_segment(source, methode) or ''
+    assert 'protected_local_changes' in corps, (
+        'l adoption ne consulte plus l inventaire des modifications protegees'
+    )
+    assert 'SyncBlocked' in corps, 'l adoption ne refuse plus rien'
+    assert 'RUNTIME_CHURN_FILES' in corps, (
+        'exception de churn perdue : un classement reecrit en continu'
+        ' bloquerait toute publication de code'
+    )
+    leves = [n for n in ast.walk(methode) if isinstance(n, ast.Raise)]
+    assert len(leves) >= 4, (
+        f'le chemin borne ne porte plus que {len(leves)} refus ; il en faut'
+        ' un pour la collision protegee, un pour les octets divergents, un'
+        ' pour la course sur update-ref et un pour HEAD non confirme'
+    )
 
 def test_une_lecture_locale_garde_son_budget_court() -> None:
     """Elargir le merge ne doit pas elargir le reste."""

@@ -141,6 +141,10 @@ LOCAL_READ_TIMEOUT_SECONDS = 900
 # le delta du split-index : il ne mesure PAS le travail reel.
 # Budget = 3x la mesure, parce que la mesure a ete prise avec un seul lot de
 # 4 fichiers a ecrire ; une adoption plus large coute davantage.
+# PLUS AUCUN APPELANT depuis le meme jour : les deux adoptions en avance
+# rapide passent par `_adopter_tete_sans_balayage` (6,8 s mesurees contre
+# 7 249 s). La constante reste pour qu'un `merge --ff-only` reintroduit un
+# jour ne reparte pas du budget des lectures ; un test l'exige.
 WORKTREE_MERGE_TIMEOUT_SECONDS = 21600
 MIN_GIT_VERSION = (2, 30)
 # A second double-click should wait for a short, bounded hand-off instead of
@@ -2194,9 +2198,9 @@ class Synchronizer:
 
             self._protect_ignored_files(fetched_remote)
             self._assert_no_new_code_changes()
-            with self._preserve_local_protected_index():
-                self.command("merge", "--ff-only", fetched_remote,
-                             timeout=WORKTREE_MERGE_TIMEOUT_SECONDS)
+            self._adopter_tete_sans_balayage(
+                fetched_remote, local, "l'adoption en avance rapide",
+            )
             merged_local = self.text("rev-parse", "HEAD")
             verified_remote = self.remote_sha()
             if merged_local != fetched_remote or verified_remote != merged_local:
@@ -3539,6 +3543,201 @@ class Synchronizer:
             f"{budget}s; rebase annulee proprement."
         ) from timeout
 
+    def _adopter_tete_sans_balayage(
+        self, new_tip: str, old_tip: str, origine: str,
+    ) -> None:
+        """Amener HEAD sur ``new_tip`` sans balayer les 1,9 M entrees d'index.
+
+        21/11/2026 -- CE CHEMIN EXISTAIT DEJA MAIS UN SEUL APPELANT S'EN SERVAIT.
+        `merge --ff-only` rafraichit l'index ENTIER. Mesure du 21/11/2026 sur ce
+        depot : `git merge --ff-only origin/main` a mis **7 249 s** (code 0) pour
+        n'ecrire que 4 fichiers, et le lanceur avait rendu NO_GO deux fois a
+        901,2 s sur cette etape. Le meme jour, la sequence ci-dessous a adopte 4
+        commits distants en **6,8 s** (recu `GIT_REPLAY_INDEX_PRESERVING`, SHA
+        local == SHA GitHub, parite verifiee). Faire MOINS de travail coutait
+        donc 1000x plus cher : seule la branche de rejeu empruntait le raccourci.
+
+        Le cout est borne par le diff d'ARBRES, pas par la taille de l'index :
+        `diff --name-only` entre deux arbres, garde sur les seuls chemins
+        entrants, `read-tree` **sans** `-u` (index seul, aucun lstat d'arbre),
+        puis `checkout-index` sur les seuls chemins de CODE -- un chemin protege
+        n'est jamais ecrit, ce qui est plus fort que le `skip-worktree` que
+        posait `_preserve_local_protected_index` autour du merge. `update-ref`
+        garde l'ancienne valeur : une course perdue restaure l'arbre et echoue
+        fermee, jamais ouverte.
+        """
+        # Ni le rejeu ni l'avance rapide n'ont touche l'arbre de travail.
+        # On recontrole l'inventaire de code juste avant d'appliquer le nouvel
+        # arbre suivi, pour qu'un editeur concurrent ne soit jamais ecrase.
+        self._assert_no_new_code_changes()
+        # On a shallow clone with thousands of SAFE catalog files on disk,
+        # ``read-tree -u -m`` will refuse if any untracked file matches a
+        # path in new_tip.  Pre-identify those conflicts and remove the SAFE
+        # ones before attempting the tree update.
+        incoming_paths = _paths(
+            self.command(
+                "diff", "--name-only", "-z", old_tip, new_tip,
+            ).stdout
+        )
+        # 21/11/2026 -- LE REFUS VENAIT DE GIT, PAS DE NOUS.
+        # Mesure : sur `test_tracked_protected_collision_still_fails_closed`,
+        # l'ancien chemin echouait sur le message de GIT << Your local changes
+        # to the following files would be overwritten by merge >>. La garde
+        # etait donc un effet de bord de `merge --ff-only`, pas un controle du
+        # lanceur. Le chemin rapide n'ecrit jamais un chemin protege
+        # (`checkout-index` ne recoit que les chemins de CODE) : les octets
+        # locaux survivaient, mais l'index declarait la version distante.
+        # Divergence SILENCIEUSE -- precisement la corruption de `catalog/`
+        # constatee le 19/11/2026 (1 582 fichiers supprimes localement,
+        # DATA_INDEX incoherent avec lui-meme). Le contrat que le lanceur
+        # AFFICHE deja est le bon : << elles seront refusees si GitHub touche
+        # ces chemins >>. On le rend explicite ici.
+        # On reutilise l'inventaire DEJA valide `protected_local_changes` au
+        # lieu d'un `git diff HEAD -- <milliers de chemins>` : ce module a
+        # mesure que ce diff etait le goulot de plusieurs minutes sur cet
+        # index. Meme exception documentee que `_protect_ignored_files` : un
+        # fichier de churn connu a une version locale PLUS RECENTE, il n'y a
+        # rien a proteger contre l'adoption.
+        observes = {
+            chemin
+            for chemin in self.report.get("protected_local_changes", [])
+            if isinstance(chemin, str)
+        }
+        collisions = sorted(
+            chemin for chemin in incoming_paths
+            if _protected(chemin)
+            and chemin in observes
+            and chemin.replace("\\", "/").casefold() not in RUNTIME_CHURN_FILES
+        )
+        if collisions:
+            raise SyncBlocked(
+                f"GitHub toucherait {len(collisions)} fichier(s) protege(s) "
+                f"modifie(s) localement: {', '.join(collisions[:5])}. "
+                "Adoption interdite pour proteger les donnees."
+            )
+        self.report["adoption_protected_collisions"] = len(collisions)
+        existing_untracked: list[str] = []
+        for path in incoming_paths:
+            full = self.root / path
+            if not full.is_file():
+                continue
+            existing_untracked.append(path)
+        _tracked_here: set[str] = set()
+        for start in range(0, len(existing_untracked), PROTECTED_PATH_BATCH_SIZE):
+            batch = existing_untracked[start:start + PROTECTED_PATH_BATCH_SIZE]
+            _tracked_here.update(_paths(
+                self.command("ls-files", "-z", "--", *batch).stdout
+            ))
+        removed_safe: list[str] = []
+        blocked_unsafe: list[str] = []
+        candidats = [
+            path for path in existing_untracked if path not in _tracked_here
+        ]
+        # 21/11/2026 -- NE JAMAIS SUPPRIMER UN FICHIER LOCAL POUR LAISSER PASSER
+        # LA FUSION. Cette boucle retirait tout chemin que
+        # `_can_defer_staged_protected` tolere (donc tout `runtime/**`,
+        # `catalog/**`...) au motif que << le remote le recree >>. C'est vrai
+        # pour un shard SAFE identique au distant ; c'est FAUX pour un etat
+        # local comme `runtime/session.json`, qui etait alors ecrase en
+        # silence. Le `merge --ff-only` ne tenait ce cas que parce que GIT
+        # refusait d'ecraser un fichier non suivi : la protection venait du
+        # refus de git, pas d'un controle a nous. Tests qui l'exigent :
+        # `test_ignored_data_collision_refused` et
+        # `test_tracked_protected_collision_still_fails_closed`.
+        # Critere PROUVABLE retenu : on ne retire que si les octets locaux sont
+        # DEJA ceux que le distant ecrirait (meme blob apres les filtres git du
+        # chemin). Identiques -> retirer ne perd rien. Differents -> le fichier
+        # porte un etat que le distant n'a pas : REFUS.
+        identiques: set[str] = set()
+        if candidats:
+            for start in range(0, len(candidats), PROTECTED_PATH_BATCH_SIZE):
+                lot = candidats[start:start + PROTECTED_PATH_BATCH_SIZE]
+                attendus = self.command(
+                    "cat-file", "--batch-check=%(objectname)", "--buffer",
+                    input_bytes="".join(
+                        f"{new_tip}:{path}" + chr(10) for path in lot
+                    ).encode("utf-8"),
+                    check=False,
+                ).stdout.decode("utf-8", errors="replace").splitlines()
+                locaux = self.command(
+                    "hash-object", "--stdin-paths",
+                    input_bytes="".join(
+                        path + chr(10) for path in lot
+                    ).encode("utf-8"),
+                    check=False,
+                ).stdout.decode("utf-8", errors="replace").splitlines()
+                if len(attendus) != len(lot) or len(locaux) != len(lot):
+                    # Comparaison impossible = refus sur tout le lot, jamais
+                    # une suppression << au benefice du doute >>.
+                    continue
+                for path, attendu, localement in zip(
+                        lot, attendus, locaux, strict=True,
+                ):
+                    a, b = attendu.strip(), localement.strip()
+                    if a and b and a == b:
+                        identiques.add(path)
+        for path in candidats:
+            if _can_defer_staged_protected(path) and path in identiques:
+                (self.root / path).unlink()
+                removed_safe.append(path)
+            else:
+                blocked_unsafe.append(path)
+        if blocked_unsafe:
+            raise SyncBlocked(
+                f"GitHub toucherait {len(blocked_unsafe)} fichier(s) local non "
+                f"suivi(s) dont les octets DIFFERENT du distant: "
+                f"{', '.join(blocked_unsafe[:5])}. "
+                "Fusion interdite."
+            )
+        if removed_safe:
+            self.say(
+                f"[GARDE DONNEES] {len(removed_safe)} fichier(s) SAFE locaux "
+                f"supprimes pour permettre la fusion (recrees par le remote)."
+            )
+        self.command(
+            "read-tree", new_tip,
+            timeout=REPLAY_WORKTREE_TIMEOUT_SECONDS,
+        )
+        code_changed = [
+            p for p in incoming_paths
+            if not _protected(p)
+        ]
+        if code_changed:
+            self._prefetch_blobs(new_tip, code_changed)
+            for ci_start in range(0, len(code_changed), PROTECTED_PATH_BATCH_SIZE):
+                ci_batch = code_changed[ci_start:ci_start + PROTECTED_PATH_BATCH_SIZE]
+                self.command(
+                    "checkout-index", "-f", "--", *ci_batch,
+                )
+        updated = self.command(
+            "update-ref", "refs/heads/main", new_tip, old_tip,
+            check=False,
+        )
+        if updated.returncode:
+            restored = self.command(
+                "read-tree", "-u", "-m", old_tip,
+                check=False,
+                timeout=REPLAY_WORKTREE_TIMEOUT_SECONDS,
+            )
+            if restored.returncode:
+                raise SyncBlocked(
+                    "Mise a jour atomique de main refusee et restauration du "
+                    "code impossible; intervention manuelle requise."
+                )
+            raise SyncBlocked(
+                "Mise a jour atomique de main refusee; code local restaure."
+            )
+
+        if self.text("rev-parse", "HEAD") != new_tip:
+            raise SyncBlocked(
+                f"HEAD local ne confirme pas {origine}; aucun push lance."
+            )
+        # A full-index diff over the code pathspecs can exceed the replay
+        # budget on this partial clone. The bounded status inventory already
+        # excludes SAFE roots and reports any code that arrived during replay;
+        # reuse it instead of holding the operator index in a long scan.
+        self._assert_no_new_code_changes()
+
     def _try_git_replay(
         self, remote: str, local: str, base: str,
     ) -> bool:
@@ -3603,95 +3802,7 @@ class Synchronizer:
                 "aucun ref ni push modifie."
             )
 
-        # The replay itself did not touch the worktree.  Recheck the code
-        # inventory immediately before applying the new tracked tree so a
-        # concurrent editor cannot be overwritten silently.
-        self._assert_no_new_code_changes()
-        # On a shallow clone with thousands of SAFE catalog files on disk,
-        # ``read-tree -u -m`` will refuse if any untracked file matches a
-        # path in new_tip.  Pre-identify those conflicts and remove the SAFE
-        # ones before attempting the tree update.
-        incoming_paths = _paths(
-            self.command(
-                "diff", "--name-only", "-z", local, new_tip,
-            ).stdout
-        )
-        existing_untracked: list[str] = []
-        for path in incoming_paths:
-            full = self.root / path
-            if not full.is_file():
-                continue
-            existing_untracked.append(path)
-        _tracked_here: set[str] = set()
-        for start in range(0, len(existing_untracked), PROTECTED_PATH_BATCH_SIZE):
-            batch = existing_untracked[start:start + PROTECTED_PATH_BATCH_SIZE]
-            _tracked_here.update(_paths(
-                self.command("ls-files", "-z", "--", *batch).stdout
-            ))
-        removed_safe: list[str] = []
-        blocked_unsafe: list[str] = []
-        for path in existing_untracked:
-            if path in _tracked_here:
-                continue
-            if _can_defer_staged_protected(path):
-                (self.root / path).unlink()
-                removed_safe.append(path)
-            else:
-                blocked_unsafe.append(path)
-        if blocked_unsafe:
-            raise SyncBlocked(
-                f"GitHub toucherait {len(blocked_unsafe)} fichier(s) local non "
-                f"suivi(s) non-SAFE: {', '.join(blocked_unsafe[:5])}. "
-                "Fusion interdite."
-            )
-        if removed_safe:
-            self.say(
-                f"[GARDE DONNEES] {len(removed_safe)} fichier(s) SAFE locaux "
-                f"supprimes pour permettre la fusion (recrees par le remote)."
-            )
-        self.command(
-            "read-tree", new_tip,
-            timeout=REPLAY_WORKTREE_TIMEOUT_SECONDS,
-        )
-        code_changed = [
-            p for p in incoming_paths
-            if not _protected(p)
-        ]
-        if code_changed:
-            self._prefetch_blobs(new_tip, code_changed)
-            for ci_start in range(0, len(code_changed), PROTECTED_PATH_BATCH_SIZE):
-                ci_batch = code_changed[ci_start:ci_start + PROTECTED_PATH_BATCH_SIZE]
-                self.command(
-                    "checkout-index", "-f", "--", *ci_batch,
-                )
-        updated = self.command(
-            "update-ref", "refs/heads/main", new_tip, local,
-            check=False,
-        )
-        if updated.returncode:
-            restored = self.command(
-                "read-tree", "-u", "-m", local,
-                check=False,
-                timeout=REPLAY_WORKTREE_TIMEOUT_SECONDS,
-            )
-            if restored.returncode:
-                raise SyncBlocked(
-                    "Mise a jour atomique de main refusee et restauration du "
-                    "code impossible; intervention manuelle requise."
-                )
-            raise SyncBlocked(
-                "Mise a jour atomique de main refusee; code local restaure."
-            )
-
-        if self.text("rev-parse", "HEAD") != new_tip:
-            raise SyncBlocked(
-                "HEAD local ne confirme pas le rejeu Git; aucun push lance."
-            )
-        # A full-index diff over the code pathspecs can exceed the replay
-        # budget on this partial clone. The bounded status inventory already
-        # excludes SAFE roots and reports any code that arrived during replay;
-        # reuse it instead of holding the operator index in a long scan.
-        self._assert_no_new_code_changes()
+        self._adopter_tete_sans_balayage(new_tip, local, "le rejeu Git")
         self.report["replay_verification"] = "INVENTORY_NO_NEW_CODE_CHANGES"
         self.report["replay_engine"] = "GIT_REPLAY_INDEX_PRESERVING"
         self.report["local_rebased_onto"] = remote
@@ -4256,9 +4367,9 @@ class Synchronizer:
                 "[INTEGRATION] Avance rapide possible: adoption des commits "
                 "GitHub sans creer de commit de fusion."
             )
-            with self._preserve_local_protected_index():
-                self.command("merge", "--ff-only", remote,
-                             timeout=WORKTREE_MERGE_TIMEOUT_SECONDS)
+            self._adopter_tete_sans_balayage(
+                remote, local, "l'adoption en avance rapide",
+            )
             self.say("[INTEGRATION OK] HEAD local aligne sur GitHub main.")
             return
         self.command(
