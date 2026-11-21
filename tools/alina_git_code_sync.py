@@ -126,6 +126,22 @@ DEFAULT_GIT_TIMEOUT_SECONDS = 900
 COMMIT_TIMEOUT_SECONDS = 900
 REMOTE_READ_TIMEOUT_SECONDS = 20
 LOCAL_READ_TIMEOUT_SECONDS = 900
+# 21/11/2026 -- BUDGET MESURE, PAS ESTIME.
+# `merge --ff-only` etait classe parmi les lectures locales (900 s) alors que
+# c'est une MUTATION de l'arbre de travail : git y reconstruit l'index ENTIER.
+# Deux executions du lanceur ont ete tuees a 901,2 s exactement, la seconde sur
+# une machine au repos (2e etape la plus lente : 2,6 s). Le budget transformait
+# donc une operation qui FONCTIONNE en NO_GO.
+# Mesure chronometree du 21/11/2026, hors lanceur, meme commande, meme depot :
+#     git merge --ff-only origin/main  ->  code 0 en 7 249 s (2 h 01)
+#     (4 fichiers ecrits, 308 insertions / 191 suppressions)
+# Cout intrinseque et non reductible par un timeout : 1 940 030 entrees
+# d'index, index partage de 244 Mo (`core.splitIndex=true`, 30 copies = 7,0 Go),
+# et un lstat de tout l'arbre sous Windows. Le `.git/index` de 4 Mo n'est que
+# le delta du split-index : il ne mesure PAS le travail reel.
+# Budget = 3x la mesure, parce que la mesure a ete prise avec un seul lot de
+# 4 fichiers a ecrire ; une adoption plus large coute davantage.
+WORKTREE_MERGE_TIMEOUT_SECONDS = 21600
 MIN_GIT_VERSION = (2, 30)
 # A second double-click should wait for a short, bounded hand-off instead of
 # forcing the user to rerun the launcher after a transient collision.  The
@@ -2179,7 +2195,8 @@ class Synchronizer:
             self._protect_ignored_files(fetched_remote)
             self._assert_no_new_code_changes()
             with self._preserve_local_protected_index():
-                self.command("merge", "--ff-only", fetched_remote)
+                self.command("merge", "--ff-only", fetched_remote,
+                             timeout=WORKTREE_MERGE_TIMEOUT_SECONDS)
             merged_local = self.text("rev-parse", "HEAD")
             verified_remote = self.remote_sha()
             if merged_local != fetched_remote or verified_remote != merged_local:
@@ -4240,7 +4257,8 @@ class Synchronizer:
                 "GitHub sans creer de commit de fusion."
             )
             with self._preserve_local_protected_index():
-                self.command("merge", "--ff-only", remote)
+                self.command("merge", "--ff-only", remote,
+                             timeout=WORKTREE_MERGE_TIMEOUT_SECONDS)
             self.say("[INTEGRATION OK] HEAD local aligne sur GitHub main.")
             return
         self.command(

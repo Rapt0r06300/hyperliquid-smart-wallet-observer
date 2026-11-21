@@ -1937,3 +1937,59 @@ def test_terminate_process_tree_reports_success_in_utf8_mode() -> None:
     )
     assert done.returncode == 0, done.stderr.decode("utf-8", errors="replace")
     assert done.stdout.decode("ascii", errors="replace").strip() == "(True, [])"
+
+
+def test_le_merge_ff_a_son_propre_budget_et_pas_celui_des_lectures() -> None:
+    """Le fast-forward est une MUTATION de l arbre, pas une lecture locale.
+
+    Le 21/11/2026 deux executions du lanceur ont rendu NO_GO a 901,2 s sur
+    l etape << Adopter GitHub main en avance rapide >>, la seconde sur une
+    machine au repos. La meme commande, chronometree hors lanceur, a abouti
+    en 7 249 s avec le code 0 : le budget tuait une operation qui marche.
+    Ce test interdit le retour au budget des lectures locales.
+    """
+    import ast
+
+    mesure_du_21_11_2026 = 7249
+    budget = sync_module.WORKTREE_MERGE_TIMEOUT_SECONDS
+    assert budget > mesure_du_21_11_2026, (
+        'budget sous la duree DEJA MESUREE : il rendrait NO_GO sur un succes'
+    )
+    assert budget > sync_module.LOCAL_READ_TIMEOUT_SECONDS
+    assert budget <= 86400, 'un budget non borne masquerait un vrai blocage'
+
+    source = Path(sync_module.__file__).read_text(encoding='utf-8')
+    appels = []
+    for noeud in ast.walk(ast.parse(source)):
+        if not isinstance(noeud, ast.Call):
+            continue
+        cible = noeud.func
+        if not (isinstance(cible, ast.Attribute) and cible.attr == 'command'):
+            continue
+        litteraux = [a.value for a in noeud.args
+                     if isinstance(a, ast.Constant)]
+        if litteraux[:2] != ['merge', '--ff-only']:
+            continue
+        delais = [mc.value for mc in noeud.keywords if mc.arg == 'timeout']
+        appels.append((noeud.lineno, delais))
+
+    assert appels, 'aucun appel merge --ff-only trouve : test devenu aveugle'
+    for ligne, delais in appels:
+        assert len(delais) == 1, (
+            f'ligne {ligne} : merge --ff-only sans timeout explicite'
+            ' retombe sur LOCAL_READ_TIMEOUT_SECONDS (900 s) :'
+            ' faux NO_GO'
+        )
+        nom = delais[0]
+        assert isinstance(nom, ast.Name) and (
+            nom.id == 'WORKTREE_MERGE_TIMEOUT_SECONDS'
+        ), f'ligne {ligne} : budget du merge non calibre sur la mesure'
+
+
+def test_une_lecture_locale_garde_son_budget_court() -> None:
+    """Elargir le merge ne doit pas elargir le reste."""
+    assert sync_module.LOCAL_READ_TIMEOUT_SECONDS == 900
+    assert sync_module.REMOTE_READ_TIMEOUT_SECONDS == 20
+    assert sync_module._git_operation_label(['merge', '--ff-only', 'x']) == (
+        'Adopter GitHub main en avance rapide'
+    )
