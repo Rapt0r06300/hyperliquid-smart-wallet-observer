@@ -1002,9 +1002,34 @@ def _terminate_process_tree(
     return killed and not residual, residual
 
 
+# MESURE DU 21/11/2026 -- cout reel de l'enumeration CIM des processus, sur
+# cette machine avec tools/python/python.exe : 1,02 / 1,01 / 0,99 s au repos et
+# 1,10 / 1,10 / 1,13 s avec 6 processus saturant le CPU. L'ancien budget de 3 s
+# ne laissait que 2,7x de marge -- assez au repos, pas sous la pression disque
+# d'une passe a 4 workers : test_terminate_process_tree_kills_descendant_process
+# a rougi a 2 % de la suite du 21/11 (residu [17980] attendu vide) puis est passe
+# seul en 3,59 s. Une garde se calibre sur le pire cas, pas sur le cas courant :
+# budget = 20x la mesure, negligeable devant le timeout git de 900 s qui
+# declenche la terminaison. Le probe tasklist garde ses 2 s : mesure 0,05 s au
+# repos et 0,10 s sous un churn de 8 processus, soit 20x de marge deja.
+PROCESS_SCAN_TIMEOUT_SECONDS = 20
+
+# Un residu [parent_pid] peut signifier deux choses tres differentes : un
+# processus REELLEMENT vivant, ou une enumeration illisible. Les deux restent
+# fail-closed (jamais de zero favorable), mais sans motif un rouge de la suite
+# est indiagnosticable -- c'est exactement ce qui s'est passe le 21/11/2026.
+DIAGNOSTIC_RESIDU: dict[str, str] = {"motif": "aucune mesure"}
+
+
 def _remaining_process_ids(root: Path, parent_pid: int) -> list[int]:
-    """Return surviving descendants after a process-tree termination attempt."""
+    """Return surviving descendants after a process-tree termination attempt.
+
+    Toujours fail-closed : une enumeration illisible declare le parent residuel
+    au lieu de declarer l'arbre propre. DIAGNOSTIC_RESIDU dit laquelle des deux
+    raisons s'applique, sans quoi les deux cas rendent la meme liste.
+    """
     if os.name != "nt":
+        DIAGNOSTIC_RESIDU["motif"] = "hors Windows : aucun arbre a verifier"
         return []
     del root
     command = (
@@ -1024,10 +1049,14 @@ def _remaining_process_ids(root: Path, parent_pid: int) -> list[int]:
             # page de codes de la console, Python en mode UTF-8) ne doit jamais faire échouer la lecture.
             text=True,
             errors="replace",
-            timeout=3,
+            timeout=PROCESS_SCAN_TIMEOUT_SECONDS,
             check=False,
         )
         if completed.returncode != 0 or not completed.stdout.strip():
+            DIAGNOSTIC_RESIDU["motif"] = (
+                f"enumeration CIM illisible (code {completed.returncode}, "
+                f"{len(completed.stdout or '')} octets) : residu suppose par securite"
+            )
             return [parent_pid]
         decoded = json.loads(completed.stdout)
         rows = decoded if isinstance(decoded, list) else [decoded]
@@ -1062,8 +1091,16 @@ def _remaining_process_ids(root: Path, parent_pid: int) -> list[int]:
             )
             if str(pid) in probe.stdout:
                 live.add(pid)
+        DIAGNOSTIC_RESIDU["motif"] = (
+            f"{len(live)} processus vivant(s) confirme(s) par tasklist sur "
+            f"{len(surviving)} candidat(s) enumere(s)"
+        )
         return sorted(live)
-    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError, TypeError):
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError, TypeError) as erreur:
+        DIAGNOSTIC_RESIDU["motif"] = (
+            f"enumeration CIM impossible ({type(erreur).__name__}) : "
+            "residu suppose par securite"
+        )
         return [parent_pid]
 
 

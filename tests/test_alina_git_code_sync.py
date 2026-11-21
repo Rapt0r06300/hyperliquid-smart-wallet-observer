@@ -58,13 +58,55 @@ def test_terminate_process_tree_kills_descendant_process(tmp_path: Path) -> None
             errors="replace",
             check=False,
         ).stdout.find(str(child_pid)) == -1
-        assert sync_module._remaining_process_ids(tmp_path, parent.pid) == []
+        assert sync_module._remaining_process_ids(tmp_path, parent.pid) == [], (
+            "residu signale apres terminaison ; motif = "
+            f"{sync_module.DIAGNOSTIC_RESIDU['motif']}"
+        )
     finally:
         subprocess.run(
             ["taskkill", "/PID", str(parent.pid), "/T", "/F"],
             capture_output=True,
             check=False,
         )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows process-tree contract")
+def test_le_residu_dit_pourquoi_il_refuse(monkeypatch, tmp_path: Path) -> None:
+    """Une enumeration illisible reste fail-closed ET nomme sa cause.
+
+    Sans motif, `[parent_pid]` confond << processus vraiment vivant >> et
+    << je n'ai pas su lire >> : le rouge du 21/11/2026 etait indiagnosticable.
+    """
+    import types
+
+    def enumeration_qui_deborde(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd="powershell.exe", timeout=1)
+
+    faux = types.SimpleNamespace(
+        run=enumeration_qui_deborde,
+        DEVNULL=subprocess.DEVNULL,
+        PIPE=subprocess.PIPE,
+        TimeoutExpired=subprocess.TimeoutExpired,
+    )
+    monkeypatch.setattr(sync_module, "subprocess", faux)
+    # Fail-closed : le parent est declare residuel, jamais un zero favorable.
+    assert sync_module._remaining_process_ids(tmp_path, 4242) == [4242]
+    motif = sync_module.DIAGNOSTIC_RESIDU["motif"]
+    assert "TimeoutExpired" in motif, motif
+    assert "securite" in motif, motif
+
+
+def test_le_budget_d_enumeration_est_calibre_sur_le_pire_cas() -> None:
+    """3 s ne laissaient que 2,7x la mesure (1,0-1,1 s) : une garde se calibre
+    sur le pire cas, pas sur le cas courant."""
+    import inspect
+
+    assert sync_module.PROCESS_SCAN_TIMEOUT_SECONDS >= 10
+    source = inspect.getsource(sync_module._remaining_process_ids)
+    assert "timeout=PROCESS_SCAN_TIMEOUT_SECONDS" in source
+    assert "timeout=3," not in source
+    # Le probe tasklist garde son budget court : 0,05 s mesures, 2 s accordees.
+    assert source.count("timeout=2,") == 1
 
 
 def test_status_paths_parse_spaces_and_rename_records():
