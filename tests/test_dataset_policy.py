@@ -14,7 +14,31 @@ REG = json.loads((ROOT / "catalog/DATA_QUALITY_REGISTRY.json").read_text())
 CAT = json.loads((ROOT / "catalog/DATA_CATALOG.json").read_text())
 INDEX_PATH = ROOT / "catalog/DATA_INDEX.json"
 INDEX_ROOT = json.loads(INDEX_PATH.read_text(encoding="utf-8"))
-MANIFEST_WORKERS = max(64, min(128, (os.cpu_count() or 8) * 8))
+#: CE TEST EST UN AUDIT EXHAUSTIF, PAS UN TEST UNITAIRE : il ouvre et relit les 1 853 164
+#: manifestes de l'index. Il reste exhaustif -- echantillonner transformerait une garantie en
+#: sondage -- mais il doit cesser d'etre HOSTILE au parallelisme.
+#:
+#: MESURE DU 21/11/2026. 128 fils de lecture, c'est juste quand ce fichier tourne SEUL. Sous
+#: `-n 4`, chaque worker en creait 128 : 512 fils sur le MEME disque. Le test depassait alors
+#: le timeout, pytest-timeout tuait son worker, et les tests qui restaient assignes a ce worker
+#: n'ont JAMAIS tourne -- 6 677 tests sur 19 846, avec un resume qui annoncait pourtant
+#: « 13 140 passed ». On divise donc le budget de fils par le nombre de workers xdist.
+def _nb_fils_de_lecture() -> int:
+    base = max(64, min(128, (os.cpu_count() or 8) * 8))
+    brut = os.environ.get("PYTEST_XDIST_WORKER_COUNT")
+    try:
+        workers = max(1, int(brut)) if brut else 1
+    except ValueError:
+        workers = 1
+    return max(8, base // workers)
+
+
+MANIFEST_WORKERS = _nb_fils_de_lecture()
+
+#: 1 h, et c'est une MESURE, pas une marge de confort : relire 1,85 million de manifestes prend
+#: le temps que ca prend. Le timeout global de la batterie (600 s) est calibre pour des tests,
+#: pas pour un audit de corpus -- l'appliquer ici ne mesurait pas un gel, il en fabriquait un.
+pytestmark = pytest.mark.timeout(3600)
 MANIFEST_BATCH_SIZE = 16384
 
 

@@ -711,8 +711,21 @@ def build_safe_copy_workspace(
             ledger_copy = diagnostic_dir / "SAFE_INPUT_DECISIONS.jsonl"
             if decisions_path.is_file():
                 shutil.copy2(decisions_path, ledger_copy)
+                # 21/11/2026 -- MEME CHAMP, MEME SENS. La branche GO ecrit un chemin
+                # RELATIF AU DEPOT ("runtime/reports/datasets/SAFE_INPUT_DECISIONS.jsonl")
+                # tandis que cette branche n ecrivait que le nom NU. Un lecteur qui resout
+                # `path` depuis la racine conclut << fichier absent >> alors que la preuve
+                # est bien la : je m y suis fait prendre moi-meme en relisant un NO_GO.
+                # Un champ qui signifie deux choses selon la branche est un piege a
+                # diagnostic. La conversion est GARDEE : nous sommes DEJA dans le
+                # gestionnaire qui ecrit le diagnostic, donc y lever une exception
+                # detruirait la seule trace du refus.
+                try:
+                    chemin_des_decisions = ledger_copy.relative_to(root).as_posix()
+                except ValueError:
+                    chemin_des_decisions = ledger_copy.as_posix()
                 decision_artifact = {
-                    "path": ledger_copy.name,
+                    "path": chemin_des_decisions,
                     "sha256": _digest(ledger_copy),
                     "bytes": ledger_copy.stat().st_size,
                     "rows": decision_totals["rows"],

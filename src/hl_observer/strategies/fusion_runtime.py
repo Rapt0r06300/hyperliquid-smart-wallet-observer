@@ -666,12 +666,17 @@ def _journaliser_fills_leaders(leader_votes) -> None:
             with p.open("a", encoding="utf-8") as fh:
                 fh.write("\n".join(lignes) + "\n")
     except Exception as exc:  # noqa: BLE001 — comptee, jamais silencieuse, jamais bloquante
-        try:
-            from hl_observer.ops.pannes_internes import noter_echec as _ne
-            _ne("fusion_runtime:_journaliser_fills_leaders", exc)
-        except Exception:  # noqa: BLE001 — le compteur lui-meme est best-effort
-            from hl_observer.ops.echec_silencieux import noter as _ns
-            _ns("strategies/fusion_runtime.py:compteur_fallback")
+        # 21/11/2026 — LE COMPTEUR NE COMPTAIT RIEN D'UTILE. La branche primaire visait
+        # `hl_observer.ops.pannes_internes.noter_echec`, un module qui n'a JAMAIS existe :
+        # chaque panne de ce journal levait donc un ImportError, tombait dans le repli, et
+        # etait enregistree sous la cle `compteur_fallback` SANS le type de l'exception.
+        # On lisait « compteur_fallback x47 » : ni le site reel, ni la cause. Un compteur
+        # qui compte toujours la meme chose est un silence deguise en chiffre.
+        #
+        # `noter()` ne leve JAMAIS (contrat du module) : aucun garde-fou n'est necessaire
+        # autour de lui, et en ajouter un reconstruirait exactement le trou qu'on bouche.
+        from hl_observer.ops.echec_silencieux import noter as _ns
+        _ns("strategies/fusion_runtime.py:_journaliser_fills_leaders", exc)
 
 
 def _copy_whitelist_ok(conflict, leader_votes, no_trade) -> bool:

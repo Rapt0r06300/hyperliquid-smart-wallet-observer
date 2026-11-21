@@ -30,9 +30,17 @@ def dump_config(root: str | Path | None = None) -> dict:
             else:
                 config[k] = v
 
+    # UNE SEULE LECTURE D'HORLOGE, ET ELLE EST EN UTC (corrige le 2026-11-21).
+    #
+    # Avant : `"ts": time.time()` et `"ts_iso": time.strftime(...)` lisaient l'horloge DEUX
+    # fois -- une meme grandeur avec deux valeurs, qui peuvent enjamber une seconde. Et
+    # `strftime` sans argument rend l'heure LOCALE sans fuseau : dans un fichier dont le seul
+    # role est l'audit post-mortem, deux lignes du changement d'heure deviennent impossibles
+    # a ordonner, et personne ne peut savoir si « 02:30 » est avant ou apres « 02:45 ».
+    maintenant = time.time()
     payload = {
-        "ts": time.time(),
-        "ts_iso": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "ts": maintenant,
+        "ts_iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(maintenant)),
         "var_count": len(config),
         "config": config,
     }

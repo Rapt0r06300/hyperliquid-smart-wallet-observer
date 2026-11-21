@@ -29,6 +29,7 @@ import shutil
 import subprocess
 import sys
 import time
+from contextlib import suppress
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -344,7 +345,7 @@ def c_circular():
 def c_arity():
     c = Check("4. Signatures des appels inter-modules (mauvais branchements)")
     sys.path.insert(0, str(SRC))
-    problems, checked, skipped = [], 0, 0
+    problems, checked, skipped, refus_prouves = [], 0, 0, 0
     for path in _py_files("src", "tests"):
         tree = _arbre(path)          # None => illisible, DEJA enregistre
         if tree is None:
@@ -363,9 +364,36 @@ def c_arity():
                         problems.append(f"{_rel(path)}: IMPORT KO {node.module}.{a.name} -> {e}")
         if not imported:
             continue
+        # UN CAS NEGATIF N'EST PAS UN MAUVAIS BRANCHEMENT (corrige le 2026-11-21). La regle
+        # signalait `tests/test_testnet_mode_controlled.py:83 Executor() KWARG INCONNU ['guard']`.
+        # Or la ligne est :
+        #     with pytest.raises(TypeError):
+        #         Executor(settings=..., adapter=..., journal=..., guard=object())
+        # C'est un test qui PROUVE qu'on ne peut pas injecter un garde maison dans l'executeur
+        # -- une garantie de securite, pas une erreur de cablage. L'accuser, c'est pousser a
+        # supprimer la preuve pour faire taire l'outil.
+        # On releve donc les lignes couvertes par un `pytest.raises(TypeError)` et on les compte
+        # a part : visibles dans le resume, jamais bloquantes.
+        lignes_refus_attendu = set()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.With):
+                continue
+            for item in node.items:
+                ce = item.context_expr
+                if not (isinstance(ce, ast.Call) and isinstance(ce.func, ast.Attribute)
+                        and ce.func.attr == "raises" and ce.args):
+                    continue
+                premier = ce.args[0]
+                attendus = premier.elts if isinstance(premier, ast.Tuple) else [premier]
+                if any(isinstance(a, ast.Name) and a.id == "TypeError" for a in attendus):
+                    fin = node.end_lineno or node.lineno
+                    lignes_refus_attendu.update(range(node.lineno, fin + 1))
         for node in ast.walk(tree):
             if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                     and node.func.id in imported):
+                continue
+            if node.lineno in lignes_refus_attendu:
+                refus_prouves += 1
                 continue
             obj = imported[node.func.id]
             target = obj.__init__ if inspect.isclass(obj) else obj
@@ -395,8 +423,9 @@ def c_arity():
                 problems.append(f"{loc} {node.func.id}() TROP d'args positionnels ({n}>{len(pos)})")
             if not has_kw and (kw - {p.name for p in params}):
                 problems.append(f"{loc} {node.func.id}() KWARG INCONNU {sorted(kw - {p.name for p in params})}")
-    return c.finish(f"{checked} appels ({skipped} ignores: depaquetage), {len(problems)} probleme(s)",
-                    _trim(problems))
+    return c.finish(f"{checked} appels ({skipped} ignores: depaquetage, "
+                    f"{refus_prouves} refus PROUVES par pytest.raises(TypeError)), "
+                    f"{len(problems)} probleme(s)", _trim(problems))
 
 
 # =============================================================== 5. imports inutilises
@@ -785,18 +814,85 @@ def _pytest_base_args() -> list[str]:
             "-o", "faulthandler_timeout=120"]
     try:
         import pytest_timeout  # noqa: F401
-        args += ["--timeout=180", "--timeout-method=thread"]
+        # 600 s, PAS 180 (recalibre le 2026-11-21 sur une mesure). `--timeout-method=thread`
+        # est le SEUL disponible sous Windows, et il tue le PROCESSUS, donc le worker xdist.
+        # `test_snapshot_sans_arreter` passe en 6,5 s seul mais depassait 120 s sous 4 workers :
+        # a 180 s il etait tue, son worker mourait, xdist le remplacait et le planificateur
+        # `loadfile` levait `KeyError: <WorkerController gw5>` -> session ABATTUE a 59 %,
+        # ~8 000 tests jamais lances, et un « 11715 passed » qui avait l'air d'un succes.
+        # Une GARDE se calibre sur le pire cas legitime, pas sur le cas courant : 600 s laisse
+        # passer un test lent sous charge tout en restant un filet contre un vrai gel.
+        args += ["--timeout=600", "--timeout-method=thread"]
     except ImportError:
         print("   [!] pytest-timeout absent : un test bloque figera l'audit.", flush=True)
         print("   [!] Installe-le : pip install pytest-timeout", flush=True)
+    # PARALLELISME (ajoute le 2026-11-21, apres mesure). La suite compte 19 673 tests :
+    # 1 788 s avec `-n 4 --dist loadfile`, soit de l'ordre de 4 a 6 h en SERIE -- au-dela du
+    # plafond de 7 200 s de `_run_stream`. La regle 20 ne pouvait donc PAS finir, et son rouge
+    # disait « un test bloque sans fin » alors que la suite avait seulement besoin de temps.
+    # `--dist loadfile` (et non `load`) parce que des fichiers de tests partagent un etat de
+    # module : regrouper par FICHIER est le seul mode sous lequel la suite est mesuree verte.
+    try:
+        import xdist  # noqa: F401
+        # `--max-worker-restart=0` : si un worker meurt quand meme, xdist ne le REMPLACE pas.
+        # Le remplacement est ce qui faisait lever `KeyError: <WorkerController gwN>` dans
+        # `loadfile` -- un INTERNALERROR opaque au lieu d'un echec nomme. Sans remplacement,
+        # la mort d'un worker se lit en clair, et c_tests() la rapporte comme telle.
+        args += ["-n", "4", "--dist", "loadfile", "--max-worker-restart=0"]
+    except ImportError:
+        print("   [!] pytest-xdist absent : suite en SERIE, elle depassera le plafond.",
+              flush=True)
     return args
+
+
+def _coverage_run_est_utilisable() -> bool:
+    """`coverage run` est-il capable de lancer quoi que ce soit avec CET interpreteur ?
+
+    LE DEFAUT QU'ON MESURAIT A LA PLACE DE LA SUITE (trouve le 2026-11-21). `coverage run`
+    retire de `sys.path` le dossier de `python.exe`. Sur un runtime EMBARQUE -- et le projet
+    en embarque un dans `tools/python/` -- c'est precisement ce dossier qui contient les
+    extensions de la bibliotheque standard (`unicodedata.pyd`, ...). Sous coverage,
+    `import unicodedata` echoue donc, et pytest MEURT avant d'avoir collecte un seul test :
+    code 1, sortie vide. La regle 20 concluait alors « LA SUITE S'EST ARRETEE TOUTE SEULE »
+    et designait un test coupable qui n'avait jamais tourne.
+
+    Mesure, pas supposition : on lance une sonde d'import sous coverage et on lit son code de
+    sortie. Si elle casse, la suite part SANS coverage -- et on le DIT. Perdre la couverture
+    est un moindre mal ; perdre la suite entiere en accusant un innocent, non.
+    """
+    sonde = ROOT / "runtime" / "logs" / "tests" / f"sonde_coverage_{os.getpid()}.py"
+    try:
+        sonde.parent.mkdir(parents=True, exist_ok=True)
+        sonde.write_text("import unicodedata, sqlite3, json  # noqa: F401" + chr(10),
+                         encoding="utf-8")
+        code, _ = _run([sys.executable, "-m", "coverage", "run", str(sonde)], timeout=180)
+        return code == 0
+    except Exception as exc:                                           # noqa: BLE001
+        print(f"   [!] sonde coverage impossible ({exc}) -> suite sans coverage", flush=True)
+        return False
+    finally:
+        with suppress(OSError):
+            sonde.unlink()
+
+
+def _cause_de_non_demarrage(sortie: str) -> str:
+    """La DERNIERE exception lisible dans une sortie pytest qui n'a rien collecte."""
+    motif = "^[A-Za-z_][A-Za-z0-9_.]*(Error|Exception|Exit)"
+    for ligne in reversed(sortie.strip().splitlines()):
+        t = ligne.strip()
+        if re.match(motif, t):
+            return t[:300]
+    for ligne in reversed(sortie.strip().splitlines()):
+        if ligne.strip():
+            return ligne.strip()[:300]
+    return "sortie VIDE : le processus n'a rien ecrit du tout"
 
 
 def c_tests():
     c = Check("20. Suite de tests complete")
-    print("   >>> PARTIE LONGUE (2 a 6 min). NE FERME PAS, NE FAIS PAS CTRL-C.", flush=True)
+    print("   >>> PARTIE LONGUE (8 a 30 min). NE FERME PAS, NE FAIS PAS CTRL-C.", flush=True)
     print("   >>> Le rapport est deja sur le disque : tu ne perdras rien.", flush=True)
-    print("   >>> Un test bloque > 180s est tue et signale (il ne peut plus figer l'audit).",
+    print("   >>> Un test bloque > 600s est tue et signale (il ne peut plus figer l'audit).",
           flush=True)
     has_cov = True
     try:
@@ -804,6 +900,15 @@ def c_tests():
     except ImportError:
         has_cov = False
     base = _pytest_base_args()
+    coverage_ecarte = ""
+    if has_cov and not _coverage_run_est_utilisable():
+        has_cov = False
+        coverage_ecarte = (
+            "coverage run CASSE cet interpreteur (il retire de sys.path le dossier de "
+            "python.exe, ou un runtime embarque range unicodedata.pyd & co) -> suite "
+            "lancee SANS coverage, seul moyen de la MESURER"
+        )
+        print("   [!] " + coverage_ecarte, flush=True)
     if has_cov:
         cmd = [sys.executable, "-m", "coverage", "run", "--source=src/hl_observer",
                "-m", "pytest"] + base
@@ -824,12 +929,52 @@ def c_tests():
                     "Cherche 'Timeout' dans les traces ci-dessous.")
     if code == 124:
         errs.append(">>> La suite entiere a depasse le timeout global : un test bloque sans fin.")
+    if coverage_ecarte:
+        errs.append("[info] " + coverage_ecarte)
+    # UNE SESSION ABATTUE N'EST PAS UNE MESURE (ajoute le 2026-11-21).
+    #
+    # Ce qui s'est passe : `test_snapshot_sans_arreter` a depasse le timeout, pytest-timeout a
+    # tue son worker, xdist l'a remplace, et le planificateur `loadfile` a leve
+    # `KeyError: <WorkerController gw5>` -> INTERNALERROR. pytest a tout de meme imprime
+    # « 2 failed, 11715 passed » : un total qui TAIT que ~8 000 tests n'ont jamais tourne.
+    # Lire cette ligne comme un resultat de suite, c'est se croire couvert alors qu'on l'est
+    # a 60 %. On compare donc le nombre de tests COLLECTES au nombre de tests EXECUTES, et on
+    # refuse de presenter un total partiel comme un verdict.
+    if "INTERNALERROR" in out:
+        causes = [ligne.split("INTERNALERROR>", 1)[-1].strip()
+                  for ligne in out.splitlines() if "INTERNALERROR>" in ligne]
+        cause = next((c for c in reversed(causes) if c and ":" in c and "File " not in c), "?")
+        errs.insert(0, ">>> SESSION PYTEST ABATTUE (INTERNALERROR) : le total annonce ne "
+                       "couvre PAS la suite -- des tests n'ont jamais tourne.")
+        errs.insert(1, f">>> Cause finale : {cause[:300]}")
+    collectes = [int(x) for x in re.findall("([0-9]+) items", out)]
+    collectes += [int(x) for x in re.findall("collected ([0-9]+)", out)]
+    executes = sum(int(x) for x in re.findall("([0-9]+) (?:passed|failed|skipped|xfailed|error)",
+                                              summary or ""))
+    if collectes and executes:
+        attendu = max(collectes)
+        if executes < attendu:
+            errs.insert(0, f">>> {attendu - executes} test(s) COLLECTES mais JAMAIS EXECUTES "
+                           f"({executes}/{attendu}) : ce resultat n'est pas celui de la suite.")
     if not summary or "KeyboardInterrupt" in out:
-        started = re.findall(r"^(tests[/\\]\S+::\S+)", out, re.M)
+        # Sous xdist, chaque ligne commence par `[gw0] [ 12%] PASSED ` : une ancre `^tests`
+        # ne voyait donc PLUS AUCUN test lance, et le diagnostic aurait accuse
+        # l'environnement alors que la suite tournait. On cherche le nom OU QU'IL SOIT.
+        started = [m for ligne in out.splitlines()
+                   for m in re.findall("(tests[^ ]*::[^ ]+)", ligne)]
         last = started[-1] if started else "?"
-        errs.insert(0, f">>> LA SUITE S'EST ARRETEE TOUTE SEULE. DERNIER TEST LANCE : {last}")
-        errs.insert(1, ">>> C'est LUI le coupable (Ctrl-C interne, gel ou crash). "
-                       "L'audit, lui, a survecu et continue.")
+        if not started:
+            # AUCUN test n'a meme commence : accuser « le dernier test lance » serait
+            # designer un coupable qui n'a jamais tourne. On rend la VRAIE cause.
+            errs.insert(0, ">>> PYTEST N'A PAS DEMARRE : zero test collecte, zero test lance.")
+            errs.insert(1, f">>> Cause lue dans la sortie : {_cause_de_non_demarrage(out)}")
+            errs.insert(2, ">>> Ce n'est donc PAS un test qui a tue la suite : c'est "
+                           "l'ENVIRONNEMENT d'execution. Ne cherche aucun coupable "
+                           "parmi les tests.")
+        else:
+            errs.insert(0, f">>> LA SUITE S'EST ARRETEE TOUTE SEULE. DERNIER TEST LANCE : {last}")
+            errs.insert(1, ">>> C'est LUI le coupable (Ctrl-C interne, gel ou crash). "
+                           "L'audit, lui, a survecu et continue.")
         if "KeyboardInterrupt" in out:
             errs.insert(2, ">>> pytest a recu un KeyboardInterrupt que PERSONNE n'a tape : "
                            "un test declenche un Ctrl-C sur la console.")
@@ -1485,8 +1630,28 @@ def c_toolkit_pure():
                 continue
             if root == "numpy" and "vectorized" in rel:
                 continue                      # numpy AVEC fallback pur : autorise
-            bad.append(f"{rel} importe `{imp}` (le toolkit doit rester pur)")
-    return c.finish(f"{len(bad)} dependance(s) externe(s) dans le toolkit", _trim(bad))
+            # DEUX CLASSES, DEUX DECISIONS (distingue le 2026-11-21). Un compte unique de
+            # « 19 dependances » cachait que ce rouge melange deux problemes de nature et de
+            # cout tres differents :
+            #   * la PILE SCIENTIFIQUE (numpy / pandas / scipy) : la retirer est une
+            #     REECRITURE des modules de recherche, avec un risque reel de deplacer des
+            #     chiffres deja mesures -- c'est une decision d'architecture ;
+            #   * une VIOLATION DE COUCHES : `src/` qui importe `tools/`. Le toolkit ne
+            #     s'importe alors plus sans la racine du depot sur sys.path. Un seul site
+            #     d'import dans src/ est concerne, et les deux modules vises sont stdlib pur :
+            #     c'est une correction locale, pas une reecriture.
+            # On compte toujours les deux (le rouge reste entier), mais on dit lequel est
+            # lequel : un diagnostic indifferencie fait prendre une decision pour l'autre.
+            if root in ("tools", "hyper_smart_observer"):
+                bad.append(f"{rel} importe `{imp}` -- COUCHES : src/ ne doit pas dependre de "
+                           f"{root}/ (correction locale, modules stdlib pur)")
+            else:
+                bad.append(f"{rel} importe `{imp}` -- PILE SCIENTIFIQUE : le toolkit doit "
+                           f"rester pur (retrait = reecriture, decision d'architecture)")
+    couches = len([x for x in bad if "COUCHES" in x])
+    return c.finish(f"{len(bad)} dependance(s) externe(s) dans le toolkit "
+                    f"({couches} violation(s) de couches, {len(bad) - couches} pile "
+                    f"scientifique)", _trim(bad))
 
 
 def c_no_io_at_import():
@@ -1580,13 +1745,55 @@ def c_env_example_sync():
 # ---------------------------------------------------------------- TESTS (suite)
 def c_tests_write_runtime():
     c = Check("Tests qui ECRIVENT dans runtime/ ou logs/ (polluent tes vraies donnees)")
-    bad = []
+    # LE FILTRE S'ATTRAPAIT LUI-MEME (trouve le 2026-11-21). La regle etait TEXTUELLE :
+    #     re.finditer(r"open\(\s*[\"'](?:\./)?(runtime|logs)[/\\]", txt)
+    # Elle signalait donc `tests/test_ecriture_sans_troncature.py:80`, dont la ligne est
+    #     assert ecriture_sans_garde('open("runtime/scenarios/...","w").write(...)')
+    # c'est-a-dire une CHAINE citee comme CAS DE TEST, pas une ecriture. Un detecteur qui lit
+    # une citation comme un fait accuse le test qui prouve justement la regle.
+    #
+    # Desormais on lit l'ARBRE : il faut un vrai `ast.Call` a `open`/`io.open`, un chemin
+    # LITTERAL sous `runtime/` ou `logs/`, et un mode d'ECRITURE. Une chaine passee a une
+    # autre fonction n'est plus qu'une `ast.Constant` : elle ne peut plus mentir.
+    #
+    # LIMITE ASSUMEE, ecrite ici pour qu'elle ne soit pas prise pour une garantie : seuls les
+    # chemins litteraux sont vus. `open(ROOT / "runtime" / x, "w")` passe sous le radar --
+    # exactement comme avec l'ancienne regex, donc la regle ne perd aucune puissance.
+    MODES_ECRITURE = ("w", "a", "x", "+")
+    bad, lectures = [], []
     for p in _py_files("tests"):
-        txt = p.read_text(encoding="utf-8", errors="replace")
-        for m in re.finditer(r"open\(\s*[\"'](?:\./)?(runtime|logs)[/\\]", txt):
-            line = txt[:m.start()].count("\n") + 1
-            bad.append(f"{_rel(p)}:{line} ecrit dans {m.group(1)}/ -- pollue tes donnees reelles")
-    return c.finish(f"{len(bad)} test(s) qui polluent", _trim(bad))
+        tree = _arbre(p)          # None => illisible, DEJA enregistre
+        if tree is None:
+            continue
+        for n in ast.walk(tree):
+            if not isinstance(n, ast.Call) or not n.args:
+                continue
+            nom = n.func.attr if isinstance(n.func, ast.Attribute) else getattr(n.func, "id", "")
+            if nom != "open":
+                continue
+            cible = n.args[0]
+            if not (isinstance(cible, ast.Constant) and isinstance(cible.value, str)):
+                continue
+            chemin = cible.value.replace(chr(92), "/")
+            while chemin[:2] == "./":
+                chemin = chemin[2:]
+            racine = chemin.split("/")[0]
+            if racine not in ("runtime", "logs"):
+                continue
+            mode = ""
+            if len(n.args) > 1 and isinstance(n.args[1], ast.Constant):
+                mode = str(n.args[1].value or "")
+            for kw in n.keywords:
+                if kw.arg == "mode" and isinstance(kw.value, ast.Constant):
+                    mode = str(kw.value.value or "")
+            if any(ch in mode for ch in MODES_ECRITURE):
+                bad.append(f"{_rel(p)}:{n.lineno} ecrit dans {racine}/ (mode {mode!r}) "
+                           f"-- pollue tes donnees reelles")
+            else:
+                lectures.append(f"{_rel(p)}:{n.lineno} LIT {racine}/ -- pas une pollution, "
+                                f"mais une dependance a l'etat reel de la machine")
+    return c.finish(f"{len(bad)} test(s) qui polluent ({len(lectures)} lecture(s) de runtime/)",
+                    _trim(bad), _trim(lectures))
 
 
 def c_slow_tests():
@@ -1810,11 +2017,34 @@ def c_init_with_logic():
 
 def c_test_files_misplaced():
     c = Check("Fichiers test_*.py HORS du dossier tests/ (jamais executes)")
-    bad = []
+    # LA REGLE LISAIT UNE ETIQUETTE (corrige le 2026-11-21). Elle signalait tout fichier
+    # nomme `test_*.py` hors de `tests/`, et accusait donc deux MODULES METIER :
+    #   * `agent_tools/efficiency/test_impact.py` -- l'analyse d'IMPACT sur les tests ;
+    #   * `backtesting/test_transversal.py`       -- le TEST statistique transversal.
+    # Aucun des deux ne contient une seule fonction `test_*` ; les deux sont importes par du
+    # code de production et couverts par de vrais tests (`tests/test_agent_efficiency.py`,
+    # `tests/test_test_transversal.py`). Les renommer casserait des imports partout pour
+    # satisfaire une regle qui confondait le NOM et le CONTENU.
+    # Le bon discriminant est donc : ce fichier contient-il des fonctions que pytest
+    # COLLECTERAIT ? Si oui, c'est un test oublie (bloquant). Sinon, c'est un homonyme metier.
+    bad, homonymes = [], []
     for p in _py_files(*_code_dirs_no_tests()):
-        if p.name.startswith("test_"):
-            bad.append(f"{_rel(p)} : nomme test_* mais hors de tests/ -> JAMAIS lance")
-    return c.finish(f"{len(bad)} test(s) au mauvais endroit", _trim(bad))
+        if not p.name.startswith("test_"):
+            continue
+        tree = _arbre(p)          # None => illisible, DEJA enregistre
+        if tree is None:
+            continue
+        collectables = [n.name for n in ast.walk(tree)
+                        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                        and n.name.startswith("test_")]
+        if collectables:
+            bad.append(f"{_rel(p)} : {len(collectables)} fonction(s) test_* hors de tests/ "
+                       f"-> JAMAIS lance ({', '.join(collectables[:3])})")
+        else:
+            homonymes.append(f"{_rel(p)} : aucune fonction test_* -- module metier homonyme "
+                             f"(« test » au sens statistique / analyse d'impact), pas un oubli")
+    return c.finish(f"{len(bad)} test(s) au mauvais endroit "
+                    f"({len(homonymes)} homonyme(s) metier)", _trim(bad), _trim(homonymes))
 
 
 def c_type_hints():
@@ -3238,6 +3468,122 @@ def c_sante_runtime():
     return c.finish(resume, None, warns)
 
 
+def _exchange_url_est_refusee():
+    """PREUVE PAR EXECUTION : l'endpoint d'ordre reel est REFUSE, pas seulement absent.
+
+    POURQUOI CETTE REGLE EXISTE (2026-11-21). La regle textuelle « Aucune URL d'execution
+    (endpoint /exchange) » rougissait sur `ops/validation_portable.py:311`, qui est le GARDE
+    lui-meme :
+
+        if "/exchange" in url.casefold() or not url.startswith("https://"):
+
+    Le garde etait accuse a la place du voleur -- le motif meme qui a motive le marqueur
+    `audit:fixture` du depot. Mais sortir cette ligne du compte textuel sans rien mettre a la
+    place echangerait un faux positif contre un ANGLE MORT : plus personne ne verifierait que
+    le refus fonctionne.
+
+    On execute donc le garde : on lui donne l'endpoint interdit et une URL en clair, et on
+    exige qu'il refuse les deux SANS JAMAIS appeler l'ouvreur reseau. Une absence de code
+    n'est pas une preuve ; un refus mesure, oui.
+    """
+    from hl_observer.ops import validation_portable as vp
+
+    appels = []
+
+    def _ouvreur_interdit(request, timeout=None):
+        appels.append(getattr(request, "full_url", str(request)))
+        raise RuntimeError("l'ouvreur reseau NE DOIT PAS etre appele sur une URL interdite")
+
+    piege = (
+        ("piege_exchange", "POST", "https://api.hyperliquid.xyz/exchange",
+         {"type": "order"}, True),
+        ("piege_en_clair", "POST", "http://api.hyperliquid.xyz/info", {"type": "meta"}, True),
+    )
+    anciens = vp.NETWORK_ENDPOINTS
+    try:
+        vp.NETWORK_ENDPOINTS = piege
+        sortie = vp.smoke_reseau_readonly(opener=_ouvreur_interdit, timeout=1.0)
+    finally:
+        vp.NETWORK_ENDPOINTS = anciens
+
+    assert not appels, f"l'ouvreur reseau a ete appele : {appels}"
+    lignes = sortie.get("results") or []
+    assert len(lignes) == 2, f"{len(lignes)} resultat(s) au lieu de 2"
+    for ligne in lignes:
+        assert ligne.get("ok") is False, f"URL interdite ACCEPTEE : {ligne}"
+        assert "refused" in str(ligne.get("detail", "")).lower(), (
+            f"refus non nomme : {ligne}")
+    assert sortie.get("exchange_endpoint_used") is False
+    assert sortie.get("credentials_sent") is False
+    assert sortie.get("read_only") is True
+    assert sortie.get("ok") is False, "un lot d'URL interdites ne peut pas etre 'ok'"
+    return ("2 URL interdites (/exchange + http en clair) refusees sans aucun appel reseau ; "
+            "exchange_endpoint_used=False, credentials_sent=False")
+
+
+def c_dedup_archive_avant_suppression():
+    """La fenetre de dedup ne supprime qu'APRES avoir archive, et jamais en entier.
+
+    POURQUOI CETTE REGLE EXISTE (2026-11-21). La regle « Le LEDGER D'EVENEMENTS ne doit jamais
+    etre supprime ni reecrit » rougissait sur `realtime/durable_dedup.py` :
+
+        DELETE FROM seen_events WHERE row_sequence <= ?
+
+    `seen_events` n'est pas le ledger d'evenements : c'est la FENETRE VIVANTE de deduplication,
+    bornee par construction, et son compactage ARCHIVE les lignes evincees avant de les
+    supprimer (`_write_archive` puis `DELETE`, dans la MEME transaction). Le motif ne matchait
+    que l'homonymie du mot « event » dans `seen_events`.
+
+    Plutot que de croire ce paragraphe, on le VERIFIE dans l'arbre : l'archivage doit preceder
+    la suppression, et la suppression doit etre bornee. Si quelqu'un inverse les deux lignes un
+    jour, cette regle rougit -- et c'est exactement le risque que la regle textuelle visait.
+    """
+    c = Check("DEDUP : la fenetre archive AVANT de supprimer (jamais une perte seche)")
+    chemin = SRC / "hl_observer" / "realtime" / "durable_dedup.py"
+    erreurs = []
+    tree = _arbre(chemin) if chemin.is_file() else None
+    if tree is None:
+        return c.finish("module de dedup introuvable ou illisible",
+                        [f"{_rel(chemin)} : illisible ou absent -- la regle ne peut rien prouver"])
+    compact = None
+    for n in ast.walk(tree):
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == "compact":
+            compact = n
+            break
+    if compact is None:
+        return c.finish("compact() introuvable",
+                        ["`compact()` a disparu de durable_dedup.py : la fenetre de dedup "
+                         "n'a plus de compactage prouve"])
+    archives = [x.lineno for x in ast.walk(compact)
+                if isinstance(x, ast.Call) and isinstance(x.func, ast.Attribute)
+                and x.func.attr == "_write_archive"]
+    suppressions = [x.lineno for x in ast.walk(compact)
+                    if isinstance(x, ast.Constant) and isinstance(x.value, str)
+                    and "DELETE FROM" in x.value.upper()]
+    if not archives:
+        erreurs.append("compact() ne fait PLUS appel a _write_archive : les identites "
+                       "evincees seraient perdues sans trace")
+    if not suppressions:
+        erreurs.append("compact() ne supprime plus rien : la fenetre n'est plus bornee "
+                       "(la base grossit sans fin)")
+    if archives and suppressions and min(archives) > min(suppressions):
+        erreurs.append(f"la SUPPRESSION (ligne {min(suppressions)}) precede l'ARCHIVAGE "
+                       f"(ligne {min(archives)}) : perte seche si l'archive echoue")
+    for x in ast.walk(compact):
+        if isinstance(x, ast.Constant) and isinstance(x.value, str) \
+                and "DELETE FROM" in x.value.upper() and "WHERE" not in x.value.upper():
+            erreurs.append(f"ligne {x.lineno} : DELETE SANS WHERE -- la fenetre entiere "
+                           f"serait videe, pas seulement l'exces")
+    detail = (f"archive ligne {min(archives) if archives else '?'} AVANT suppression ligne "
+              f"{min(suppressions) if suppressions else '?'}, suppression bornee par un WHERE")
+    return c.finish(detail if not erreurs else "contrat d'archivage rompu", erreurs)
+
+
+c_exchange_url_refusee = exec_rule(
+    "SECURITE : une URL d'execution est REFUSEE (preuve par execution)",
+    _exchange_url_est_refusee)
+
+
 def c_fichiers_illisibles():
     """Un fichier que l audit ne sait pas lire est exempte de TOUTES les regles AST."""
     c = Check("Aucun fichier illisible par l'audit (un fichier saute est exempte de tout)")
@@ -3270,14 +3616,14 @@ def main():
 
     plan = [
         # --- INTEGRITE DU CODE ---
-        c_fichiers_illisibles,
+        c_fichiers_illisibles, c_dedup_archive_avant_suppression,
         c_compile, c_imports, c_all_imports, c_circular, c_arity, c_dead_imports,
         c_lazy_import, c_star_import, c_empty_files, c_init_with_logic,
         c_duplicate_module_names, c_module_docstrings, c_type_hints,
         # --- SECURITE : AUCUNE EXECUTION REELLE ---
         c_secrets, c_no_real_exec, c_lib_signature, c_env_privkey, c_exchange_url,
         c_wallet_connect, c_shell_true, c_eval_exec, c_pickle, c_os_system,
-        c_profit_promise, c_safety,
+        c_profit_promise, c_safety, c_exchange_url_refusee,
         # --- ROBUSTESSE D'UN RUN 48h ---
         c_silent_except, c_pass_in_except, c_http_no_timeout, c_ws_no_timeout,
         c_open_no_with, c_open_no_encoding, c_sqlite_no_ctx, c_thread_no_daemon,

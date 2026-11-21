@@ -32,6 +32,28 @@ import hashlib
 SEPARATEUR = "-t"
 
 
+def tranche_valide(tranche) -> tuple[int, int]:
+    """Rend la tranche sous la forme `(debut, fin)`, ou REFUSE en nommant le probleme.
+
+    POURQUOI UN REFUS NOMME PLUTOT QU'UN IndexError. `int(tranche[0])` sur une sequence trop
+    courte levait un `IndexError: list index out of range` nu : le nom d'une campagne -- donc
+    l'endroit ou s'ecrivent `TRIALS.jsonl` et `CHECKPOINT.json` -- se fabriquait sur une
+    exception qui ne dit ni QUOI etait invalide, ni OU. Le fuzzing de l'audit l'a attrape a
+    juste titre le 2026-11-21 (`nom_de_campagne([]) -> IndexError`).
+
+    Une tranche mal formee est une donnee CONTRADICTOIRE : la regle du projet est qu'elle
+    refuse, jamais qu'elle passe en silence ni qu'elle rende un nom tronque. `ValueError`
+    porte le motif ; `None` reste le seul moyen legitime de dire « pas de tranche ».
+    """
+    try:
+        debut, fin = tranche
+        return int(debut), int(fin)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "TRANCHE_INVALIDE : attendu (debut_ms, fin_ms) ou None, recu %r" % (tranche,)
+        ) from exc
+
+
 def nom_de_campagne(selection_digest: str, tranche: tuple[int, int] | None) -> str:
     """Le nom du dossier d'une campagne : `{digest}` ou `{digest}-t{début}-{fin}`.
 
@@ -40,7 +62,8 @@ def nom_de_campagne(selection_digest: str, tranche: tuple[int, int] | None) -> s
     """
     if tranche is None:
         return selection_digest
-    return f"{selection_digest}{SEPARATEUR}{int(tranche[0])}-{int(tranche[1])}"
+    debut, fin = tranche_valide(tranche)
+    return f"{selection_digest}{SEPARATEUR}{debut}-{fin}"
 
 
 def digest_de_campagne(nom: str) -> str:
@@ -68,7 +91,8 @@ def empreinte_de_tranche(tranche: tuple[int, int] | None) -> str:
     """
     if tranche is None:
         return ""
-    graine = f"{int(tranche[0])}-{int(tranche[1])}"
+    debut, fin = tranche_valide(tranche)
+    graine = f"{debut}-{fin}"
     return hashlib.sha256(graine.encode("utf-8")).hexdigest()[:8]
 
 
@@ -83,5 +107,5 @@ def est_tranchee(nom: str) -> bool:
 
 __all__ = [
     "SEPARATEUR", "nom_de_campagne", "digest_de_campagne", "est_tranchee",
-    "empreinte_de_tranche",
+    "empreinte_de_tranche", "tranche_valide",
 ]
