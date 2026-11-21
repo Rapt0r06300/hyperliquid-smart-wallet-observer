@@ -39,7 +39,27 @@ LOGDIR = RACINE / "runtime" / "logs" / "cmd"
 REGISTRE: list[tuple[str, str, list[str], float, str]] = [
     ("SUIVI_COFFRE",          "SUIVI_COFFRE.cmd",                  [],            45,   "sur"),
     ("RAPPORT_COLLECTEURS",   "RAPPORT-COLLECTEURS.cmd",           [],           150,   "sur"),
-    ("Certificateur_data",    "Certificateur Coffre Fort.cmd",     ["--data"],   360,   "sur"),
+    # 21/11/2026 -- L ENTREE RAPIDE HONNETE. En sortant Certificateur_data de `sur`
+    # (voir juste dessous), la passe rapide tombait a 3 entrees et mon propre test
+    # test_la_passe_rapide_reste_rapide refusait : "la regle ne couvre plus la passe".
+    # Baisser ce seuil pour accommoder mon changement aurait affaibli une garde. Le
+    # lanceur expose `--plan`, qui AFFICHE ce qui manque et s arrete : mesure du 21/11,
+    # 2 secondes, exit=0, zero requete reseau. C est exactement ce que `sur` demande --
+    # une commande qui doit se terminer, et qui se termine. Meme patron que
+    # RATTRAPAGE_plan, et meme .cmd teste sous deux invocations comme ALINA_SYNC.
+    ("Certificateur_plan",    "Certificateur Coffre Fort.cmd",     ["--plan"],    90,   "sur"),
+    # 21/11/2026 -- MESURE. Cette entree etait classee `sur` avec 360 s et ressortait
+    # "A VOIR" a chaque passe (exit=None, CRITIQUE=0 ERREUR=0 AVERT=0) : indistinguable
+    # d une panne. Le verdict n y est pour rien -- le docstring de etat_du_resultat dit
+    # exprès qu une commande `sur` DOIT se terminer, et c est la bonne regle. C est la
+    # CLASSIFICATION qui etait fausse : `--data` certifie tout runtime/data, et au bout
+    # des 360 s il etait a 44 coins sur 263 du seul rattrapage des bougies 1d (log
+    # Certificateur_data__20261121T050018). A ce rythme les bougies seules demandent
+    # ~35 min, plus la passe de scellement (mesuree a 44,3 Mo/s sur ~27 Go, soit ~10 min).
+    # D ou `lourd` : plafond genereux, hors passe rapide, et surtout `lourd` ne TUE PAS
+    # les collecteurs (contrairement a `long`) -- or ce travail lit runtime/data pendant
+    # qu ils ecrivent. 5400 s laisse de la marge sans bloquer la batterie lourde 4 h.
+    ("Certificateur_data",    "Certificateur Coffre Fort.cmd",     ["--data"],  5400,   "lourd"),
     # 20/11/2026 -- MESURE, PAS ESTIMATION. Cette entree etait classee `sur` avec
     # 900 s. Or `--preflight-only` emprunte TOUJOURS le mode EXACT_SHA_SCAN de
     # restore_alina : il verifie en SHA-256 chaque asset present
