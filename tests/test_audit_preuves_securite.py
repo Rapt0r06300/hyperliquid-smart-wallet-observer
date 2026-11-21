@@ -156,3 +156,81 @@ def test_les_deux_regles_sont_BLOQUANTES():
     m = _audit()
     assert m.c_exchange_url_refusee().blocking is True
     assert m.c_dedup_archive_avant_suppression().blocking is True
+
+
+# ------------------------------- l'interpreteur qui MESURE doit etre le bon
+def _requirements_bidon(monkeypatch, tmp_path, contenu):
+    """Fait lire a la regle un requirements.txt fabrique, sans toucher au vrai."""
+    m = _audit()
+    (tmp_path / "requirements.txt").write_text(contenu, encoding="utf-8")
+    monkeypatch.setattr(m, "ROOT", tmp_path)
+    return m
+
+
+def test_la_regle_est_verte_quand_l_interpreteur_satisfait_les_bornes(
+        monkeypatch, tmp_path):
+    m = _requirements_bidon(
+        monkeypatch, tmp_path, "pytest>=0" + chr(10) + "packaging>=0" + chr(10))
+    verdict = m.c_interpreteur_conforme_aux_requirements()
+    assert verdict.ok, verdict.errors
+    assert "2/2" in verdict.summary
+
+
+def test_la_regle_ROUGIT_sur_une_version_interdite(monkeypatch, tmp_path):
+    """LE CAS REEL DU 21/11/2026.
+
+    La passe complete (19 860 tests verts) avait tourne sous un interpreteur
+    portant pytest 8.4.2 et websockets 10.4, alors que requirements.txt exige
+    pytest>=9.0.3,<10 et websockets>=17,<18. Deux echecs n'avaient pas
+    d'autre cause. Un vert obtenu sur une bibliotheque interdite n'est pas
+    un verdict : la regle doit le dire, et le dire en BLOQUANT.
+    """
+    m = _requirements_bidon(
+        monkeypatch, tmp_path, "pytest>=99,<100" + chr(10))
+    verdict = m.c_interpreteur_conforme_aux_requirements()
+    assert not verdict.ok, (
+        'une version hors bornes n a pas fait rougir la regle'
+    )
+    assert verdict.blocking is True, (
+        'la regle doit rester BLOQUANTE : un faux vert se presenterait'
+        ' comme un verdict'
+    )
+    joint = chr(10).join(verdict.errors)
+    assert "pytest" in joint and ">=99" in joint
+    assert "interpreteur courant" in joint, (
+        'le refus doit nommer l interpreteur fautif, sinon il est inactionnable'
+    )
+    assert "tools/python/python.exe" in joint, (
+        'le refus doit donner le remede : l interpreteur epingle du depot'
+    )
+
+
+def test_la_regle_ROUGIT_sur_un_paquet_absent(monkeypatch, tmp_path):
+    m = _requirements_bidon(
+        monkeypatch, tmp_path,
+        "paquet-qui-n-existe-pas-du-tout>=1" + chr(10))
+    verdict = m.c_interpreteur_conforme_aux_requirements()
+    assert not verdict.ok
+    assert any("ABSENT" in e for e in verdict.errors)
+
+
+def test_la_regle_ROUGIT_plutot_que_de_ne_rien_mesurer(monkeypatch, tmp_path):
+    """Un fichier vide, ou absent, ne doit pas donner un vert favorable."""
+    m = _requirements_bidon(
+        monkeypatch, tmp_path, "# que des commentaires" + chr(10))
+    verdict = m.c_interpreteur_conforme_aux_requirements()
+    assert not verdict.ok, 'aucune borne lue = regle AVEUGLE, donc refus'
+    assert any("AVEUGLE" in e for e in verdict.errors)
+
+    (tmp_path / "requirements.txt").unlink()
+    verdict = m.c_interpreteur_conforme_aux_requirements()
+    assert not verdict.ok, 'fichier absent = refus, jamais un vert'
+    assert verdict.blocking is True
+
+
+def test_la_regle_est_bien_branchee_dans_le_plan_bloquant():
+    """Une regle non enregistree ne protege personne."""
+    source = (RACINE / "tools" / "audit_report.py").read_text(encoding="utf-8")
+    assert "c_interpreteur_conforme_aux_requirements," in source, (
+        'la regle n est pas listee dans `plan` : elle ne tournera jamais'
+    )

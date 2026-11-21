@@ -3605,6 +3605,78 @@ c_exchange_url_refusee = exec_rule(
     _exchange_url_est_refusee)
 
 
+def c_interpreteur_conforme_aux_requirements():
+    """L'interpreteur qui EXECUTE la suite doit satisfaire requirements.txt.
+
+    21/11/2026 -- UNE SUITE VERTE PEUT MESURER LE MAUVAIS PRODUIT.
+    La passe complete du jour (19 860 tests verts, 31m38s) a tourne sous
+    l'interpreteur systeme avec pytest 8.4.2 et websockets 10.4, alors que
+    `requirements.txt` exige `pytest>=9.0.3,<10` et `websockets>=17,<18` --
+    et le commentaire de ce fichier rappelle que pytest<9 porte un
+    signalement pip-audit corrige en 9.0.3.
+    Deux echecs de cette passe n'avaient AUCUNE autre cause :
+      * test_websockets_api_courante.py::test_la_bibliotheque_installee_accepte_le_nom_moderne
+      * tests/dydx_v4/...::TestLiveObserver::test_paper_entry_accepted
+    Tous deux VERTS sous `tools/python/python.exe` (pytest 9.0.3,
+    websockets 17.0.1), qui est l'interpreteur que les lanceurs et les
+    collecteurs utilisent reellement (son `python314._pth` porte
+    l'entree `src/` du depot). Sans cette regle, un vert obtenu sur une
+    bibliotheque INTERDITE se presente comme un verdict -- exactement le faux << parfait >>
+    que l'audit doit empecher.
+
+    La regle reste BLOQUANTE meme si `packaging` manque : un refus de mesurer
+    n'est pas une mesure favorable.
+    """
+    c = Check("L'interpreteur qui execute la suite respecte requirements.txt")
+    chemin = ROOT / "requirements.txt"
+    if not chemin.is_file():
+        return c.finish("requirements.txt introuvable",
+                        ["conformite NON verifiable : le fichier de bornes manque"])
+    try:
+        import importlib.metadata as _meta
+
+        from packaging.requirements import Requirement
+    except Exception as exc:                                        # noqa: BLE001
+        return c.finish("outillage de comparaison absent",
+                        [f"conformite NON verifiable ({type(exc).__name__}: {exc}) : "
+                         f"sans `packaging` on ne peut pas comparer les bornes"])
+    exigences, illisibles = [], []
+    for numero, ligne in enumerate(
+            chemin.read_text(encoding="utf-8").splitlines(), 1):
+        nu = ligne.split("#")[0].strip()
+        if not nu or nu.startswith("-"):
+            continue
+        try:
+            exigences.append(Requirement(nu))
+        except Exception as exc:                                    # noqa: BLE001
+            illisibles.append(f"requirements.txt:{numero} illisible ({exc}) : {nu[:60]}")
+    if not exigences:
+        return c.finish("aucune borne lue",
+                        ["la regle serait AVEUGLE : aucune dependance declaree "
+                         "n'a pu etre lue"] + illisibles)
+    fautes = list(illisibles)
+    conformes = []
+    for exigence in exigences:
+        try:
+            presente = _meta.version(exigence.name)
+        except Exception:                                           # noqa: BLE001
+            fautes.append(f"{exigence.name} ABSENT de cet interpreteur "
+                          f"(exige {exigence.specifier})")
+            continue
+        if exigence.specifier.contains(presente, prereleases=True):
+            conformes.append(f"{exigence.name} {presente}")
+        else:
+            fautes.append(f"{exigence.name} {presente} installe ici, "
+                          f"mais requirements.txt exige {exigence.specifier}")
+    if fautes:
+        fautes.append(f"interpreteur courant : {sys.executable}")
+        fautes.append("remede : relancer avec l'interpreteur epingle du depot, "
+                      "`tools/python/python.exe -m pytest ...` -- un vert obtenu "
+                      "sur une version interdite n'est pas un verdict")
+    return c.finish(
+        f"{len(conformes)}/{len(exigences)} dependance(s) declaree(s) conforme(s) "
+        f"dans l'interpreteur courant", fautes)
+
 def c_fichiers_illisibles():
     """Un fichier que l audit ne sait pas lire est exempte de TOUTES les regles AST."""
     c = Check("Aucun fichier illisible par l'audit (un fichier saute est exempte de tout)")
@@ -3645,6 +3717,7 @@ def main():
         c_secrets, c_no_real_exec, c_lib_signature, c_env_privkey, c_exchange_url,
         c_wallet_connect, c_shell_true, c_eval_exec, c_pickle, c_os_system,
         c_profit_promise, c_safety, c_exchange_url_refusee,
+        c_interpreteur_conforme_aux_requirements,
         # --- ROBUSTESSE D'UN RUN 48h ---
         c_silent_except, c_pass_in_except, c_http_no_timeout, c_ws_no_timeout,
         c_open_no_with, c_open_no_encoding, c_sqlite_no_ctx, c_thread_no_daemon,

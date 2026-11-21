@@ -80,7 +80,7 @@ from hl_observer.economics.numeric import (
 )
 from hl_observer.normalization.l2_book import normalize_l2_levels
 from hl_observer.simulation.economic_freeze_registry import parameter_hash
-from tools.copy_vault_continuity import load_release_history_audits
+from hl_observer.dataset.copy_vault_continuity import load_release_history_audits
 
 # EXTRAIT LE 21/11/2026 vers copy_vault_preuve_journaliere (invariant #13 : un fichier > son plafond
 # devient intouchable). Les definitions ont ete DEPLACEES, pas dupliquees ; cet
@@ -498,7 +498,7 @@ def _verified_assets(
                 )
             ) if progress is not None else None,
         )
-        from tools.partitioned_data_index import select_index_rows
+        from hl_observer.dataset.partitioned_data_index import select_index_rows
 
         if progress is not None:
             progress("Lecture bornée du DATA_INDEX actif, une partition à la fois")

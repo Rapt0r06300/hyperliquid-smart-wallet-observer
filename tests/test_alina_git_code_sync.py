@@ -2047,6 +2047,65 @@ def test_l_adoption_ne_refuse_que_sur_un_ecart_de_contenu(repos):
     assert task.report["adoption_protected_collisions"] == 0
 
 
+def test_l_adoption_materialise_le_catalogue_canonique(repos):
+    """L arbre de travail ne doit plus mentir sur `catalog/`.
+
+    MESURE DU 21/11/2026. `checkout-index` ne recevait que les chemins de
+    CODE : l index passait sur l arbre distant pendant que le worktree
+    gardait l ancien. Sur `catalog/campaigns` (5 265 manifestes suivis),
+    92 chemins divergeaient du disque : 73 perimes (git devant sur
+    attempts / completed_units / updated_at), 19 ABSENTS du disque, 0 ou le
+    local etait devant, 0 contradictoire. Exemple mesure :
+    market-e8-0-2026101820-v7.json, attempts 151 (git) contre 150 (disque),
+    index == HEAD == origin/main sur le meme blob 6eb7b0f94315.
+    """
+    local, cloud, _origin = repos
+    task, depart, arrivee = _monte_adoption(local, cloud)
+    fichier = local / "catalog" / "state.json"
+    assert fichier.read_text(encoding="utf-8") == "v1" + chr(10)
+
+    task._adopter_tete_sans_balayage(arrivee, depart, "le test")
+
+    assert fichier.read_text(encoding="utf-8") == "v2" + chr(10), (
+        'le catalogue est reste PERIME alors que l index annonce le distant :'
+        ' c est exactement la divergence silencieuse mesuree le 21/11/2026'
+    )
+    assert task.report["adoption_canonical_materialises"] >= 1
+
+
+def test_les_racines_lourdes_restent_exclues_de_l_ecriture() -> None:
+    """Elargir a `catalog/` ne doit pas ouvrir les shards.
+
+    Ecrire `datasets/` declencherait le telechargement des blobs sur ce
+    clone partiel `blob:none` : autre cout, autre decision.
+    """
+    adoptable = sync_module._adoptable_depuis_le_distant
+    assert adoptable("catalog/campaigns/market-e8-0.json") is True
+    assert adoptable("catalog/DATA_INDEX.json") is True
+    for lourd in (
+        "datasets/sharded/a/b.jsonl.gz",
+        "runtime/data/market_ticks/x/ticks.jsonl.gz",
+        "logs/hypersmart_observer.log",
+        "data/quelque_chose.json",
+        "archives/vieux.json",
+    ):
+        assert adoptable(lourd) is False, lourd
+
+
+def test_l_adoption_ne_touche_ni_le_churn_ni_un_secret_ni_une_archive() -> None:
+    """Trois exclusions qui doivent survivre a l elargissement."""
+    adoptable = sync_module._adoptable_depuis_le_distant
+    for chemin in sorted(sync_module.RUNTIME_CHURN_FILES):
+        assert adoptable(chemin) is False, (
+            'un fichier de churn a une version LOCALE plus recente :'
+            ' l ecraser avec le distant perdrait la mesure la plus fraiche'
+        )
+    assert adoptable("catalog/secrets/jeton.json") is False
+    assert adoptable("catalog/campaigns/paquet.zip") is False
+    assert adoptable("catalog/base.sqlite") is False
+    assert adoptable("catalog/../ailleurs.json") is False
+    assert adoptable("") is False
+
 def test_l_adoption_refuse_quand_le_contenu_diverge_vraiment(repos):
     """Meme montage, vrais octets locaux : REFUS, et rien ne bouge.
 

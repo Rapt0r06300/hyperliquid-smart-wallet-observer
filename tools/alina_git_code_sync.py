@@ -42,6 +42,48 @@ PROTECTED_DIRS = {
 # scan cannot complete within the launcher read budget; remote changes to one
 # of these paths are still checked individually before any merge.
 UNSCANNABLE_PROTECTED_ROOTS = {"datasets"}
+# 21/11/2026 -- MESURE : NE PAS ECRIRE `catalog/` LAISSAIT L'ARBRE MENTIR.
+# `checkout-index` ne recevait que les chemins de CODE : l'index passait sur
+# l'arbre distant pendant que le worktree gardait l'ancien. Mesure du
+# 21/11/2026 sur `catalog/campaigns` (5 265 manifestes suivis), 92 chemins
+# divergents entre le disque et l'index :
+#     73 PERIMES  -- git devant sur attempts / completed_units / updated_at
+#     19 ABSENTS  -- git les avait, le worktree pas du tout (18 crees par le
+#                    cloud le matin meme)
+#      0 ou le LOCAL etait devant
+#      0 contradictoire
+# Exemple : market-e8-0-2026101820-v7.json, attempts 151 (git) contre 150
+# (disque), index == HEAD == origin/main sur le meme blob 6eb7b0f94315. C'est
+# la corruption de `catalog/` du 19/11 atteinte par un autre chemin, et c'est
+# `test_windows_checkout_preserves_byte_exact_replay_catalog` qui l'a dit.
+# `catalog/` est donc adopte comme du CODE : petits JSON dont GitHub est la
+# source. Les racines LOURDES restent exclues -- ecrire `datasets/`
+# declencherait le telechargement des blobs sur ce clone partiel `blob:none`,
+# ce qui est un tout autre cout et une tout autre decision.
+CANONICAL_REMOTE_ROOTS = {"catalog"}
+
+
+def _adoptable_depuis_le_distant(path: str) -> bool:
+    """Chemin protege dont la version DISTANTE est canonique ET legere.
+
+    Strictement plus etroit que `_protected` : seules les racines de
+    `CANONICAL_REMOTE_ROOTS` sont concernees, et jamais un fichier de churn
+    (sa version locale est plus recente par construction), ni un chemin
+    sensible, ni une archive ou une base.
+    """
+    normalized = path.replace(chr(92), "/")
+    if normalized.casefold() in RUNTIME_CHURN_FILES:
+        return False
+    parts = PurePosixPath(normalized).parts
+    if not parts or normalized.startswith("/") or ".." in parts:
+        return False
+    lower = tuple(part.casefold() for part in parts)
+    if lower[0] not in CANONICAL_REMOTE_ROOTS:
+        return False
+    if any(part in SENSITIVE_PARTS for part in lower):
+        return False
+    return Path(lower[-1]).suffix not in PROTECTED_EXTENSIONS
+
 # Fichiers sous un dossier de CODE mais réécrits en permanence par la collecte
 # (classements / candidats de leaders rafraîchis par le poll). Ce sont des
 # DONNÉES runtime, pas du code : on les traite comme du churn (ignorés par la
@@ -3721,8 +3763,11 @@ class Synchronizer:
         )
         code_changed = [
             p for p in incoming_paths
-            if not _protected(p)
+            if not _protected(p) or _adoptable_depuis_le_distant(p)
         ]
+        self.report["adoption_canonical_materialises"] = sum(
+            1 for p in code_changed if _protected(p)
+        )
         if code_changed:
             self._prefetch_blobs(new_tip, code_changed)
             for ci_start in range(0, len(code_changed), PROTECTED_PATH_BATCH_SIZE):
