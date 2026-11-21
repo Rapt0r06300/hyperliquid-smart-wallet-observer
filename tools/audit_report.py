@@ -949,8 +949,11 @@ def c_tests():
         errs.insert(1, f">>> Cause finale : {cause[:300]}")
     collectes = [int(x) for x in re.findall("([0-9]+) items", out)]
     collectes += [int(x) for x in re.findall("collected ([0-9]+)", out)]
-    executes = sum(int(x) for x in re.findall("([0-9]+) (?:passed|failed|skipped|xfailed|error)",
-                                              summary or ""))
+    # `deselected` et `xpassed` comptent comme « vus » : les omettre ferait crier cette garde
+    # des qu'un `-m` ou un `--deselect` entre en jeu -- un faux positif dans le controle meme
+    # qui existe pour empecher un faux total.
+    executes = sum(int(x) for x in re.findall(
+        "([0-9]+) (?:passed|failed|skipped|xfailed|xpassed|deselected|error)", summary or ""))
     if collectes and executes:
         attendu = max(collectes)
         if executes < attendu:
