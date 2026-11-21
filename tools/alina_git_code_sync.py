@@ -3603,12 +3603,33 @@ class Synchronizer:
             for chemin in self.report.get("protected_local_changes", [])
             if isinstance(chemin, str)
         }
-        collisions = sorted(
+        suspects = sorted(
             chemin for chemin in incoming_paths
             if _protected(chemin)
             and chemin in observes
             and chemin.replace("\\", "/").casefold() not in RUNTIME_CHURN_FILES
         )
+        # 21/11/2026 -- `protected_local_changes` DIT << PEUT-ETRE MODIFIE >>.
+        # Premier essai de cette garde : NO_GO sur
+        # `catalog/CAMPAIGN_WATCHDOG_RECEIPT.json`. Mesure : le fichier sur
+        # disque avait EXACTEMENT le blob de HEAD (3999191e8b8d, 2 608 870
+        # octets a l'identique) et `git diff --name-only HEAD -- <ce chemin>`
+        # ne renvoyait RIEN. L'inventaire est volontairement base sur le STAT
+        # (ce module a mesure qu'un diff de contenu sur des milliers de chemins
+        # coute plusieurs minutes) : c'est un SUR-ENSEMBLE, pas un diagnostic.
+        # Refuser dessus bloquait une adoption parfaitement legitime -- le
+        # meme travers que les controles qui lisent une etiquette pour un fait.
+        # On confirme donc par le CONTENU, avec le critere de git lui-meme,
+        # borne aux seuls chemins ENTRANTS (1 ici, pas les 28 163 de
+        # l'inventaire) : le cout reste celui d'un inventaire borne.
+        collisions: list[str] = []
+        for start in range(0, len(suspects), PROTECTED_PATH_BATCH_SIZE):
+            lot = suspects[start:start + PROTECTED_PATH_BATCH_SIZE]
+            collisions.extend(_paths(self.command(
+                "diff", "--name-only", "-z", "HEAD", "--", *lot,
+            ).stdout))
+        collisions = sorted(set(collisions))
+        self.report["adoption_protected_suspects"] = len(suspects)
         if collisions:
             raise SyncBlocked(
                 f"GitHub toucherait {len(collisions)} fichier(s) protege(s) "

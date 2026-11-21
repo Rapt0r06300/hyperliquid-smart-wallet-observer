@@ -2001,41 +2001,70 @@ def test_l_adoption_ne_balaye_plus_l_index_entier() -> None:
         ), f'ligne {ligne} : budget du merge non calibre sur la mesure'
 
 
-def test_l_adoption_rapide_refuse_une_collision_protegee_sans_passer_par_git() -> None:
-    """Le refus venait de GIT, pas du lanceur -- il doit etre a nous.
+def _monte_adoption(local, cloud, contenu_local=None):
+    """Prepare un distant en avance sur UN chemin protege, et rend les deux SHA."""
+    cloud_commit(cloud, "catalog/state.json", "v1" + chr(10))
+    git(local, "fetch", "origin", "main")
+    git(local, "merge", "--ff-only", "origin/main")
+    cloud_commit(cloud, "catalog/state.json", "v2" + chr(10))
+    git(local, "fetch", "origin", "main")
+    if contenu_local is not None:
+        (local / "catalog" / "state.json").write_text(
+            contenu_local, encoding="utf-8",
+        )
+    depart = git(local, "rev-parse", "HEAD")
+    arrivee = git(local, "rev-parse", "origin/main")
+    assert depart != arrivee
+    task = Synchronizer(local, allow_test_remote=True)
+    # L inventaire reel est base sur le STAT : on reproduit son SUR-ENSEMBLE.
+    task.report["protected_local_changes"] = ["catalog/state.json"]
+    return task, depart, arrivee
 
-    Mesure du 21/11/2026 : l ancien chemin echouait sur le message de git
-    << Your local changes to the following files would be overwritten by
-    merge >>. Sans le merge, cette garde disparaissait et l adoption
-    reussissait en silence en laissant l index sur la version distante et
-    l arbre sur la version locale. C est la corruption de `catalog/`
-    constatee le 19/11/2026. La garde doit etre explicite dans le code.
+
+def test_l_adoption_ne_refuse_que_sur_un_ecart_de_contenu(repos):
+    """Un chemin signale par le STAT mais identique a HEAD ne doit PAS bloquer.
+
+    21/11/2026 : la premiere version de cette garde a rendu NO_GO reel sur
+    `catalog/CAMPAIGN_WATCHDOG_RECEIPT.json` alors que son blob sur disque
+    etait EXACTEMENT celui de HEAD (3999191e8b8d, 2 608 870 octets) et que
+    `git diff --name-only HEAD -- <ce chemin>` ne renvoyait rien.
+    `protected_local_changes` est un inventaire STAT : il dit << peut-etre
+    modifie >>, jamais << modifie >>. Un refus bati dessus bloque une
+    adoption legitime.
     """
-    import ast
+    local, cloud, _origin = repos
+    task, depart, arrivee = _monte_adoption(local, cloud)
+    fichier = local / "catalog" / "state.json"
+    assert fichier.read_text(encoding="utf-8") == "v1" + chr(10), (
+        'le montage doit laisser le contenu de HEAD, sinon le test ne'
+        ' prouve rien'
+    )
 
-    source = Path(sync_module.__file__).read_text(encoding='utf-8')
-    methode = None
-    for noeud in ast.walk(ast.parse(source)):
-        if (isinstance(noeud, ast.FunctionDef)
-                and noeud.name == '_adopter_tete_sans_balayage'):
-            methode = noeud
-    assert methode is not None, 'le chemin borne d adoption a disparu'
+    task._adopter_tete_sans_balayage(arrivee, depart, "le test")
 
-    corps = ast.get_source_segment(source, methode) or ''
-    assert 'protected_local_changes' in corps, (
-        'l adoption ne consulte plus l inventaire des modifications protegees'
-    )
-    assert 'SyncBlocked' in corps, 'l adoption ne refuse plus rien'
-    assert 'RUNTIME_CHURN_FILES' in corps, (
-        'exception de churn perdue : un classement reecrit en continu'
-        ' bloquerait toute publication de code'
-    )
-    leves = [n for n in ast.walk(methode) if isinstance(n, ast.Raise)]
-    assert len(leves) >= 4, (
-        f'le chemin borne ne porte plus que {len(leves)} refus ; il en faut'
-        ' un pour la collision protegee, un pour les octets divergents, un'
-        ' pour la course sur update-ref et un pour HEAD non confirme'
-    )
+    assert git(local, "rev-parse", "HEAD") == arrivee
+    assert task.report["adoption_protected_suspects"] == 1
+    assert task.report["adoption_protected_collisions"] == 0
+
+
+def test_l_adoption_refuse_quand_le_contenu_diverge_vraiment(repos):
+    """Meme montage, vrais octets locaux : REFUS, et rien ne bouge.
+
+    Avant le 21/11/2026 ce refus venait de GIT (<< Your local changes to the
+    following files would be overwritten by merge >>), pas du lanceur :
+    remplacer le merge sans le reecrire ouvrait la garde.
+    """
+    local, cloud, _origin = repos
+    task, depart, arrivee = _monte_adoption(local, cloud, "octets locaux" + chr(10))
+    fichier = local / "catalog" / "state.json"
+
+    with pytest.raises(SyncBlocked) as leve:
+        task._adopter_tete_sans_balayage(arrivee, depart, "le test")
+
+    assert "protege" in str(leve.value)
+    assert "catalog/state.json" in str(leve.value)
+    assert git(local, "rev-parse", "HEAD") == depart, "HEAD a bouge malgre le refus"
+    assert fichier.read_text(encoding="utf-8") == "octets locaux" + chr(10)
 
 def test_une_lecture_locale_garde_son_budget_court() -> None:
     """Elargir le merge ne doit pas elargir le reste."""
