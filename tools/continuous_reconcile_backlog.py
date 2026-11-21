@@ -570,8 +570,17 @@ def main() -> int:
         print(f"HISTORICAL_RECONCILE_FAIL_CLOSED {exc}", file=sys.stderr)
         return 2
     print(f"HISTORICAL_RUNNER_CHECKPOINT waves={waves} snapshot_remaining={remaining}", flush=True)
-    with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
-        env.write(f"REMAINING_NEW_TAGS={remaining}\n")
+    # 21/11/2026 : la variable GITHUB_ENV n existe QUE dans GitHub Actions. Lue sans
+    # garde a la DERNIERE ligne, apres que tout le travail a reussi, il transformait un
+    # succes local en KeyError : code 0 perdu, trace d erreur a la place. Le chiffre est
+    # deja imprime juste au-dessus ; hors CI on se contente de le redire.
+    chemin_env = os.environ.get("GITHUB_ENV")
+    if chemin_env:
+        with open(chemin_env, "a", encoding="utf-8") as env:
+            env.write(f"REMAINING_NEW_TAGS={remaining}\n")
+    else:
+        print(f"REMAINING_NEW_TAGS={remaining}  (hors GitHub Actions : non exporte)",
+              flush=True)
     return 0
 
 

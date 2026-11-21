@@ -18,7 +18,7 @@ import sys
 import threading
 import time
 from collections.abc import Mapping
-from contextlib import suppress
+from contextlib import closing, suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -107,7 +107,18 @@ def inspect_local_safe_corpus(root: Path) -> dict[str, Any]:
             and registry.is_file() and not registry.is_symlink()
         ):
             return {**result, "reason": "RESTORE_REPORT_NOT_BOUND_TO_ACTIVE_SCOPE_AND_CATALOG"}
-        with sqlite3.connect(registry.resolve().as_uri() + "?mode=ro", uri=True, timeout=5.0) as db:
+        # `with sqlite3.connect(...)` ne FERME PAS la connexion : il ne fait que commit/rollback.
+        # Verifie le 20/11/2026 sur Python 3.14.2 / sqlite 3.50.4 -- la connexion repond encore
+        # apres le bloc. Sous Windows un handle ouvert maintient un verrou sur le .db et ses
+        # -wal/-shm, et le contrat exige de gerer << fichiers verrouilles, SQLite actif >>.
+        # `closing(...)` ferme pour de vrai. (Gravite faible ici : lecture `mode=ro` dans une
+        # fonction courte, donc le compteur de references fermait a la sortie -- mais le piege
+        # se declencherait des qu une ligne serait ajoutee apres le bloc.)
+        # ATTENTION si on copie ce motif : `with sqlite3.connect(...)` COMMIT en sortie, pas
+        # `closing()`. C est sans effet ici (les trois connexions sont en `mode=ro`, il n y a rien
+        # a committer) ; sur une connexion en ECRITURE il faut LES DEUX :
+        #     with closing(sqlite3.connect(p)) as c, c:   # ferme ET commit
+        with closing(sqlite3.connect(registry.resolve().as_uri() + "?mode=ro", uri=True, timeout=5.0)) as db:
             metadata = dict(db.execute(
                 "SELECT key, value FROM safe_shard_registry_meta "
                 "WHERE key IN ('run_status','active_catalog_sha256','target_catalog_sha256')"
