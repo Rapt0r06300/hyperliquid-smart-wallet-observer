@@ -975,3 +975,71 @@ qui ne peut se juger que sur des données neuves.
   Un filtre qui garde moins de 30 % des cycles ne peut pas réussir, même s'il « gagne ».
 - **Ne touche pas** à l'apprenant ni à sa campagne : outil de lecture séparé, `tools/goal2_refus_prospectif.py`.
 
+## 22. Données externes Ironflow (22/11, 23:37 heure de Paris, heure lue sur l'horloge) et H17
+
+**Ingestion.** `tools/ingerer_ironflow.py` : 138 fichiers Parquet (funding, open interest + mark/oracle,
+liquidations events + fills, bougies 1 h), 634 Mo, empreintes SHA-256 officielles vérifiées, schémas,
+UTC, doublons de clé, cohérence OHLC ; 4 lignes d'open interest négatif (HIP-3) exclues et nommées.
+Rangé sous `runtime/history/ironflow/` avec `MANIFESTE.json`. Niveau : RESEARCH_ELIGIBLE, jamais SAFE ni
+REPLAY_ELIGIBLE (aucune heure de réception par Alina). **Recoupement avec nos données** (`tools/recouper_ironflow.py`) :
+funding **identique** sur 860 570 paires (coin, heure) ; bougies 1 h écart médian 0 bps sur 793 015 paires,
+0,017 % au-delà de 10 bps. Les liquidations, inmesurables jusqu'ici (§21), deviennent mesurables.
+
+### H17 — le leader qui ABSORBE une vague de liquidations (pré-enregistrée AVANT toute mesure)
+
+**Mécanisme.** Une liquidation est une vente (ou un achat) FORCÉE, donc non informée (Jia et al. 2026 :
+les sorties forcées sont un des trois canaux de perte). Celui qui fournit l'immédiateté en face achète
+sous la valeur. Si un de nos leaders ouvre DANS LE SENS OPPOSÉ aux positions liquidées pendant une vague, il
+est l'absorbeur ; le copier, c'est se placer du côté qui encaisse la pression temporaire.
+**Ce qui l'invaliderait** : un excès nul ou négatif sur un jumeau qui subit la même vague sans leader (le
+rebond serait celui du marché, pas une information du leader), ou un excès qui n'existe qu'avec un leader.
+
+**Règle (figée).**
+- Vague : heure où le notionnel liquidé d'un coin natif (marché sans « : ») dépasse **1 M USD ET 5 fois**
+  la médiane des 30 jours précédents de ce coin (causal). Sens de la vague = côté le plus liquidé
+  (positions longues liquidées = ventes forcées -> l'absorbeur ACHÈTE).
+- Événement : ouverture agrégée d'un leader (≥ 1 000 USD) dont le dernier fill tombe dans l'heure de la
+  vague ou l'heure suivante, dans le sens de l'absorbeur. Entrée : première bougie 1 h ≥ dernier fill
+  + 120 s ET ≥ fin de l'heure de la vague (la vague est connue en entier avant d'entrer).
+- Témoins : (a) jumeau sans leader, même coin, même sens, même mouvement des 72 h passées
+  (`goal2_placebo_position_en_perte.jumeler`) ; (b) ouvertures du même sens hors vague.
+- Horizons 4 h et **24 h (principal)**. Coût : frais taker aller-retour + 6 bps.
+- **Critère, exploration (26/04 → 31/08)** : à 24 h, excès sur jumeau IC95 > 0 ET net IC95 > 0 ET excès
+  sans le meilleur leader IC95 > 0 → `CANDIDAT_PROSPECTIF` (la validation historique est consommée : la
+  confirmation ne peut être que prospective, via le collecteur de liquidations) ; sinon `REJECTED`.
+- Diagnostic sans leader (hors stratégie, la famille Liquidations reste désactivée) : rendement moyen
+  après les vagues dans le sens de l'absorbeur, pour situer l'effet de marché.
+
+### Essai 33 — H17 mesurée (exploration) : `REJECTED`, et un fait de marché
+
+873 vagues sur 24 coins ; 369 ouvertures de leaders absorbantes (30 leaders, 111 jours). À 24 h : brut
+−41,9 [−115,3 ; 20,7], **excès sur jumeau −59,4 [−137,0 ; 5,8]**, sans le meilleur leader **[−157,4 ; −5,5]**.
+Témoin hors vague : excès −23,3 [−72,6 ; 22,5]. **Diagnostic sans leader** : 24 h après une vague, dans le
+sens de l'absorbeur, **−72,9 bps [−149,0 ; −0,6]** sur 867 vagues : les vagues de liquidation CONTINUENT,
+elles ne rebondissent pas (le « couteau qui tombe » de `liquidation_cascade.py`, enfin mesuré). Ce n'est
+PAS une stratégie : suivre les liquidations serait la famille Liquidations, désactivée ; exploration seule,
+à 33 essais le seuil corrigé est 99,85 %.
+
+### H18 — refuser la copie qui ABSORBE une vague (pré-enregistrée le 22/11 à 23:40 heure de Paris, 22:40:04 UTC lu sur l’horloge)
+
+Conséquence CopyVault de l'essai 33 : un FILTRE DE REFUS, pas un pari. Copier un leader qui ouvre contre
+une vague, c'est attraper le couteau.
+- Données : les cycles de la règle de base de H16 (mêmes paramètres, même gel `2026-11-22T22:30:00Z`).
+- Refus F5 : l'ouverture du leader tombe dans l'heure d'une vague (définition H17, à l'identique) ou
+  l'heure suivante, dans le sens de l'absorbeur.
+- Source des vagues : Ironflow, fichier de novembre 2026 (publié après la clôture du mois). **Tant qu'il
+  n'existe pas : `MORE_DATA`.** Le filtre n'est pas encore applicable EN DIRECT : aucune source publique de
+  liquidations réalisées n'est collectée en temps réel (le `liq-collector` relève une carte des prix de
+  liquidation, pas les liquidations exécutées). Un verdict positif prouverait la valeur du filtre, pas sa
+  disponibilité au moment de la décision ; il faudrait alors une source temps réel avant tout usage.
+- Critère : celui de H16 (≥ 5 jours, ≥ 50 refus... ramené à **≥ 20 refus**, les vagues étant rares,
+  fixé ICI avant toute donnée), couverture ≥ 30 %, IC à 95 % (un seul filtre), gain > 0 ET filtré > 0.
+
+### Tardis (jours gratuits) intégré — et ce qu'il est vraiment
+
+`tools/ingerer_tardis_jours_gratuits.py` : 24 fichiers (carnet + trades, BTC/ETH/HYPE, 1ers mai → août 2026),
+326 Mo, 24,0 h de couverture chacun, trou de ~3,5 min le 01/08. **Le « carnet incrémental » d'Hyperliquid chez
+Tardis est une suite d'instantanés** (~0,54 s), **20 niveaux par côté jusqu'en juin, 5 dès juillet** : bon pour
+le coût d'un petit ordre au meilleur prix, pas pour une profondeur complète. Niveau 3. Matrice complète :
+`docs/audit/MATRICE_DONNEES_EXTERNES.md`.
+

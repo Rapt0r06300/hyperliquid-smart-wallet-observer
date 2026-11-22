@@ -2765,3 +2765,20 @@ fournis. Sans collecte, le labo n a toujours pas d episode complet de l entree a
 - **Erreur corrigée** : heures inventées dans le journal (2e fois) → mémoire `heure_lue_jamais_devinee`.
 - En attente utilisateur : `POUSSER-GITHUB.cmd` ; redémarrage de l'apprenant en conservant l'état.
 
+## 22/11/2026 (nuit, 23:47 Paris, heure lue) — push débloqué + mission « Data quant maximum »
+
+- **Push GitHub FAIT** (autorisé) : `SYNCHRONIZED`, 0 commit d'écart ; les 4 workflows de collecte tournent
+  avec les corrections. Causes levées : Codex tenait `index.lock` ; préchargement des blobs un par un
+  (> 900 s) → un seul `fetch --stdin` (13 s, `_prefetch_blobs_par_lot` + test) ; 546 entrées `catalog/`
+  laissées dans l'index par le lancement interrompu → remises sur HEAD (sauvegarde
+  `runtime/reports/git-sync/index_catalog_avant_reparation_20261122.txt`).
+- **Apprenant redémarré** (PID 12156, code à jour, `debut_ms` conservé) ; il enregistre le contexte d'entrée.
+- **Ironflow intégré** : 138 Parquet, 634 Mo, SHA-256 + schémas ; funding identique à nos données
+  (860 570 paires), bougies écart médian 0 bps. `tools/ingerer_ironflow.py`, `tools/recouper_ironflow.py`.
+- **Tardis intégré** (jours gratuits) : 24 fichiers, 326 Mo ; carnet = instantanés top-20 puis top-5.
+- **H17** (absorption des liquidations) `REJECTED` ; les vagues CONTINUENT (−72,9 bps à 24 h pour
+  l'absorbeur). **H18** (refus « contre une vague ») pré-enregistrée, MORE_DATA jusqu'au fichier Ironflow
+  de novembre. Matrice : `docs/audit/MATRICE_DONNEES_EXTERNES.md`. 33 essais au registre.
+- Nœud Hyperliquid : impossible sur ce PC (128 Go de RAM exigés, 32 Go présents).
+- Non poussé (aucun push automatique) : ingesteurs, H17/H18, matrice.
+

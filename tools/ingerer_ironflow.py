@@ -46,13 +46,31 @@ JEUX: dict[str, dict[str, Any]] = {
                 "colonnes": ("timestamp", "market", "coin", "funding_rate"), "cle": ("timestamp", "market"),
                 "bornes": {"funding_rate": (-0.05, 0.05)}},
     "open-interest": {"depot": "hyperliquid-open-interest", "licence": "CC BY 4.0",
-                      "colonnes": ("timestamp",), "cle": None, "bornes": {}},
+                      "colonnes": ("timestamp", "market", "mark_price", "oracle_price", "open_interest"),
+                      "cle": ("timestamp", "market"),
+                      "bornes": {"mark_price": (0.0, 1e8), "oracle_price": (0.0, 1e8), "open_interest": (0.0, 1e14)}},
     "liquidations": {"depot": "hyperliquid-liquidations", "licence": "CC BY 4.0",
                      "colonnes": ("timestamp", "market", "wallet", "position_side", "size", "notional_usd", "avg_price"),
                      "cle": None, "bornes": {"notional_usd": (0.0, 1e10), "avg_price": (0.0, 1e8)}},
     "candles-1h": {"depot": "hyperliquid-candles-1h", "licence": "CC BY 4.0",
-                   "colonnes": ("timestamp",), "cle": None, "bornes": {}},
+                   "colonnes": ("timestamp", "market", "open", "high", "low", "close", "volume"),
+                   "cle": ("timestamp", "market"),
+                   "bornes": {"open": (0.0, 1e8), "high": (0.0, 1e8), "low": (0.0, 1e8), "close": (0.0, 1e8),
+                              "volume": (0.0, 1e16)}, "ohlc": True},
 }
+# La table `fills` des liquidations (une ligne par fill de liquidation) n'a pas le schéma des `events`.
+SOUS_TABLES = {("liquidations", "fills"): {
+    "colonnes": ("timestamp", "market", "wallet", "side", "price", "size", "notional_usd", "tx_hash"),
+    "cle": None, "bornes": {"price": (0.0, 1e8), "notional_usd": (0.0, 1e10)}}}
+VERSION_CONTROLES = 3          # change quand les contrôles changent : force la revalidation, jamais le retéléchargement
+
+
+def spec_de(jeu: str, chemin_relatif: str) -> dict[str, Any]:
+    parties = Path(chemin_relatif).parts
+    for (j, sous), spec in SOUS_TABLES.items():
+        if j == jeu and sous in parties:
+            return {**JEUX[jeu], **spec}
+    return JEUX[jeu]
 DEBUT_PLAUSIBLE_MS = 1_672_531_200_000          # 2023-01-01 : avant, Hyperliquid perps n'existait pas sous cette forme
 
 
@@ -101,11 +119,12 @@ def _ms(v: Any) -> int | None:
         return None
 
 
-def valider(jeu: str, chemin: Path) -> dict:
+def valider(jeu: str, chemin: Path, chemin_relatif: str = "") -> dict:
     import pyarrow.compute as pc
     import pyarrow.parquet as pq
 
-    spec = JEUX[jeu]
+    spec = spec_de(jeu, chemin_relatif)
+    incoherences_ohlc = 0
     motifs: list[str] = []
     f = pq.ParquetFile(chemin)
     schema = f.schema_arrow
@@ -134,6 +153,10 @@ def valider(jeu: str, chemin: Path) -> dict:
                 col = pc.drop_null(t.column(c))
                 n = pc.sum(pc.or_(pc.less(col, bas), pc.greater(col, haut))).as_py() or 0
                 hors_bornes[c] = hors_bornes.get(c, 0) + int(n)
+        if spec.get("ohlc") and all(c in t.column_names for c in ("open", "high", "low", "close")):
+            o, h, lo, c_ = (t.column(x) for x in ("open", "high", "low", "close"))
+            mauvais = pc.or_(pc.less(h, pc.max_element_wise(o, c_)), pc.greater(lo, pc.min_element_wise(o, c_)))
+            incoherences_ohlc += int(pc.sum(mauvais).as_py() or 0)
         if spec["cle"] and all(c in t.column_names for c in spec["cle"]):
             cles = zip(*(t.column(c).to_pylist() for c in spec["cle"]))
             for k in cles:
@@ -149,12 +172,19 @@ def valider(jeu: str, chemin: Path) -> dict:
         motifs.append(f"date antérieure à 2023 ({tmin})")
     if tmax is not None and tmax > time.time() * 1000 + 86_400_000:
         motifs.append(f"date dans le futur ({tmax})")
-    for c, n in hors_bornes.items():
-        if n:
-            motifs.append(f"{n} valeurs impossibles sur {c}")
+    # Quelques lignes impossibles (ex. open interest NÉGATIF sans prix mark sur 4 marchés HIP-3 en juin-juillet
+    # 2026) ne condamnent pas un mois entier : elles sont EXCLUES et nommées, jamais réparées. Au-delà de
+    # 1 ligne sur 10 000, le fichier entier est refusé.
+    exclusions = {c: n for c, n in hors_bornes.items() if n}
+    if exclusions and sum(exclusions.values()) > max(1, lignes // 10_000):
+        motifs.extend(f"{n} valeurs impossibles sur {c}" for c, n in exclusions.items())
+        exclusions = {}
+    if incoherences_ohlc:
+        motifs.append(f"{incoherences_ohlc} bougies avec high < max(open, close) ou low > min(open, close)")
     if doublons:
         motifs.append(f"{doublons} doublons de clé {spec['cle']}")
     return {"lignes": lignes, "ts_min_ms": tmin, "ts_max_ms": tmax, "colonnes": schema.names,
+            "lignes_exclues_a_la_lecture": {c: {"n": n, "regle": f"{c} hors {spec['bornes'][c]}"} for c, n in exclusions.items()},
             "statut": "EXTERNAL_REJECTED" if motifs else "EXTERNAL_VALIDATED", "motifs": motifs}
 
 
@@ -184,7 +214,8 @@ def main(argv: list[str] | None = None) -> int:
                 cle = f"{jeu}/{e['path']}"
                 connu = manifeste["fichiers"].get(cle, {})
                 attendu = (e.get("lfs") or {}).get("oid")
-                if connu.get("sha256") == attendu and cible.exists() and connu.get("statut"):
+                if (connu.get("sha256") == attendu and cible.exists() and connu.get("statut")
+                        and connu.get("version_controles") == VERSION_CONTROLES):
                     continue                                        # idempotent : déjà ingéré et validé
                 if not cible.exists() and telecharges + e.get("size", 0) > budget:
                     print(f"  [BUDGET] {cle} non téléchargé (plafond {a.max_mo:.0f} Mo atteint)")
@@ -197,11 +228,11 @@ def main(argv: list[str] | None = None) -> int:
                     continue
                 if etat == "telecharge":
                     telecharges += e.get("size", 0)
-                v = valider(jeu, cible)
+                v = valider(jeu, cible, e["path"])
                 manifeste["fichiers"][cle] = {
                     "jeu": jeu, "url": FICHIER.format(jeu=JEUX[jeu]["depot"], chemin=e["path"]),
                     "editeur": "Ironflow (ironflow.sh), via Hugging Face", "licence": JEUX[jeu]["licence"],
-                    "sha256": attendu, "octets": e.get("size"), "recupere_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    "sha256": attendu, "octets": e.get("size"), "version_controles": VERSION_CONTROLES, "recupere_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                     "niveau_de_preuve": "RESEARCH_ELIGIBLE (descriptif / études d'événements) ; jamais REPLAY_ELIGIBLE :"
                                         " pas d'heure de réception Alina, données reconstruites après coup",
                     **v}
