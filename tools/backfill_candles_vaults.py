@@ -47,6 +47,7 @@ RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
 
 from hl_observer.collection import candle_backfill as CB  # noqa: E402
+from hl_observer.ops import budget_rest as _BUDGET  # noqa: E402  (n° 22 : poids REST réel, sans bloquer)
 from hl_observer.collection import collecte_fiable as CF  # noqa: E402
 from hl_observer.collection.univers_perps import charger_univers, filtrer_abonnables  # noqa: E402
 from hl_observer.instrument_identity import preserve_native_instrument_symbol  # noqa: E402
@@ -269,7 +270,9 @@ def _post_candles(coin: str, intervalle: str, a: int, b: int, *, timeout_s: floa
                         "req": {"coin": coin, "interval": intervalle, "startTime": int(a), "endTime": int(b)}}).encode()
     req = urllib.request.Request(URL_HL, data=corps, headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout_s) as rep:      # noqa: S310 (URL constante)
-        return json.loads(rep.read().decode("utf-8"))
+        rendu = json.loads(rep.read().decode("utf-8"))
+    _BUDGET.compter("candleSnapshot", len(rendu) if isinstance(rendu, list) else 0)
+    return rendu
 
 
 def poids_requete(n_bougies: int) -> float:
@@ -313,7 +316,9 @@ def _post_funding(coin: str, a: int, b: int, *, timeout_s: float = 15.0) -> Any:
     corps = json.dumps({"type": "fundingHistory", "coin": coin, "startTime": int(a), "endTime": int(b)}).encode()
     req = urllib.request.Request(URL_HL, data=corps, headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout_s) as rep:      # noqa: S310 (URL constante)
-        return json.loads(rep.read().decode("utf-8"))
+        rendu = json.loads(rep.read().decode("utf-8"))
+    _BUDGET.compter("fundingHistory", len(rendu) if isinstance(rendu, list) else 0)
+    return rendu
 
 
 def tirer_funding(coin: str, a: int, b: int, *, poster=_post_funding) -> tuple[list[dict[str, Any]], bool, str | None]:

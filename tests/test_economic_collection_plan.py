@@ -633,3 +633,31 @@ def test_write_plan_is_strict_json_and_human_readable(tmp_path: Path) -> None:
     assert "## lead_lag" not in rendered
     assert "## cross_venue_dislocation_v2" not in rendered
     assert "Collecte encore actionnable" in rendered
+
+
+def test_le_poll_REST_est_exige_car_il_capte_ce_que_le_WS_rate() -> None:
+    """Mesure du 22/11/2026 : sur les MEMES vaults dans la MEME fenetre, le WS rate 16,6 %.
+
+    `tools/couverture_live_contre_poll.py` restreint les deux sources a leur intersection
+    stricte -- 14 vaults communs, 22,67 h de fenetre partagee -- parce que les comparer
+    globalement n'a aucun sens (live : 17 vaults sur 13 jours ; poll : 27 vaults sur 1 jour,
+    donc les « exclusifs » mesurent d'abord le perimetre). Sur l'intersection :
+
+        fills live 26 864 | fills poll 31 500 | union 32 201
+        manques par LIVE : 5 337  (16,57 %)   <- le flux « live » est le plus troue
+        manques par POLL :   701  ( 2,18 %)
+        couverture de la meilleure source : 97,82 %
+
+    Un fill manquant a l'entree ou a la sortie rend l'episode incomplet, et le labo le rejette
+    (1 045 `STALE_OR_MISSING_EXIT_BOOK` sur 1 613 candidats TRAIN). Exiger `userfills-live`
+    sans `userfills-poll` laisserait donc l'operateur perdre un fill sur six en croyant avoir
+    allume tout le necessaire. `slots_userfills.py` le disait deja en prose (« un autre
+    collecteur voit deja tout le monde : le poll REST ») ; ce test en fait une exigence.
+    """
+    plan = build_collection_plan(
+        [{"family": "copy_vault", "objective_status": "NON_ATTEINT"}], {"copy_vault": {}})
+    requis = plan["required_collectors"]
+    assert "userfills-poll" in requis, "le poll REST est la source de fills la plus complete"
+    assert "userfills-live" in requis, "le WS reste requis : il capte 2,18 % que le poll rate"
+    copy = next(row for row in plan["families"] if row["family"] == "copy_vault")
+    assert "runtime/data/vault_fills_poll.jsonl" in copy["required_artifacts"]

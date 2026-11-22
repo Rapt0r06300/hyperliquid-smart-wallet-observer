@@ -93,7 +93,13 @@ def parse_bybit_linear_instruments(payload: dict[str, object]) -> list[tuple[str
         base = str(item.get("baseCoin") or canonical_coin(symbol)).upper()
         quote = str(item.get("quoteCoin") or "").upper()
         settle = str(item.get("settleCoin") or "").upper()
-        status = str(item.get("status") or "Trading")
+        # 21/11/2026 : un statut ABSENT valait << negociable >>. Un marche suspendu
+        # entrait alors dans l univers, consommait du quota et polluait la comparaison
+        # de funding entre bourses avec un marche mort. `coin_universe.py` (OKX) refuse
+        # deja dans ce cas : `state` absent -> ecarte. Meme regle ici. Les charges reelles
+        # portent toujours le champ, donc ce refus ne mord que si l API change de forme --
+        # exactement le moment ou l on veut un refus plutot qu une acceptation muette.
+        status = str(item.get("status") or "")
         contract_type = str(item.get("contractType") or "").lower()
         if not symbol or not base:
             continue

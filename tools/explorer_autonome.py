@@ -37,18 +37,54 @@ CLASSEMENT = Path("config") / "leaders_actifs_classement.json"
 LEADERS = Path("config") / "copy_vault_leaders.json"
 
 
-def charger_univers(timeout: float = 6.0) -> list[str]:
-    """Univers des coins (meta publique) pour décoder l'indice d'actif des ordres. Fail-soft."""
+UNIVERS_LOCAL = Path("runtime") / "data" / "hl_univers_perps.json"
+
+
+def univers_en_cache(chemin: Path = UNIVERS_LOCAL) -> list[str]:
+    """L'univers du dex principal tel que le lanceur l'a enregistré (même ordre que `meta`), ou []."""
     try:
+        cache = json.loads(Path(chemin).read_text(encoding="utf-8"))
+        noms = cache["par_dex"][""]
+    except (OSError, ValueError, KeyError, TypeError):
+        return []
+    return [str(n) for n in noms if n] if isinstance(noms, list) else []
+
+
+def charger_univers(timeout: float = 6.0, *, essais: int = 3, dormir=time.sleep, poster=None) -> list[str]:
+    """Univers des coins (meta publique) pour décoder l'indice d'actif des ordres. Fail-soft.
+
+    22/11/2026 : un seul échec réseau rendait [] et l'explorateur passait le cycle entier (5 minutes)
+    à décoder « de façon limitée ». Désormais : trois essais espacés (1 s, 2 s), puis REPLI sur
+    l'univers que le lanceur a enregistré au démarrage — même ordre, donc mêmes indices. Le repli est
+    DIT ; la liste vide ne reste que si les deux sources manquent.
+    """
+    def _lire() -> list[str]:
         req = urllib.request.Request("https://api.hyperliquid.xyz/info",
                                      data=json.dumps({"type": "meta"}).encode(),
                                      headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=timeout) as r:  # noqa: S310 (API publique connue)
             meta = json.loads(r.read().decode())
         return [str(a.get("name")) for a in meta.get("universe", []) if a.get("name")]
-    except Exception as exc:  # noqa: BLE001
-        print(f"[auto] meta indisponible ({type(exc).__name__}) — décodage d'indice limité.", flush=True)
-        return []
+
+    lire = poster or _lire
+    derniere = ""
+    for essai in range(max(1, int(essais))):
+        try:
+            noms = lire()
+            if noms:
+                return noms
+            derniere = "reponse vide"
+        except Exception as exc:  # noqa: BLE001
+            derniere = type(exc).__name__
+        if essai + 1 < max(1, int(essais)):
+            dormir(float(essai + 1))
+    repli = univers_en_cache(UNIVERS_LOCAL)      # lu a l'appel : un defaut de parametre ne se remplace pas
+    if repli:
+        print(f"[auto] meta indisponible ({derniere}) apres {essais} essais — repli sur l'univers local "
+              f"({len(repli)} coins).", flush=True)
+        return repli
+    print(f"[auto] meta indisponible ({derniere}) — décodage d'indice limité.", flush=True)
+    return []
 
 
 def _charger_leaders(root: Path) -> set[str]:

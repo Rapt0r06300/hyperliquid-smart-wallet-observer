@@ -369,8 +369,29 @@ def parser_aggtrade_binance(msg: Any) -> dict | None:
     px = _f(d.get("p"))
     if px is None:
         return None
-    return {"symbol": str(d.get("s")).upper(), "px": px, "sz": _f(d.get("q")) or 0.0,
-            "side": "SELL" if d.get("m") else "BUY", "ts_ex": float(d.get("T") or 0.0)}
+    # 21/11/2026 -- TROIS REFUS MANQUES dans une seule ligne de retour, sur le detecteur
+    # de CHOC EXECUTABLE qui alimente le lead-lag. Chacun transformait une absence en
+    # affirmation, et la fonction savait deja refuser (elle rend `None` sur un prix
+    # illisible) : le consommateur teste `if t and ...`.
+    taille = _f(d.get("q"))
+    if taille is None or taille <= 0:
+        # Comptee 0, elle fabriquait un trade fantome de taille nulle.
+        return None
+    agressif_vendeur = d.get("m")
+    if agressif_vendeur is None:
+        # `m` absent valait << ACHAT >>. Or `m` DECIDE qui est l agresseur : un sens
+        # invente retourne le signe du choc, donc la mesure de lead-lag.
+        return None
+    horodatage = _f(d.get("T"))
+    if horodatage is None or horodatage <= 0:
+        # 0.0 = 1970 : ce trade trierait AVANT toute l histoire et rendrait n importe
+        # quelle latence absurde. Un instant inconnu n est pas un instant ancien.
+        return None
+    symbole = str(d.get("s") or "").upper()
+    if not symbole:
+        return None
+    return {"symbol": symbole, "px": px, "sz": taille,
+            "side": "SELL" if agressif_vendeur else "BUY", "ts_ex": float(horodatage)}
 
 
 def dispatch_lead_lag_trade(
@@ -1604,6 +1625,13 @@ async def _boucle(
             duree_s = (now_ns - stats["debut_mono_ns"]) / 1e9
             hb = {"ts": time.time(), "duree_continue_s": round(duree_s, 1), **stats,
                   "taux_rejet": round(stats["rejets"] / max(1, stats["ecrits"] + stats["rejets"]), 4),
+                  # 22/11/2026 : `taux_rejet` ne compte que les paires BBO atomiques. Le 22/11 il valait
+                  # 0.0 pendant que 76 251 evenements canoniques sur 90 269 (84 %) etaient refuses par la
+                  # porte de qualite. Ce second taux dit ce que l'autre taisait ; `None` = rien a juger.
+                  "taux_rejet_canonique": (
+                      round(stats["canonical_events_rejected"]
+                            / (stats["canonical_events_written"] + stats["canonical_events_rejected"]), 4)
+                      if (stats["canonical_events_written"] + stats["canonical_events_rejected"]) > 0 else None),
                   "raw_queue_depth": len(raw_queue),
                   "feed_quality_ready": quality_payload["ready_feeds"],
                   "feed_quality_total": quality_payload["total_feeds"],

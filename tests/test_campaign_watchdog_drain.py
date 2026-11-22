@@ -7,6 +7,8 @@ from tools.campaign_watchdog import (
     _dispatch_market_handoff,
     _dispatch_successor,
     _reconcile_drain_stuck,
+    _reconcile_epoch_superseded,
+    _reconcile_retry_current_epoch,
     _reconcile_finished_owner,
     _select_market_handoff_successor,
     _terminalize_superseded_stuck,
@@ -409,3 +411,154 @@ def test_dispatch_market_handoff_targets_distinct_successor_and_records_lineage(
     assert predecessor["cursor"]["hot_handoff_successor_campaign_id"] == "market-next"
     assert predecessor["history"][-1]["event"] == "HOT_HANDOFF_SUCCESSOR_DISPATCHED"
 
+
+
+# ---------------------------------------- EPOQUE DEPASSEE (mesure du 21/11/2026)
+def _phase_courante(epoch: int = 8):
+    """L'etat REEL mesure le 21/11/2026 : COLLECT, sans cutoff, sans epoque source."""
+    return {
+        "phase": "COLLECT",
+        "analysis_stage": None,
+        "epoch": epoch,
+        "source_collection_epoch": None,
+        "collection_cutoff_at_utc": None,
+    }
+
+
+def _row_abandonnee(*, epoch=4, status="STUCK", lease=None, completed=None):
+    """Une campagne de l'epoque 4, telle que `copy-vault-12-2026100104-v7`."""
+    return {
+        "schema_version": "alina.resumable_campaign.v2",
+        "campaign_id": "copy-vault-12-2026100104-v7",
+        "kind": "copy_vault_collection",
+        "creation_phase": "COLLECT",
+        "phase_epoch": epoch,
+        "status": status,
+        "status_reason": "OWNER_RUN_COMPLETED_WITH_ACTIVE_LEASE",
+        "stuck_reason": "OWNER_RUN_COMPLETED_WITH_ACTIVE_LEASE",
+        "lease": lease,
+        "completed_units": completed or {},
+        "history": [],
+    }
+
+
+def _maintenant():
+    return datetime(2026, 11, 21, 20, 0, tzinfo=timezone.utc)
+
+
+def test_une_campagne_d_epoque_depassee_est_isolee_et_non_laissee_en_attente():
+    """13 campagnes etaient figees depuis le 07/10 : terminales mais INCLOSABLES.
+
+    `_reconcile_finished_owner` revoque la lease et marque STUCK en comptant sur le
+    controleur pour reconcilier ; le controleur est passe de l'epoque 4 a 8 sans jamais
+    drainer. `_reconcile_drain_stuck` exige un autre motif, ANALYZE/DRAIN, un cutoff et
+    l'egalite d'epoque : aucun chemin ne pouvait plus les fermer.
+    """
+    row = _row_abandonnee()
+    assert _reconcile_epoch_superseded(row, _phase_courante(), _maintenant()) is True
+    assert row["status"] == "UNAVAILABLE"
+    assert row["status_reason"] == "EPOCH_SUPERSEDED_COLLECTION_WINDOW_CLOSED"
+    assert row["stuck_reason"] is None
+    evenement = row["history"][-1]
+    assert evenement["event"] == "WATCHDOG_EPOCH_SUPERSEDED_TERMINALIZED"
+    assert evenement["previous_status"] == "STUCK"
+    assert evenement["campaign_phase_epoch"] == 4
+    assert evenement["controller_epoch"] == 8
+    assert len(row["terminal_evidence_digest"]) == 64
+
+
+def test_le_travail_deja_fait_n_est_jamais_rabaisse_a_rien():
+    """4 des 295 campagnes mesurees portaient des unites faites : elles finissent PARTIAL."""
+    row = _row_abandonnee(completed={"u0": {"shards": 3}})
+    assert _reconcile_epoch_superseded(row, _phase_courante(), _maintenant()) is True
+    assert row["status"] == "PARTIAL"
+    assert row["status_reason"] == "EPOCH_SUPERSEDED_WITH_DURABLE_PROGRESS"
+    assert row["completed_units"] == {"u0": {"shards": 3}}
+
+
+def test_l_epoque_courante_n_est_jamais_touchee():
+    """La mesure du 21/11 laisse 66 PENDING et 8 STUCK de l'epoque courante intacts."""
+    row = _row_abandonnee(epoch=8)
+    assert _reconcile_epoch_superseded(row, _phase_courante(8), _maintenant()) is False
+    assert row["status"] == "STUCK"
+
+
+def test_une_campagne_reclamee_par_quelqu_un_n_est_pas_fermee():
+    """Une lease vivante est le travail en cours d'un autre : on n'y touche pas."""
+    row = _row_abandonnee(lease={"owner_run_id": "123", "acquired_at": "2026-11-21T19:00:00Z"})
+    assert _reconcile_epoch_superseded(row, _phase_courante(), _maintenant()) is False
+    assert row["status"] == "STUCK"
+
+
+def test_un_statut_deja_terminal_reste_tel_quel():
+    for statut in ("COMPLETE", "FAILED", "UNAVAILABLE", "PARTIAL"):
+        row = _row_abandonnee(status=statut)
+        assert _reconcile_epoch_superseded(row, _phase_courante(), _maintenant()) is False
+        assert row["status"] == statut
+
+
+def test_un_schema_ancien_ou_une_epoque_illisible_ne_declenche_rien():
+    ancien = _row_abandonnee()
+    ancien["schema_version"] = "alina.resumable_campaign.v1"
+    assert _reconcile_epoch_superseded(ancien, _phase_courante(), _maintenant()) is False
+    sans_epoque = _row_abandonnee()
+    sans_epoque["phase_epoch"] = None
+    assert _reconcile_epoch_superseded(sans_epoque, _phase_courante(), _maintenant()) is False
+    futur = _row_abandonnee(epoch=9)
+    assert _reconcile_epoch_superseded(futur, _phase_courante(8), _maintenant()) is False
+
+
+# -------------------------------- REPRISE bornee de l'epoque courante (21/11/2026)
+def test_une_campagne_de_l_epoque_courante_est_REPRISE_et_non_isolee():
+    """8 campagnes de l'epoque 8 etaient figees depuis le 01-07/11, lease nulle.
+
+    Leur fenetre de collecte est encore OUVERTE : les isoler jetterait des donnees
+    encore collectables. `_reconcile_finished_owner` annonce << reconcile OR RETRY >> ;
+    personne ne reprenait.
+    """
+    row = _row_abandonnee(epoch=8, status="STUCK", completed={"u0": {"shards": 2}})
+    assert _reconcile_retry_current_epoch(row, _phase_courante(8), _maintenant()) is True
+    assert row["status"] == "PENDING"
+    assert row["status_reason"] == "RETRY_AFTER_OWNER_RUN_DEATH"
+    assert row["stuck_reason"] is None
+    assert row["watchdog_retries"] == 1
+    # La reprise RESUME : le travail durable n'est pas jete.
+    assert row["completed_units"] == {"u0": {"shards": 2}}
+    assert row["history"][-1]["event"] == "WATCHDOG_RETRY_CURRENT_EPOCH"
+    assert row["history"][-1]["preserved_completed_units"] == ["u0"]
+
+
+def test_la_reprise_est_BORNEE_et_son_epuisement_est_nomme():
+    """Sans plafond, une campagne qui tue ses runners serait relancee sans fin."""
+    row = _row_abandonnee(epoch=8, status="STUCK")
+    row["watchdog_retries"] = 3
+    assert _reconcile_retry_current_epoch(row, _phase_courante(8), _maintenant()) is True
+    assert row["status"] == "FAILED"
+    assert row["status_reason"] == "RETRIES_EXHAUSTED_AFTER_OWNER_RUN_FAILURES"
+    assert row["history"][-1]["event"] == "WATCHDOG_RETRIES_EXHAUSTED"
+    assert len(row["terminal_evidence_digest"]) == 64
+
+
+def test_l_epuisement_preserve_le_travail_deja_fait():
+    row = _row_abandonnee(epoch=8, status="STUCK", completed={"u1": {"shards": 9}})
+    row["watchdog_retries"] = 3
+    assert _reconcile_retry_current_epoch(row, _phase_courante(8), _maintenant()) is True
+    assert row["status"] == "PARTIAL"
+    assert row["completed_units"] == {"u1": {"shards": 9}}
+
+
+def test_les_deux_reconciliations_ne_se_chevauchent_jamais():
+    """Une epoque depassee s'isole, une epoque courante se reprend : jamais l'inverse."""
+    depassee = _row_abandonnee(epoch=4, status="STUCK")
+    assert _reconcile_retry_current_epoch(depassee, _phase_courante(8), _maintenant()) is False
+    courante = _row_abandonnee(epoch=8, status="STUCK")
+    assert _reconcile_epoch_superseded(courante, _phase_courante(8), _maintenant()) is False
+
+
+def test_la_reprise_ne_touche_ni_une_lease_vivante_ni_un_autre_motif():
+    avec_lease = _row_abandonnee(epoch=8, status="STUCK",
+                                 lease={"owner_run_id": "9", "acquired_at": "2026-11-21T19:00:00Z"})
+    assert _reconcile_retry_current_epoch(avec_lease, _phase_courante(8), _maintenant()) is False
+    autre_motif = _row_abandonnee(epoch=8, status="STUCK")
+    autre_motif["stuck_reason"] = "LEASE_EXPIRED_REQUIRES_RECONCILIATION"
+    assert _reconcile_retry_current_epoch(autre_motif, _phase_courante(8), _maintenant()) is False

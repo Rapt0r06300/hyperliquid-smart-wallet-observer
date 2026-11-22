@@ -95,6 +95,15 @@ def _candidates() -> list[tuple[str, str, Any]]:
 
 
 def main() -> int:
+    # Sortie journalisable : hors console, Windows encode la sortie en cp1252 et un
+    # caractere exotique imprime tue l'outil. Mesure du 21/11/2026 :
+    # `conduire_labo_par_tranches.py` lisait 10 631 645 fills en 12 s puis mourait sur
+    # la fleche de << -> N tranches >> des que sa sortie partait dans un fichier.
+    for flux in (sys.stdout, sys.stderr):
+        try:  # noqa: SIM105 -- idiome du depot ; contextlib ici couterait un import par outil
+            flux.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     print("=" * 96)
     print("  #562 -- BALAYAGE DIFFERENTIEL DU LOOKAHEAD")
     print("  Il n'ouvre pas le code. Il appelle, il tronque, il compare.")

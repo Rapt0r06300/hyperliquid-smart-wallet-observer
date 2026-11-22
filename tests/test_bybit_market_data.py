@@ -381,3 +381,22 @@ def test_bybit_market_stream_falls_back_to_official_bytick_domain(monkeypatch) -
     ]
     assert client.last_ws_url == "wss://stream.bytick.com/v5/public/linear"
 
+
+
+def test_un_statut_absent_est_refuse_et_non_suppose_negociable():
+    """MESURE DU 21/11/2026 : `item.get("status") or "Trading"` faisait passer un statut
+    ABSENT pour negociable. Un marche suspendu entrait dans l'univers, consommait du quota
+    et polluait la comparaison de funding entre bourses avec un marche mort.
+
+    Precedent INTERNE au depot : `coin_universe.py` (OKX) ecarte deja un `state` absent.
+    Les charges reelles portent toujours le champ, donc ce refus ne mord que si l'API
+    change de forme -- le moment ou l'on veut un refus plutot qu'une acceptation muette.
+    """
+    base = {"symbol": "BTCUSDT", "baseCoin": "BTC", "quoteCoin": "USDT",
+            "settleCoin": "USDT", "contractType": "LinearPerpetual"}
+    present = {"result": {"list": [dict(base, status="Trading")]}}
+    absent = {"result": {"list": [dict(base)]}}
+    suspendu = {"result": {"list": [dict(base, status="PreLaunch")]}}
+    assert parse_bybit_linear_instruments(present) == [("BTC", "BTCUSDT")]
+    assert parse_bybit_linear_instruments(absent) == [], "statut absent accepte"
+    assert parse_bybit_linear_instruments(suspendu) == []

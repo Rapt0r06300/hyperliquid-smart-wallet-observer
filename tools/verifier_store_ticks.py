@@ -118,6 +118,18 @@ def _dossiers_instrument(store: Path):
                 yield source.name, canal.name, Path(instrument.path)
 
 
+#: Les shards d'UN dossier, lus par l'index. `LIKE 'dossier/shards/%'` ne peut pas s'en servir
+#: (LIKE ignore la casse, l'index non) : il relisait toute la table à chaque dossier — 166 ms sur
+#: 581 578 lignes, contre 0,03 ms par plage. Les bornes : `/` (0x2F) puis `0` (0x30), son suivant.
+REQUETE_SHARDS_DU_DOSSIER = "SELECT chemin, octets, mtime_ns FROM shards WHERE chemin >= ? AND chemin < ?"
+
+
+def shards_connus(cnx: sqlite3.Connection, relatif: str) -> dict[str, tuple[int, int]]:
+    """{chemin: (octets, mtime_ns)} des shards déjà vérifiés de ce dossier, et de lui seul."""
+    return {ligne[0]: (ligne[1], ligne[2])
+            for ligne in cnx.execute(REQUETE_SHARDS_DU_DOSSIER, (relatif + "/shards/", relatif + "/shards0"))}
+
+
 def verifier_store(root: Path, *, budget_s: float = 45.0, horloge=time.monotonic) -> dict[str, Any]:
     """Un passage borné de vérification ; renvoie (et écrit) l'état d'ensemble du magasin.
 
@@ -163,6 +175,11 @@ def _verifier(root: Path, store: Path, budget_s: float, horloge) -> dict[str, An
         ).fetchone()
         if connu and connu[2] and (connu[0], connu[1]) == empreinte:
             continue                                  # rien de nouveau ici : sauté sans lister les shards
+        # LE BUDGET SE REGARDE AUSSI ICI (22/11/2026). Il n'était consulté qu'en tombant sur un shard
+        # NON vérifié : un dossier actif — manifeste réécrit à chaque rotation, rien de neuf — était
+        # relisté sans jamais consulter l'horloge. À l'arrêt des collecteurs : 3 min 29 s pour 45 s.
+        if not epuise and horloge() - debut > budget_s:
+            epuise = True
         if epuise:
             restants += 1
             continue
@@ -171,11 +188,7 @@ def _verifier(root: Path, store: Path, budget_s: float, horloge) -> dict[str, An
             shards = sorted((e for e in os.scandir(shards_dir) if e.name.endswith(".jsonl.gz")), key=lambda e: e.name)
         except OSError:
             shards = []
-        deja = {
-            ligne[0]: (ligne[1], ligne[2])
-            for ligne in cnx.execute("SELECT chemin, octets, mtime_ns FROM shards WHERE chemin LIKE ?",
-                                     (relatif + "/shards/%",))
-        }
+        deja = shards_connus(cnx, relatif)
         termine = True
         for entree in shards:
             cle = f"{relatif}/shards/{entree.name}"

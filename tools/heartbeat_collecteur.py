@@ -204,7 +204,67 @@ def battre(root: Path, nom: str, *, n_ecrites: int = 0, dernier_exchange_ts=None
         elif "protocol" in prev:
             hb["protocol"] = str(prev.get("protocol") or "")[:160]
         _ecrire_atomique(p, json.dumps(hb, ensure_ascii=False))
+    # Le collecteur bat depuis SA boucle, soit en son nom, soit au nom de son enveloppeur (son parent
+    # direct : `bbo-collector`, `copy-vault-checkpoints`, `userfills-live` passent `os.getppid()`).
+    # Un battement écrit pour un AUTRE processus n'imprime rien.
+    if heartbeat_pid in (os.getpid(), os.getppid()):
+        ligne_de_vie(hb)
     return hb
+
+
+#: Une ligne de vie par collecteur et par période, dans SON journal.
+LIGNE_DE_VIE_S = 300.0
+_PREMIER_BATTEMENT: dict[str, float] = {}
+_DERNIERE_LIGNE: dict[str, float] = {}
+_ECRITES_A_LA_DERNIERE: dict[str, int] = {}
+
+
+def ligne_de_vie(hb: Mapping[str, Any], *, maintenant: float | None = None, ecrire=None,
+                 periode_s: float | None = None) -> str | None:
+    """Écrit au plus une ligne `[vie] …` par période dans le journal du collecteur. Rend la ligne, ou None.
+
+    22/11/2026 : après 28 minutes de campagne, `native-venues`, `copy-vault-checkpoints` et
+    `bbo-collector` n'avaient RIEN écrit dans leur journal — tout leur état vivait dans un fichier de
+    battement que personne ne lit à l'écran. Un journal vide ne distingue pas « tout va bien » de
+    « bloqué ».
+
+    Elle n'est écrite que s'il y a eu du PROGRÈS (des écritures) depuis la précédente. Certains
+    collecteurs battent depuis une tâche à part (`collecter_l2_lane`, `collecter_userfills_vaults`) :
+    une ligne inconditionnelle rafraîchirait le journal d'un collecteur dont la réception est figée,
+    et ferait taire le contrôle qualité qui juge sur la fraîcheur du journal. Sans progrès, rien
+    n'est écrit : un journal figé reste figé. Elle porte les compteurs et toute métrique de qualité
+    non nulle. La première n'arrive qu'après une période entière.
+    """
+    if os.environ.get("HYPERSMART_LIGNE_DE_VIE", "1").strip() == "0":
+        return None
+    nom = str(hb.get("nom") or "?")
+    t = time.monotonic() if maintenant is None else float(maintenant)
+    periode = LIGNE_DE_VIE_S if periode_s is None else float(periode_s)
+    depart = _PREMIER_BATTEMENT.setdefault(nom, t)
+    if t - _DERNIERE_LIGNE.get(nom, depart) < periode:
+        return None
+    try:
+        ecrites = int(hb.get("n_ecrites_cumul") or 0)
+    except (TypeError, ValueError):
+        return None
+    if ecrites <= _ECRITES_A_LA_DERNIERE.get(nom, 0):
+        return None                          # aucun progrès : on ne rafraîchit pas un journal figé
+    _DERNIERE_LIGNE[nom] = t
+    _ECRITES_A_LA_DERNIERE[nom] = ecrites
+    metriques = hb.get("metriques") if isinstance(hb.get("metriques"), Mapping) else {}
+    anomalies = ",".join(f"{k}:{v}" for k, v in sorted(metriques.items())
+                         if v not in (None, False, 0, 0.0, "", [], {}))
+    ligne = (f"[vie] {time.strftime('%H:%M:%S')} {nom} vivant depuis {(t - depart) / 60:.0f} min"
+             f" | passes={hb.get('n_passes')} ecrites={hb.get('n_ecrites_cumul')}"
+             f" | qualite : {anomalies or 'rien a signaler'}")
+    try:
+        if ecrire is not None:
+            ecrire(ligne)
+        else:
+            print(ligne, flush=True)
+    except (OSError, ValueError):
+        return None                          # sortie fermée : la collecte ne meurt pas pour une ligne
+    return ligne
 
 
 def _lire_sans_verrou(p: Path) -> dict:

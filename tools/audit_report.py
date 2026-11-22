@@ -1438,11 +1438,27 @@ c_env_privkey = regex_rule(
     r"(?:getenv|environ\.get|environ\[)\s*\(?\s*[\"'][A-Z_]*(PRIVATE_KEY|SECRET_KEY|MNEMONIC|SEED)[A-Z_]*[\"']",
     why="lire une cle = premier pas vers l'execution reelle", blocking=True)
 
+def _exchange_hors_emploi(txt: str, line: int) -> bool:
+    """Vrai si le `/exchange` de cette ligne est EXAMINE et non EMPLOYE.
+
+    Meme discriminant que pour la regle 13 (`_lignes_exchange_utilisees`), applique a la
+    SECONDE regle qui accusait le meme garde : les deux rougissaient sur
+    `src/hl_observer/ops/validation_portable.py:311`, et n'en corriger qu'une laissait
+    l'audit rouge. Un fichier inanalysable n'ignore rien (fail-closed).
+    """
+    utilisees = _lignes_exchange_utilisees(txt)
+    if utilisees is None:
+        return False
+    return line not in utilisees
+
+
 c_exchange_url = regex_rule(
     "Aucune URL d'execution (endpoint /exchange)",
     r"[\"'][^\"']*hyperliquid[^\"']*/exchange[\"']|[\"']/exchange[\"']",
     why="l'endpoint d'ordre reel ne doit exister nulle part", blocking=True,
-    exclude=("safety_audit", "mainnet_guard", "disabled"))
+    exclude=("safety_audit", "mainnet_guard", "disabled"),
+    # Une chaine TESTEE pour refuser (`if "/exchange" in url`) est le garde, pas la porte.
+    discriminant=_exchange_hors_emploi)
 
 c_wallet_connect = regex_rule(
     "Aucun wallet-connect",
@@ -1457,10 +1473,45 @@ c_wallet_connect = regex_rule(
     line_exclude=("False", "allowed", "not ", "forbidden", "interdit", "deny", "refus",
                   "banned", "disabled", "jamais", "aucun"))
 
+def _shell_true_hors_code(txt: str, line: int) -> bool:
+    """Vrai si le `shell=True` de cette ligne n'est PAS un argument d'appel.
+
+    MESURE DU 21/11/2026 -- la regle rougissait sur
+    `src/hl_observer/ops/crash_notification.py:69`, qui est le COMMENTAIRE expliquant
+    le correctif d'injection PowerShell : << ... sans `shell=True` et donc invisible
+    pour la regle qui le cherche >>. La note du correctif etait accusee a la place du
+    defaut. Un commentaire n'execute rien.
+
+    Discriminant de CONTENU : on ne garde que les lignes ou l'arbre porte vraiment un
+    argument nomme `shell` a `True` dans un APPEL. Un fichier inanalysable rend False
+    (rien n'est ignore) : fail-closed, jamais de zero favorable.
+    """
+    try:
+        arbre = ast.parse(txt)
+    except (SyntaxError, ValueError):
+        return False
+    en_code: set[int] = set()
+    for noeud in ast.walk(arbre):
+        if not isinstance(noeud, ast.Call):
+            continue
+        for argument in noeud.keywords:
+            if argument.arg != "shell":
+                continue
+            valeur = argument.value
+            if isinstance(valeur, ast.Constant) and valeur.value is True:
+                en_code.add(argument.value.lineno)
+                en_code.add(noeud.lineno)
+    return line not in en_code
+
+
 c_shell_true = regex_rule(
     "Aucun subprocess shell=True (injection de commande)",
     r"shell\s*=\s*True",
-    why="injection de commande possible", blocking=True)
+    why="injection de commande possible", blocking=True,
+    # Un `shell=True` cite dans un commentaire ou une docstring n'est pas un appel :
+    # verifie dans l'arbre, pas devine sur la ligne (`line_exclude=("#",)` aurait
+    # aussi blanchi un vrai appel suivi d'un commentaire).
+    discriminant=_shell_true_hors_code)
 
 def c_eval_exec():
     """AST, PAS REGEX — un APPEL a eval()/exec(), pas le MOT quelque part.
@@ -3778,6 +3829,66 @@ def c_interpreteur_conforme_aux_requirements():
         f"{len(conformes)}/{len(exigences)} dependance(s) declaree(s) conforme(s) "
         f"dans l'interpreteur courant", fautes)
 
+def c_copy_vault_collecte_non_gelee():
+    """La collecte CopyVault de l'epoque courante avance-t-elle, ou est-elle en panne ?
+
+    MESURE DU 21/11/2026 -- 45 jours de gel silencieux. Voir le docstring du patch et
+    `coffre_gele_par_campagnes_inclosables` : une seule campagne STUCK
+    (`OWNER_RUN_COMPLETED_WITH_ACTIVE_LEASE`) portait les 3 052 leaders de l'epoque, et
+    le coffre n'a plus recu de release copy-vault depuis le 18/10.
+
+    Ecrite SANS `exec_rule` : `exec_rule` rattrape ImportError/AttributeError/TypeError et
+    rend la regle NON bloquante, c'est-a-dire exactement l'inverse de ce qu'on veut pour
+    une panne de collecte.
+    """
+    c = Check("COLLECTE : la couverture CopyVault de l'epoque courante n'est pas gelee")
+    chemin = ROOT / "catalog" / "COPY_VAULT_COVERAGE_RECEIPT.json"
+    if not chemin.is_file():
+        chemin = ROOT / "runtime" / "reports" / "copy_vault_coverage_20261121.json"
+    if not chemin.is_file():
+        return c.finish(
+            "recu de couverture introuvable",
+            ["aucun COPY_VAULT_COVERAGE_RECEIPT.json : lancer "
+             "`tools/build_copy_vault_coverage_receipt.py`. Un plan qu'on ne sait pas "
+             "lire n'est pas un plan sain."])
+    import json as _json
+    try:
+        recu = _json.loads(chemin.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, ValueError) as erreur:
+        return c.finish("recu illisible",
+                        [f"{_rel(chemin)} : {type(erreur).__name__}"])
+    plan = recu.get("authoritative_plan")
+    if not isinstance(plan, dict):
+        return c.finish("plan autoritaire absent du recu",
+                        ["clef `authoritative_plan` absente ou mal formee"])
+
+    pannes = []
+    for campagne in plan.get("campaigns") or []:
+        if not isinstance(campagne, dict):
+            continue
+        statut = str(campagne.get("status") or "")
+        motif = str(campagne.get("status_reason") or "")
+        if statut in ("STUCK", "FAILED") and "OWNER_RUN" in motif:
+            pannes.append(
+                f"{campagne.get('campaign_id')} : {statut} ({motif}) -- run proprietaire "
+                "mort, personne ne reprend. Remede : `_reconcile_retry_current_epoch` "
+                "dans tools/campaign_watchdog.py, applique par `campaign-watchdog.yml` "
+                "(cron */5).")
+
+    planifiees = int(plan.get("scheduled_lane_count") or 0)
+    collectees = int(plan.get("collected_lane_count") or 0)
+    if planifiees > 0 and collectees == 0:
+        pannes.append(
+            f"{planifiees} lane(s) planifiee(s) et AUCUNE collectee "
+            f"(qualified_shard_count={plan.get('qualified_shard_count')}) : la couverture "
+            f"de l'epoque {recu.get('phase_epoch')} ne produit rien.")
+
+    return c.finish(
+        f"{len(pannes)} panne(s) de collecte CopyVault ; {collectees}/{planifiees} "
+        "lane(s) collectee(s)",
+        _trim(pannes))
+
+
 def c_fichiers_illisibles():
     """Un fichier que l audit ne sait pas lire est exempte de TOUTES les regles AST."""
     c = Check("Aucun fichier illisible par l'audit (un fichier saute est exempte de tout)")
@@ -3810,6 +3921,7 @@ def main():
 
     plan = [
         # --- INTEGRITE DU CODE ---
+        c_copy_vault_collecte_non_gelee,
         c_fichiers_illisibles, c_dedup_archive_avant_suppression,
         c_compile, c_imports, c_all_imports, c_circular, c_arity, c_dead_imports,
         c_lazy_import, c_star_import, c_empty_files, c_init_with_logic,

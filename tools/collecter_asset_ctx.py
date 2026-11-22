@@ -20,6 +20,8 @@ from typing import Any, Callable
 RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
 
+from hl_observer.instrument_identity import preserve_native_instrument_symbol  # noqa: E402
+
 URL_INFO = "https://api.hyperliquid.xyz/info"
 TAPE = Path("runtime") / "data" / "asset_ctx_tape.jsonl"       # HISTORIQUE append-only (préservé)
 HEARTBEAT = Path("runtime") / "data" / "asset_ctx_heartbeat.json"
@@ -31,6 +33,27 @@ def _post_info(charge: dict, *, timeout_s: float = 10.0) -> Any:
     req = urllib.request.Request(URL_INFO, data=corps, headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout_s) as rep:      # noqa: S310 (URL constante publique)
         return json.loads(rep.read().decode("utf-8"))
+
+
+ATTENTE_MAX_S = 300.0
+
+
+def attente_apres_echec(erreur: BaseException, attente_s: float, cadence_s: float) -> float:
+    """Le délai avant la passe suivante. Sur un refus de débit (HTTP 429) il DOUBLE, borné à 5 min :
+    réessayer à cadence fixe sur un 429 entretient le refus (10 refus en 7 min le 22/11/2026). Toute
+    autre erreur garde la cadence. La réponse d'erreur est FERMÉE : laissée ouverte, elle remplissait
+    le journal d'avertissements de ressource (755 Ko en 7 minutes)."""
+    import urllib.error
+
+    if isinstance(erreur, urllib.error.HTTPError):
+        code = erreur.code
+        try:
+            erreur.close()
+        except Exception:  # noqa: BLE001 - fermer une réponse d'erreur ne doit jamais faire tomber la boucle
+            code = erreur.code
+        if code == 429:
+            return min(ATTENTE_MAX_S, max(float(cadence_s), float(attente_s)) * 2.0)
+    return float(cadence_s)
 
 
 def parser_ctx_complet(payload: Any) -> dict[str, dict]:
@@ -48,7 +71,10 @@ def parser_ctx_complet(payload: Any) -> dict[str, dict]:
         if i >= len(ctxs) or not isinstance(actif, dict) or not isinstance(ctxs[i], dict):
             continue
         c = ctxs[i]
-        nom = str(actif.get("name") or "").upper()
+        # NOM NATIF (22/11/2026) : `.upper()` enregistrait `KPEPE`, `KSHIB`, `KBONK` -- des marchés qui
+        # n'existent pas sous ce nom. Les lecteurs actuels comparent sans la casse, donc rien n'y
+        # change ; mais toute jointure exacte avec les fills (`kPEPE`) les manquait.
+        nom = preserve_native_instrument_symbol(actif.get("name")) or ""
         try:
             oracle = float(c["oraclePx"])
             mark = float(c.get("markPx") or oracle)
@@ -105,13 +131,16 @@ def main(argv=None) -> int:
         print("[asset_ctx] 1 passe : %d coins archivés" % n, flush=True)
         return 0
     print("[asset_ctx] démarrage boucle poll=%.0fs (read-only)" % a.poll_s, flush=True)
+    attente_s = a.poll_s
     while True:
         try:
             n = une_passe(root)
             print("[asset_ctx] %d coins archivés" % n, flush=True)
+            attente_s = a.poll_s
         except Exception as e:  # noqa: BLE001 (une boucle collecteur ne meurt jamais sur une passe)
-            print("[asset_ctx] passe KO: %s" % e, flush=True)
-        time.sleep(a.poll_s)
+            attente_s = attente_apres_echec(e, attente_s, a.poll_s)
+            print("[asset_ctx] passe KO: %s — prochaine dans %.0f s" % (e, attente_s), flush=True)
+        time.sleep(attente_s)
 
 
 if __name__ == "__main__":

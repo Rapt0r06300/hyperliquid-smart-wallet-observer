@@ -334,6 +334,28 @@ def sceller_le_coffre(root: Path, *, journal: Path | None = None,
                     surveiller_memoire=surveiller_memoire)
 
 
+def afficher_alignement(bilan: dict[str, Any]) -> None:
+    """Ce que le coffre contient vraiment, face au curseur du rattrapage. Une ligne, ou le detail."""
+    statut = bilan.get("statut")
+    if statut in ("CURSEUR_ABSENT", "CURSEUR_ILLISIBLE", "COFFRE_ILLISIBLE"):
+        print(f"  coffre : {statut} — le plan suit le curseur seul (rien n'est recule sur une lecture ratee)")
+        return
+    series = ", ".join(f"{s} {n} coins" for s, n in sorted((bilan.get("series_au_coffre") or {}).items()))
+    corr = bilan.get("corrections") or []
+    if bilan.get("en_attente_de_scellage"):
+        print(f"  coffre : {bilan['en_attente_de_scellage']} serie(s)-coin(s) deja sur le disque, pas encore au coffre "
+              f"(passage interrompu ?) : elles seront scellees a la fin, PAS redemandees")
+    if not corr:
+        print(f"  coffre : le curseur correspond a ce que le coffre contient ({series})")
+        return
+    motifs: dict[str, int] = {}
+    for c in corr:
+        motifs[c["motif"]] = motifs.get(c["motif"], 0) + 1
+    print(f"  coffre : le curseur PROMET {len(corr)} serie(s)-coin(s) ABSENTES du coffre "
+          f"({', '.join(f'{m} x{n}' for m, n in sorted(motifs.items()))}) — exemples : "
+          + ", ".join(f"{c['serie']}/{c['coin']}" for c in corr[:6]))
+
+
 def afficher_plan(plan: list[dict[str, Any]], *, debit: float) -> None:
     from hl_observer.ops import rattrapage_plan as RP
 
@@ -374,7 +396,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--taches", default="",
                    help="limiter a ces taches (noms separes par des virgules)")
     p.add_argument("--plan", action="store_true",
-                   help="AFFICHER le plan et s'arreter : aucune requete, aucune ecriture")
+                   help="AFFICHER le plan et s'arreter : aucune requete ; seul le cache de couverture du coffre est ecrit")
     p.add_argument("--sans-garde-memoire", action="store_true",
                    help="ne pas s'arreter sur une memoire critique (deconseille)")
     p.add_argument("--sans-scellement", action="store_true",
@@ -391,6 +413,12 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  {BR.journal_memoire('memoire')}")
 
     coins = coins_du_livre(root)
+    # LE COFFRE FAIT FOI (22/11/2026). Le curseur dit ce qui a ete DEMANDE ; le coffre, ce que le
+    # labo et le moteur peuvent LIRE. Mesure d'abord, en lecture seule ; le curseur n'est recule
+    # qu'une fois le verrou pris (plus bas), pour ne jamais ecrire sous un autre rattrapage.
+    from hl_observer.ops import rattrapage_coffre as RC
+    alignement = RC.aligner_le_curseur_sur_le_coffre(root, ecrire=False)
+    afficher_alignement(alignement)
     etat = charger_etat_collecteurs(root)
     if not coins:
         print("[rattrapage] aucun coin suivi (ni fills, ni liste de coins) : rien a rattraper.")
@@ -429,6 +457,16 @@ def main(argv: list[str] | None = None) -> int:
         return 3
     if mot:
         print(f"[rattrapage] {mot}")
+    if alignement.get("corrections"):
+        alignement = RC.aligner_le_curseur_sur_le_coffre(root, ecrire=True)
+        print(f"[rattrapage] curseur recule sur le coffre : {len(alignement['corrections'])} serie(s)-coin(s) "
+              f"seront redemandees (copie de l'ancien curseur : {alignement.get('copie_avant')})")
+        etat = charger_etat_collecteurs(root)
+        manques = RP.manques(coins=coins, etat=etat, now_ms=now_ms, profondeur_funding_j=a.profondeur_jours)
+        if demandees:
+            manques = {k: v for k, v in manques.items() if k in demandees}
+        plan = RP.ordonner(manques)
+        afficher_plan(plan, debit=100.0)
 
     reparti = RP.repartir_budget(plan, total_s=a.budget_s)
     journal = root / "runtime" / "logs" / "rattrapage" / f"rattrapage_{time.strftime('%Y%m%d_%H%M%S')}.log"

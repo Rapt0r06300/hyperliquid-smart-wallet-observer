@@ -186,6 +186,10 @@ def test_balayage_reprend_au_curseur_sans_rafale_et_survit_aux_pannes(tmp_path, 
 
     monkeypatch.setattr(m, "_get_vaults_public", fausse_liste)
     monkeypatch.setattr(m, "_post_info", faux_post)
+    # 22/11/2026 : le balayage relit aussi la courbe des vaults du protocole (HLP). Ce test porte sur
+    # le CURSEUR, avec un univers de 5 adresses : on neutralise cet ajout ici, il a son propre test
+    # (`test_collecteurs_exploitation.py`).
+    monkeypatch.setattr(m, "VAULTS_HISTORIQUE_SEULEMENT", frozenset())
     t = (T0 + 10 * DAY) / 1000
 
     un = m.balayer_historique(tmp_path, max_vaults=2, now=t)

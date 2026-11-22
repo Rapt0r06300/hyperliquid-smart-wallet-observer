@@ -1,5 +1,13 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
+rem 22/11/2026 : ce lanceur n ecrivait plus rien dans runtime\logs\launchers depuis le 12/11 ; on ne
+rem   pouvait donc pas savoir si un lancement avait ete tente. Meme journal que LANCER_HYPERSMART.
+set "ALINA_LAUNCH_RUN_ID=%DATE%_%TIME%_%RANDOM%_%RANDOM%"
+set "ALINA_LAUNCH_MODE=%~1"
+if not defined ALINA_LAUNCH_MODE set "ALINA_LAUNCH_MODE=loop"
+set "ALINA_LAUNCH_PYTHON=unresolved"
+set "ALINA_LAUNCH_OUTPUT_LOG=runtime/logs/supervisor.log"
+call "%~dp0tools\launcher_log.cmd" "LANCER_COLLECTEURS_COPY_VAULT" START preflight "launcher-entry" ""
 cd /d "%~dp0" || (
   echo [ERREUR] Impossible d'ouvrir le depot local.
   pause
@@ -42,14 +50,11 @@ set "CV_BACKOFF_MAX=300"
 set "CV_PROFILE=copy-vault"
 set "CV_LOCKFILE=%CV_ROOT%runtime\data\collecteurs.lock"
 
-if /I "%~1"=="--help" goto :help
-if /I "%~1"=="-h" goto :help
-if /I "%~1"=="--status" goto :status
-if /I "%~1"=="--stop" set "CV_MODE=stop"&shift
-if /I "%~1"=="--arreter" set "CV_MODE=stop"&shift
-if /I "%~1"=="--once" set "CV_MODE=once"&shift
-if /I "%~1"=="--duration" set "CV_DURATION=%~2"&shift&shift
-
+rem DEPLACE ICI le 22/11/2026 : `--status` saute a :status AVANT l analyse des arguments,
+rem   donc Python n etait pas resolu dans ce chemin. Consequences mesurees en lancant le
+rem   vrai lanceur : l etat interne ne s affichait pas (defaut PREEXISTANT) et la detection
+rem   a identite verifiee etait sautee, donc l ecran annoncait "ARRETE" par defaut, meme
+rem   avec des collecteurs vivants. Resoudre Python d abord repare les deux.
 rem --- Python ---
 set "CV_PYTHON="
 set "CV_PY_ARGS="
@@ -66,6 +71,19 @@ if not defined CV_PYTHON (
   where python >nul 2>nul
   if not errorlevel 1 set "CV_PYTHON=python"
 )
+
+if /I "%~1"=="--help" goto :help
+if /I "%~1"=="-h" goto :help
+if /I "%~1"=="--status" goto :status
+if /I "%~1"=="--stop" set "CV_MODE=stop"&shift
+if /I "%~1"=="--arreter" set "CV_MODE=stop"&shift
+if /I "%~1"=="--once" set "CV_MODE=once"&shift
+rem 22/11/2026 : profil allege. 13 collecteurs au lieu de 20 : seuls ceux que CopyVault exige et leurs
+rem   soutiens (prix, carnets et contexte des leaders, certification, controle). Les 7 autres servent des
+rem   familles desactivees. Usage : LANCER_COLLECTEURS_COPY_VAULT.cmd --copyvault-seul
+if /I "%~1"=="--copyvault-seul" set "CV_PROFILE=copy-vault-seul"&shift
+if /I "%~1"=="--duration" set "CV_DURATION=%~2"&shift&shift
+
 if not defined CV_PYTHON goto :python_missing
 
 rem --- Version Python 3.11+ ---
@@ -132,14 +150,28 @@ if /I "%CV_MODE%"=="stop" goto :stop
 rem --- Detection d'instance existante : collecteurs REELLEMENT vivants ? ---
 rem     On verifie les PID des collecteurs (le verrou n'etait qu'un nombre aleatoire,
 rem     donc l'ancienne detection ne matchait jamais un vrai process).
+rem PERIME 22/11/2026 -- l ancienne detection testait seulement "ce PID est UN python".
+rem   Un PID recycle par n importe quel python (mesure du jour : douze python.exe vivants,
+rem   les ouvriers d une suite de tests) faisait croire a une campagne en cours, donc un
+rem   refus de demarrer. Et un collecteur dont le .pid avait disparu restait INVISIBLE.
+rem   Ancien code, conserve et desactive :
+rem     for %%F in (poll_leaders.pid explorer_autonome.pid) do (
+rem       tasklist /FI "PID eq %%A" /NH | findstr /I "python" && set "CV_DEJA=1" )
+rem   Desormais l identite se lit sur la LIGNE DE COMMANDE : racine du projet + marqueur de
+rem   collecteur, avec exclusion de l ecran, du scelleur, de la sync et du labo.
 set "CV_DEJA="
-for %%F in (poll_leaders.pid explorer_autonome.pid) do (
-  if exist "%CV_ROOT%runtime\data\%%F" (
-    for /f "usebackq tokens=*" %%A in ("%CV_ROOT%runtime\data\%%F") do (
-      tasklist /FI "PID eq %%A" /NH 2>nul | findstr /I "python" >nul 2>nul && set "CV_DEJA=1"
-    )
-  )
+set "CV_VIVANTS=0"
+if defined CV_PYTHON (
+  rem Compteur par FICHIER, pas par backquote : `for /f usebackq` coupait le chemin
+  rem   de python.exe au premier espace (mesure du 22/11/2026 : "C:\Users\flo\Desktop\Projet"
+  rem   n est pas reconnu), le for echouait et CV_VIVANTS restait 0 -- un faux ARRETE
+  rem   obtenu PAR ECHEC, qui ressemblait a une mesure.
+  "%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\collecteurs_balayage.py" --racine "%CV_ROOT%." --compter > "%CV_ROOT%runtime\data\.cv_vivants" 2>nul
+  if exist "%CV_ROOT%runtime\data\.cv_vivants" set /p CV_VIVANTS=<"%CV_ROOT%runtime\data\.cv_vivants"
+  if exist "%CV_ROOT%runtime\data\.cv_vivants" del /f /q "%CV_ROOT%runtime\data\.cv_vivants" >nul 2>nul
+  if not defined CV_VIVANTS set "CV_VIVANTS=INCONNU"
 )
+if not "%CV_VIVANTS%"=="0" set "CV_DEJA=1"
 if defined CV_DEJA (
   echo [DEJA EN COURS] Des collecteurs tournent deja sur ce PC.
   echo   Arretez-les d'abord : appuyez sur  q  dans leur ecran, ou relancez avec  --stop.
@@ -149,24 +181,47 @@ if defined CV_DEJA (
 rem --- Auto-reparation : restes d'un Ctrl+C precedent. CMD ne peut pas
 rem     piéger Ctrl+C ; si "Terminate batch job" a coupe sans :cleanup, le
 rem     poll a pu rester. On le neutralise AVANT une nouvelle campagne. ---
-if exist "%CV_ROOT%runtime\data\poll_leaders.pid" (
-  for /f "usebackq tokens=*" %%P in ("%CV_ROOT%runtime\data\poll_leaders.pid") do taskkill /PID %%P /T /F >nul 2>nul
-  del /f /q "%CV_ROOT%runtime\data\poll_leaders.pid" >nul 2>nul
+rem PERIME 22/11/2026 -- DEUX FACONS DE TUER UN INNOCENT, remplacees :
+rem   taskkill /PID %%P /T /F    : PID lu dans un .pid, AUCUNE verification. Windows
+rem                                RECYCLE les PID ; /T emporte tout l arbre du malheureux.
+rem   taskkill /FI "WINDOWTITLE" : un titre de fenetre n appartient a personne.
+rem   Ancien code, conserve et desactive :
+rem     for /f %%P in (poll_leaders.pid) do taskkill /PID %%P /T /F
+rem     taskkill /FI "WINDOWTITLE eq ALINA-POLL-LEADERS*" /T /F
+rem     taskkill /FI "WINDOWTITLE eq ALINA-EXPLORER-AUTO*" /T /F
+rem     taskkill /FI "WINDOWTITLE eq ALINA-ASSET-CTX*" /T /F
+rem     taskkill /FI "WINDOWTITLE eq ALINA-SUPERVISOR*" /T /F
+rem   Desormais : identite verifiee (racine + marqueur + exclusions), les PID des .pid sont
+rem   VERIFIES eux aussi, et tout refus est motive et affiche. Un arret qui ECHOUE empeche
+rem   de demarrer : croire avoir arrete un collecteur encore vivant, c est lancer une
+rem   seconde campagne par-dessus la premiere.
+if defined CV_PYTHON (
+  "%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\collecteurs_balayage.py" --racine "%CV_ROOT%." --arreter --pid-de "%CV_ROOT%runtime\data\poll_leaders.pid" --pid-de "%CV_ROOT%runtime\data\explorer_autonome.pid"
+  if errorlevel 3 (
+    echo [ARRET INCOMPLET] Un collecteur n a PAS pu etre arrete : on ne demarre pas une
+    echo    seconde campagne par-dessus. Relancez avec --stop ou verifiez les droits.
+    goto :fail_lock
+  )
 )
-taskkill /FI "WINDOWTITLE eq ALINA-POLL-LEADERS*" /T /F >nul 2>nul
-rem Idem explorer autonome + superviseur de fond (orphelins d'un Ctrl+C+O precedent).
-if exist "%CV_ROOT%runtime\data\explorer_autonome.pid" (
-  for /f "usebackq tokens=*" %%P in ("%CV_ROOT%runtime\data\explorer_autonome.pid") do taskkill /PID %%P /T /F >nul 2>nul
-  del /f /q "%CV_ROOT%runtime\data\explorer_autonome.pid" >nul 2>nul
-)
-taskkill /FI "WINDOWTITLE eq ALINA-EXPLORER-AUTO*" /T /F >nul 2>nul
-taskkill /FI "WINDOWTITLE eq ALINA-ASSET-CTX*" /T /F >nul 2>nul
-taskkill /FI "WINDOWTITLE eq ALINA-SUPERVISOR*" /T /F >nul 2>nul
+if exist "%CV_ROOT%runtime\data\poll_leaders.pid" del /f /q "%CV_ROOT%runtime\data\poll_leaders.pid" >nul 2>nul
+if exist "%CV_ROOT%runtime\data\explorer_autonome.pid" del /f /q "%CV_ROOT%runtime\data\explorer_autonome.pid" >nul 2>nul
 if exist "%CV_ROOT%runtime\data\stop_collecteurs.flag" del /f /q "%CV_ROOT%runtime\data\stop_collecteurs.flag" >nul 2>nul
 if exist "%CV_ROOT%runtime\data\.session_nettoyee" del /f /q "%CV_ROOT%runtime\data\.session_nettoyee" >nul 2>nul
 
-rem --- Ecrire le verrou (PID du cmd courant) ---
-echo %RANDOM%%RANDOM%> "%CV_LOCKFILE%"
+rem --- Ecrire le verrou : une IDENTITE (PID + commande + instant), pas un hasard ---
+rem PERIME 22/11/2026 : `echo %RANDOM%%RANDOM%` ecrivait un nombre ALEATOIRE sous un
+rem   commentaire annoncant "PID du cmd courant". Le code contredisait son commentaire, et
+rem   personne ne pouvait savoir qui detenait le verrou -- donc ni le valider, ni le liberer
+rem   en connaissance de cause. Verifie sur la machine le 22/11 : le verrou reel portait
+rem   encore ce format, et le nouveau lecteur l annonce FORMAT_ANCIEN_OU_ILLISIBLE au lieu
+rem   de le lire comme un PID. Ancien code conserve, desactive :
+rem     echo %RANDOM%%RANDOM%> "%CV_LOCKFILE%"
+if defined CV_PYTHON (
+  "%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\ecrire_verrou_collecteurs.py" --verrou "%CV_LOCKFILE%" --commande "LANCER_COLLECTEURS_COPY_VAULT.cmd" >nul 2>nul
+)
+rem Repli : si Python manque, un verrou vaut mieux que pas de verrou -- mais il sera annonce
+rem comme illisible, ce qui est la verite.
+if not exist "%CV_LOCKFILE%" echo %RANDOM%%RANDOM%> "%CV_LOCKFILE%"
 
 rem --- SESSION FRAICHE : on NE certifie PAS au lancement (c'est LENT et c'est le role
 rem     du certificateur A L'ARRET, sur les donnees de la session). On se contente
@@ -177,6 +232,9 @@ if exist "%CV_ROOT%tools\archiver_tapes.py" (
   if not exist "%CV_ROOT%runtime\logs\coffre_certifie" mkdir "%CV_ROOT%runtime\logs\coffre_certifie" >nul 2>nul
   rem Reste d une session interrompue : il passe D ABORD par le certificateur ; sinon l archiveur
   rem le laisse en place. Rapide quand il n y a rien de nouveau. Rien n echappe au coffre.
+  rem 22/11/2026 : cette etape etait MUETTE. Apres la ligne [ARRET] l ecran restait vide une a deux
+  rem minutes et le lanceur paraissait bloque. On l annonce AVANT de la lancer.
+  echo [COFFRE] Mise au coffre du reste d'une session precedente ^(1 a 2 minutes, ecran immobile = normal^)...
   if exist "%CV_ROOT%tools\sceller_coffre_local.py" "%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\sceller_coffre_local.py" --root "%CV_ROOT%." >> "%CV_ROOT%runtime\logs\coffre_session.log" 2>&1
   echo [RESET] Session a zero : archivage rapide du reste eventuel ^(rien n'est perdu^)...
   "%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\archiver_tapes.py" --root "%CV_ROOT%." >> "%CV_ROOT%runtime\logs\coffre_session.log" 2>&1
@@ -196,7 +254,7 @@ echo   et vaults depuis Hyperliquid + venues secondaires (Binance,
 echo   Bybit, OKX, Gate, Bitget) pour alimenter les backtests et
 echo   replays du laboratoire quant Copy-Vault.
 echo.
-echo   20 collecteurs actifs (profil %CV_PROFILE%)
+if /I "%CV_PROFILE%"=="copy-vault-seul" (echo   13 collecteurs actifs ^(profil %CV_PROFILE% : CopyVault et ses soutiens^)) else (echo   20 collecteurs actifs ^(profil %CV_PROFILE%^))
 echo   + poll causal des leaders (REST) : casse le cap WebSocket ~10/IP
 echo   + explorer autonome : decouvre les traders ACTIFS (suivi adaptatif)
 echo   Securite : PAPER / READ-ONLY / FAIL-CLOSED
@@ -291,14 +349,27 @@ goto :cleanup
 echo.
 echo === ETAT DES COLLECTEURS COPY-VAULT ===
 echo.
+rem PERIME 22/11/2026 -- MEME DEFAUT, DEUXIEME COPIE. L ecran `:status` affichait
+rem   "EN COURS" ou "ARRETE" avec la logique "ce PID est UN python" : il pouvait donc
+rem   mentir dans les deux sens, alors que son seul role est de dire l etat REEL.
+rem   Ancien code conserve, desactive :
+rem     for %%F in (poll_leaders.pid explorer_autonome.pid) do (
+rem       tasklist /FI "PID eq %%A" /NH | findstr /I "python" && set "CV_DEJA=1" )
 set "CV_DEJA="
-for %%F in (poll_leaders.pid explorer_autonome.pid) do (
-  if exist "%CV_ROOT%runtime\data\%%F" (
-    for /f "usebackq tokens=*" %%A in ("%CV_ROOT%runtime\data\%%F") do (
-      tasklist /FI "PID eq %%A" /NH 2>nul | findstr /I "python" >nul 2>nul && set "CV_DEJA=1"
-    )
-  )
+set "CV_VIVANTS=0"
+if defined CV_PYTHON (
+  rem Compteur par FICHIER, pas par backquote : `for /f usebackq` coupait le chemin
+  rem   de python.exe au premier espace (mesure du 22/11/2026 : "C:\Users\flo\Desktop\Projet"
+  rem   n est pas reconnu), le for echouait et CV_VIVANTS restait 0 -- un faux ARRETE
+  rem   obtenu PAR ECHEC, qui ressemblait a une mesure.
+  "%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\collecteurs_balayage.py" --racine "%CV_ROOT%." --compter > "%CV_ROOT%runtime\data\.cv_vivants" 2>nul
+  if exist "%CV_ROOT%runtime\data\.cv_vivants" set /p CV_VIVANTS=<"%CV_ROOT%runtime\data\.cv_vivants"
+  if exist "%CV_ROOT%runtime\data\.cv_vivants" del /f /q "%CV_ROOT%runtime\data\.cv_vivants" >nul 2>nul
+  if not defined CV_VIVANTS set "CV_VIVANTS=INCONNU"
+  echo   Collecteurs identifies par leur ligne de commande : %CV_VIVANTS%
+  "%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\collecteurs_balayage.py" --racine "%CV_ROOT%." --lister --verrou "%CV_LOCKFILE%" 2>nul
 )
+if not "%CV_VIVANTS%"=="0" set "CV_DEJA=1"
 if defined CV_DEJA (
   echo Statut : EN COURS ^(collecteurs vivants^)
 ) else (
@@ -307,7 +378,25 @@ if defined CV_DEJA (
 echo.
 if exist "%CV_ROOT%runtime\data\economic_collection_pids.json" (
   echo --- Etat interne (economic_collection_pids.json^) ---
-  "%CV_PYTHON%" %CV_PY_ARGS% -c "import json,sys; d=json.loads(open(sys.argv[1],'r',encoding='utf-8').read()); print('  Lease valide:',d.get('lease_valid','?')); print('  Schema:',d.get('schema_version','?')); pids=d.get('pids',{}); print('  Workers:',len(pids)); [print(f'    {k}: PID {v}') for k,v in sorted(pids.items())]" "%CV_ROOT%runtime\data\economic_collection_pids.json" 2>nul
+rem PERIME 22/11/2026 : cette ligne lisait `d.get('lease_valid')`, une clef ABSENTE de ce
+rem   schema (elle appartient a `bounded_collection`). L ecran affichait donc
+rem   `Lease valide: ?` POUR TOUJOURS, alors que le bail etait expire depuis 10,2 h : le
+rem   bail vit ici sous `lease.expires_at_ms`. Et le fichier listait 20 workers quand 0
+rem   etait vivant. Remplacee par l etat REEL a quatre niveaux (processus vivant !=
+rem   collecte fonctionnelle != donnees fraiches != certifiables). Ancienne ligne gardee :
+rem "%CV_PYTHON%" %CV_PY_ARGS% -c "import json,sys; d=json.loads(open(sys.argv[1],'r',encoding='utf-8').read()); print('  Lease valide:',d.get('lease_vali
+  "%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\etat_collecte_reel.py" --racine "%CV_ROOT%." 2>nul
+rem --- AVANCEMENT DU RATTRAPAGE : cable le 22/11/2026 apres mesure `prod=0`.
+rem     `tools/avancement_rattrapage.py` existait, teste, et n etait appele par PERSONNE.
+rem     Or la passe de rattrapage etait MUETTE : zero octet de sortie en une heure (verifie
+rem     le 15/11), son resume n arrivant qu APRES epuisement du budget, jusqu a 8 h plus
+rem     tard. Un rattrapage silencieux est indistinguable d un rattrapage MORT, et sans le
+rem     voir on ne peut decider ni d attendre ni de relancer. LECTURE SEULE : il ne lance
+rem     aucune passe. ---
+if exist "%CV_ROOT%tools\avancement_rattrapage.py" (
+  echo.
+  "%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\avancement_rattrapage.py" --root "%CV_ROOT%." 2>nul
+)
 ) else (
   echo Aucun fichier d'etat trouve.
 )
@@ -398,20 +487,26 @@ echo [ARRET] Arret propre en cours...
 rem --- Signal d'arret au superviseur de fond + arret des workers collecteurs ---
 >"%CV_ROOT%runtime\data\stop_collecteurs.flag" echo 1
 if defined CV_PYTHON "%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\watch_economic_collectors.py" --root "%CV_ROOT%." --stop >nul 2>nul
-taskkill /FI "WINDOWTITLE eq ALINA-SUPERVISOR*" /T /F >nul 2>nul
+rem --- Arret a IDENTITE VERIFIEE : racine du projet + marqueur de collecteur,
+rem     exclusions (ecran, scelleur, sync, labo), PID des .pid VERIFIES eux aussi,
+rem     et tout refus est motive et affiche. Remplace les taskkill ci-dessous. ---
+if defined CV_PYTHON (
+  "%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\collecteurs_balayage.py" --racine "%CV_ROOT%." --arreter --pid-de "%CV_ROOT%runtime\data\poll_leaders.pid" --pid-de "%CV_ROOT%runtime\data\explorer_autonome.pid"
+)
+rem PERIME 22/11/2026 (PID recycle / titre de fenetre) : taskkill /FI "WINDOWTITLE eq ALINA-SUPERVISOR*" /T /F >nul 2>nul
 rem --- Arreter l'explorer autonome ---
 if exist "%CV_ROOT%runtime\data\explorer_autonome.pid" (
-  for /f "usebackq tokens=*" %%P in ("%CV_ROOT%runtime\data\explorer_autonome.pid") do taskkill /PID %%P /T /F >nul 2>nul
+rem PERIME 22/11/2026 (PID recycle / titre de fenetre) : for /f "usebackq tokens=*" %%P in ("%CV_ROOT%runtime\data\explorer_autonome.pid") do taskkill /PID %%P /T /F >nul 2>nul
   del /f /q "%CV_ROOT%runtime\data\explorer_autonome.pid" >nul 2>nul
 )
-taskkill /FI "WINDOWTITLE eq ALINA-EXPLORER-AUTO*" /T /F >nul 2>nul
-taskkill /FI "WINDOWTITLE eq ALINA-ASSET-CTX*" /T /F >nul 2>nul
+rem PERIME 22/11/2026 (PID recycle / titre de fenetre) : taskkill /FI "WINDOWTITLE eq ALINA-EXPLORER-AUTO*" /T /F >nul 2>nul
+rem PERIME 22/11/2026 (PID recycle / titre de fenetre) : taskkill /FI "WINDOWTITLE eq ALINA-ASSET-CTX*" /T /F >nul 2>nul
 rem --- Arreter le poll des leaders (fenetre dediee) ---
 if exist "%CV_ROOT%runtime\data\poll_leaders.pid" (
-  for /f "usebackq tokens=*" %%P in ("%CV_ROOT%runtime\data\poll_leaders.pid") do taskkill /PID %%P /T /F >nul 2>nul
+rem PERIME 22/11/2026 (PID recycle / titre de fenetre) : for /f "usebackq tokens=*" %%P in ("%CV_ROOT%runtime\data\poll_leaders.pid") do taskkill /PID %%P /T /F >nul 2>nul
   del /f /q "%CV_ROOT%runtime\data\poll_leaders.pid" >nul 2>nul
 )
-taskkill /FI "WINDOWTITLE eq ALINA-POLL-LEADERS*" /T /F >nul 2>nul
+rem PERIME 22/11/2026 (PID recycle / titre de fenetre) : taskkill /FI "WINDOWTITLE eq ALINA-POLL-LEADERS*" /T /F >nul 2>nul
 
 rem --- ENVOYER LES DONNEES AU BON ENDROIT : depot dans le COFFRE CERTIFIE
 rem     (scellage verifie) puis remise a zero des flux. Zero perte. ---
@@ -448,21 +543,27 @@ echo === ARRET PROPRE DES COLLECTEURS COPY-VAULT ===
 rem Arret immediat : invalide le bail + tue les workers verifies (watchdog --stop).
 >"%CV_ROOT%runtime\data\stop_collecteurs.flag" echo 1
 if defined CV_PYTHON "%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\watch_economic_collectors.py" --root "%CV_ROOT%." --stop
-taskkill /FI "WINDOWTITLE eq ALINA-SUPERVISOR*" /T /F >nul 2>nul
+rem --- Arret a IDENTITE VERIFIEE : racine du projet + marqueur de collecteur,
+rem     exclusions (ecran, scelleur, sync, labo), PID des .pid VERIFIES eux aussi,
+rem     et tout refus est motive et affiche. Remplace les taskkill ci-dessous. ---
+if defined CV_PYTHON (
+  "%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\collecteurs_balayage.py" --racine "%CV_ROOT%." --arreter --pid-de "%CV_ROOT%runtime\data\poll_leaders.pid" --pid-de "%CV_ROOT%runtime\data\explorer_autonome.pid"
+)
+rem PERIME 22/11/2026 (PID recycle / titre de fenetre) : taskkill /FI "WINDOWTITLE eq ALINA-SUPERVISOR*" /T /F >nul 2>nul
 rem Arret de l'explorer autonome.
 if exist "%CV_ROOT%runtime\data\explorer_autonome.pid" (
-  for /f "usebackq tokens=*" %%P in ("%CV_ROOT%runtime\data\explorer_autonome.pid") do taskkill /PID %%P /T /F >nul 2>nul
+rem PERIME 22/11/2026 (PID recycle / titre de fenetre) : for /f "usebackq tokens=*" %%P in ("%CV_ROOT%runtime\data\explorer_autonome.pid") do taskkill /PID %%P /T /F >nul 2>nul
   del /f /q "%CV_ROOT%runtime\data\explorer_autonome.pid" >nul 2>nul
 )
-taskkill /FI "WINDOWTITLE eq ALINA-EXPLORER-AUTO*" /T /F >nul 2>nul
-taskkill /FI "WINDOWTITLE eq ALINA-ASSET-CTX*" /T /F >nul 2>nul
+rem PERIME 22/11/2026 (PID recycle / titre de fenetre) : taskkill /FI "WINDOWTITLE eq ALINA-EXPLORER-AUTO*" /T /F >nul 2>nul
+rem PERIME 22/11/2026 (PID recycle / titre de fenetre) : taskkill /FI "WINDOWTITLE eq ALINA-ASSET-CTX*" /T /F >nul 2>nul
 del /f /q "%CV_ROOT%runtime\data\stop_collecteurs.flag" >nul 2>nul
 rem Arret du poll des leaders.
 if exist "%CV_ROOT%runtime\data\poll_leaders.pid" (
-  for /f "usebackq tokens=*" %%P in ("%CV_ROOT%runtime\data\poll_leaders.pid") do taskkill /PID %%P /T /F >nul 2>nul
+rem PERIME 22/11/2026 (PID recycle / titre de fenetre) : for /f "usebackq tokens=*" %%P in ("%CV_ROOT%runtime\data\poll_leaders.pid") do taskkill /PID %%P /T /F >nul 2>nul
   del /f /q "%CV_ROOT%runtime\data\poll_leaders.pid" >nul 2>nul
 )
-taskkill /FI "WINDOWTITLE eq ALINA-POLL-LEADERS*" /T /F >nul 2>nul
+rem PERIME 22/11/2026 (PID recycle / titre de fenetre) : taskkill /FI "WINDOWTITLE eq ALINA-POLL-LEADERS*" /T /F >nul 2>nul
 rem Liberer le verrou.
 if exist "%CV_LOCKFILE%" del /f /q "%CV_LOCKFILE%" >nul 2>nul
 echo [OK] Collecteurs arretes proprement. Vous pouvez relancer sans souci.

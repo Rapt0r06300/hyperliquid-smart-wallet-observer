@@ -1930,6 +1930,60 @@ def _promotion_une_passe(root: Path) -> None:
     PC.construire(root, coins_probe=coins_probe, tape=tape, candidats_observes=observes)
     PC.scorer_paires(root, tape=tape)                     # SHADOW PAR PAIRE (même hors table PROBE)
     RS.ecrire(root, tape=tape)                            # SHADOW multi-seuils × âge réel (versionné)
+    _auto_amelioration_une_passe(root)                    # APPRENDRE : juge l'échantillon clos, choisit la variante suivante
+    _hlp_papier_une_passe(root)                           # SUIVRE le dépôt papier HLP (une lecture publique par jour)
+
+
+HLP_PAPIER_INTERVALLE_S = 24 * 3600.0
+_HLP_PAPIER_DERNIERE_S: float | None = None
+
+
+def _hlp_papier_une_passe(root: Path, *, maintenant_s: float | None = None) -> bool:
+    """Marque le dépôt PAPIER de 100 USD dans HLP, au plus une fois par 24 h. Rend True si la lecture
+    a été tentée. Sous-processus isolé (l'outil charge numpy : on ne l'importe pas dans le collecteur),
+    borné à 120 s, fail-soft : rien ici ne doit ralentir ni interrompre la réception des fills."""
+    global _HLP_PAPIER_DERNIERE_S
+    import subprocess
+    import sys as _sys
+    import time as _time
+    maintenant = _time.monotonic() if maintenant_s is None else float(maintenant_s)
+    if _HLP_PAPIER_DERNIERE_S is not None and maintenant - _HLP_PAPIER_DERNIERE_S < HLP_PAPIER_INTERVALLE_S:
+        return False
+    _HLP_PAPIER_DERNIERE_S = maintenant           # armé AVANT l'appel : un échec ne relance pas toutes les 5 minutes
+    try:
+        outil = Path(root) / "tools" / "goal2_hlp.py"
+        fini = subprocess.run([_sys.executable, str(outil), "--lire", "--segment", "papier"],
+                              capture_output=True, text=True, encoding="utf-8", errors="replace",
+                              timeout=120, cwd=str(root), check=False)
+        lignes = [x.strip() for x in (fini.stdout or "").splitlines() if x.strip()]
+        print("[hlp-papier] rc=%s %s" % (fini.returncode, lignes[-1][:140] if lignes else "(aucune sortie)"), flush=True)
+    except Exception as exc:  # noqa: BLE001
+        print("[hlp-papier] err %s" % str(exc)[:80], flush=True)
+    return True
+
+
+def _auto_amelioration_une_passe(root: Path) -> None:
+    """Le moteur apprend de ses cycles clôturés (bac à sable RAW, papier) : `auto_amelioration`.
+
+    Isolée et fail-soft : une erreur ici ne doit jamais interrompre la passe shadow ni la réception
+    des fills. N'imprime que lorsqu'une décision CHANGE quelque chose (pas toutes les 5 minutes).
+    """
+    try:
+        from hl_observer.experimental import auto_amelioration as AA
+        etat = AA.une_passe(root, appliquer=True)
+    except Exception as exc:  # noqa: BLE001
+        print("[auto-amelioration] err %s" % str(exc)[:80], flush=True)
+        return
+    arme = ((etat.get("parallele") or {}).get("decision") or {})
+    if etat.get("appliquee"):
+        if arme.get("action") == "ARMER":
+            print("[auto-amelioration] RAW_PROBE ARMER variante=%s edge=%s bps — %s" % (
+                arme.get("variante"), arme.get("edge_brut_bps"), arme.get("motif")), flush=True)
+        for action in etat.get("echelle") or []:
+            print("[auto-amelioration] %s %s frac_tvl=%s — %s" % (
+                action.get("cohorte"), action.get("action"), action.get("frac_tvl"), action.get("motif")), flush=True)
+    elif etat.get("refus"):
+        print("[auto-amelioration] decision NON appliquee : %s" % etat["refus"], flush=True)
 
 
 async def _promotion_periodique(root: Path, *, intervalle_s: float = 300.0) -> None:
@@ -2820,6 +2874,15 @@ async def _boucle(root: Path) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Sortie journalisable : hors console, Windows encode la sortie en cp1252 et un
+    # caractere exotique imprime tue l'outil. Mesure du 21/11/2026 :
+    # `conduire_labo_par_tranches.py` lisait 10 631 645 fills en 12 s puis mourait sur
+    # la fleche de << -> N tranches >> des que sa sortie partait dans un fichier.
+    for flux in (sys.stdout, sys.stderr):
+        try:  # noqa: SIM105 -- idiome du depot ; contextlib ici couterait un import par outil
+            flux.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     _configure_console_output()
     p = argparse.ArgumentParser(description="Moteur WS userFills inline 2 cohortes (lecture seule).")
     p.add_argument("--root", default=str(RACINE))

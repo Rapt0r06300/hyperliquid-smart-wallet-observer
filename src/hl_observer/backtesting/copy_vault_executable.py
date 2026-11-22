@@ -66,7 +66,10 @@ from hl_observer.economics.numeric import (
     float_not_above,
     float_not_below,
 )
-from hl_observer.funding.funding_times import next_funding_time_ms
+from hl_observer.backtesting.copy_vault_funding_realise import (
+    champs_de_portage,
+    porte_de_funding,
+)
 from hl_observer.normalization.l2_book import validate_l2_book_sides
 from hl_observer.simulation.economic_objective import STARTING_CAPITAL_USD
 
@@ -226,6 +229,8 @@ def execute_metaorder(
     fee_bps: float | None = None,
     require_causal_books: bool = False,
     economic_mode: EconomicRunMode | str = EconomicRunMode.EXPLORATORY,
+    taux_funding: Mapping[str, Any] | None = None,
+    couverture_funding_ms: tuple[int, int] | None = None,
 ) -> tuple[dict[str, Any] | None, str]:
     """Execute one closed paper episode or return an explicit refusal code."""
     raw_execution_parameters = (
@@ -362,14 +367,6 @@ def execute_metaorder(
             if l2_reason is not None:
                 return None, "INVALID_OBSERVED_BOOK_L2"
     entry_ts_ms = int(entry["ts_ms"])
-    # Include a funding boundary exactly equal to entry time: with timestamps
-    # alone the fill/funding event order is unknown, so that position is unsafe.
-    first_possible_funding_ms = next_funding_time_ms(
-        entry_ts_ms - 1,
-        interval_hours=1,
-    )
-    if first_possible_funding_ms <= int(exit_book["ts_ms"]):
-        return None, "FUNDING_BOUNDARY_UNPRICED"
     checkpoint_writer_ids = {
         str(row.get("writer_run_id") or "").strip()
         for row in (reference, entry, exit_book)
@@ -407,6 +404,16 @@ def execute_metaorder(
     direction = meta_direction * int(direction_multiplier)
     if direction not in (-1, 1):
         return None, "INVALID_DIRECTION"
+    # Frontiere de funding : ambigue -> refus ; interieure + taux observe -> chiffree ; sinon
+    # refus (defaut inchange). Regle et justification : `porte_de_funding`.
+    carry, refus_funding = porte_de_funding(
+        coin=str(entry.get("coin") or metaorder.get("coin") or ""),
+        entree_ms=entry_ts_ms, sortie_ms=int(exit_book["ts_ms"]),
+        notionnel_usd=float(notional_usd), direction=int(direction),
+        taux_funding=taux_funding, couverture_ms=couverture_funding_ms,
+    )
+    if refus_funding is not None:
+        return None, refus_funding
     reference_mid = (float(reference["bid"]) + float(reference["ask"])) / 2.0
     reference_spread_bps = (
         (float(reference["ask"]) - float(reference["bid"])) / reference_mid * 10_000.0
@@ -730,6 +737,7 @@ def execute_metaorder(
             else "EXPLORATORY_EXPLICIT_NON_CERTIFIABLE_OVERRIDE"
         ),
         "net_pnl_usd": net,
+        **champs_de_portage(net, carry),      # a COTE du net, jamais dedans
         "liquidatable_net": True,
         "paper_read_only": True,
         "real_execution": False,

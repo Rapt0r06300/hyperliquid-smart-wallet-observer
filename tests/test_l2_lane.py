@@ -226,3 +226,44 @@ def test_un_carnet_bbo_de_lane_garde_son_identite_jusqu_au_moteur(tmp_path):
     metaordre = cv.cluster_metaorders([entree])[0][0]
     _trade, raison = cv.execute_metaorder(metaordre, carnets["ETH"], horizon_ms=300_000, require_causal_books=True)
     assert raison not in {"L2_CONNECTION_IDENTITY_INCOMPLETE", "L2_GAP_EPOCH_IDENTITY_INCOMPLETE"}
+
+
+def test_seuls_les_coins_nouveaux_et_abonnables_sont_ajoutes():
+    """Session de 6 h (22/11) : un coin nouvellement tenu ne doit pas attendre la session suivante."""
+    univers = {"BTC", "ETH", "kPEPE", "SOL"}
+    assert L.coins_a_ajouter({"BTC", "ETH"}, ["BTC", "ETH", "kPEPE", "FAUX"], univers) == ["kPEPE"]
+    assert L.coins_a_ajouter({"BTC", "ETH"}, ["BTC"], univers) == []                     # sorti de la liste : rien
+    assert L.coins_a_ajouter({"BTC"}, ["BTC", "SOL"], None) == ["SOL"]                    # univers inconnu : pas de rejet
+    assert L.coins_a_ajouter(set(), ["BTC", "ETH", "SOL", "kPEPE"], univers, shard_count=2, shard_index=0) == \
+        [c for c in L.shard_leaders(["BTC", "ETH", "SOL", "kPEPE"], 2, 0)]               # même tranche qu'au démarrage
+
+
+def test_la_relecture_ouvre_une_connexion_supplementaire_sans_toucher_aux_autres(tmp_path, monkeypatch):
+    import argparse
+    import asyncio
+    ouvertes: list[tuple[str, list[str]]] = []
+
+    async def connexion_factice(lane, coins, socket_id, deadline):
+        ouvertes.append((socket_id, list(coins)))
+
+    listes = iter([["BTC", "ETH"], ["BTC", "ETH", "kPEPE", "SOL"], ["BTC", "ETH", "kPEPE", "SOL"]])
+    monkeypatch.setattr(L, "_connexion", connexion_factice)
+    monkeypatch.setattr(L, "_charger_coins", lambda root, chemin: next(listes))
+    monkeypatch.setattr(L, "charger_univers", lambda root: {"BTC", "ETH", "kPEPE", "SOL"})
+    horloge = {"t": 0.0}
+
+    async def dormir(s):
+        horloge["t"] += s
+
+    args = argparse.Namespace(coins_file="x.json", shard_count=1, shard_index=0, coins_par_connexion=1)
+    suivis, taches = {"BTC", "ETH"}, []
+
+    async def scenario():
+        await L._ajouter_les_nouveaux_coins(tmp_path, args, None, suivis, 2000.0, taches, periode_s=600.0,
+                                            dormir=dormir, horloge=lambda: horloge["t"])
+        await asyncio.gather(*taches)
+
+    asyncio.run(scenario())
+    assert ouvertes == [("N1", ["kPEPE"]), ("N2", ["SOL"])]          # une connexion par groupe, rien deux fois
+    assert suivis == {"BTC", "ETH", "kPEPE", "SOL"}
+    assert horloge["t"] == 1800.0                                     # s'arrête avant la fin de session

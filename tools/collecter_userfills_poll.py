@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from hl_observer.collection import collecte_fiable as CF
+from hl_observer.ops import budget_rest as _BUDGET  # noqa: E402  (n° 22 : poids REST réel, sans bloquer)
 from hl_observer.collection.forward_poll_fills import (
     LIVE_POLL_SOURCE,
     RESPONSE_PAGE_CAP,
@@ -137,7 +138,9 @@ def _post_userfills(vault: str, start_ms: int, end_ms: int, *, timeout_s: float 
         req = urllib.request.Request(URL_HL, data=corps, headers=_UA_POLL)
         try:
             with urllib.request.urlopen(req, timeout=timeout_s) as rep:  # noqa: S310 (URL constante)
-                return json.loads(rep.read().decode("utf-8"))
+                rendu = json.loads(rep.read().decode("utf-8"))
+            _BUDGET.compter("userFillsByTime", len(rendu) if isinstance(rendu, list) else 0)
+            return rendu
         except urllib.error.HTTPError:
             raise  # 429 & co. DOIVENT remonter a l'AIMD (ne jamais masquer le signal)
         except (urllib.error.URLError, OSError, TimeoutError) as exc:
@@ -549,10 +552,17 @@ def main(argv: list[str] | None = None) -> int:
         pid_path.write_text(str(os.getpid()), encoding="utf-8")
     except OSError:
         pass
+    # Leaders DISTINCTS réellement pollés depuis le démarrage : « 228 leaders au plan » ne dit pas
+    # combien ont été lus. Seul ce compte dit si l'historique des fills se construit pour tous.
+    polles_cumul: set[str] = set()
     # Écrit la page de santé immédiatement pour qu'elle existe à l'ouverture auto.
     try:
+        # `phase` : cette premiere page est ecrite AVANT toute passe. Sans cette etiquette elle se lit
+        # « 0 leader polle, tous les flux ABSENTS » pendant toute la premiere passe (plus de 7 minutes
+        # le 22/11/2026) : un etat de demarrage pris pour une panne.
         _ecrire_page_sante(root, time.time() * 1000.0,
-                           {"leaders": len(leaders), "polles": 0, "fills_emis": 0, "en_backoff": 0})
+                           {"leaders": len(leaders), "polles": 0, "fills_emis": 0, "en_backoff": 0,
+                            "phase": "DEMARRAGE_AUCUNE_PASSE_TERMINEE"})
     except Exception:  # noqa: BLE001
         pass
     while True:
@@ -566,8 +576,12 @@ def main(argv: list[str] | None = None) -> int:
             due_ms[v] = now + interval * 1000.0
         _save_state(root / STATE_PATH, state)  # #9 flush de l'état à chaque passe
         en_backoff = sum(1 for v in leaders if not cooldown.due(v, now))
+        polles_cumul.update(str(v) for v in a_poller)
         resume = {"leaders": len(leaders), "polles": len(a_poller), "fills_emis": emitted,
-                  "en_backoff": en_backoff, "shard": f"{args.shard_index}/{args.shard_count}"}
+                  "leaders_polles_depuis_le_demarrage": len(polles_cumul),
+                  "leaders_jamais_polles": max(0, len(leaders) - len(polles_cumul)),
+                  "en_backoff": en_backoff, "shard": f"{args.shard_index}/{args.shard_count}",
+                  "phase": "PASSE_TERMINEE"}
         try:  # #5/#10 page de santé (fail-soft : ne doit jamais arrêter la collecte)
             _ecrire_page_sante(root, now, resume)
         except Exception as exc:  # noqa: BLE001

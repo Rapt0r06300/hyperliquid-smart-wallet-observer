@@ -118,6 +118,36 @@ def _stop_child(child: subprocess.Popen[bytes], *, grace_s: float = 5.0) -> None
     child.wait(timeout=grace_s)
 
 
+GENERATIONS_PRECEDENTES = 3
+
+
+def decaler_les_generations(log: Path, garder: int = GENERATIONS_PRECEDENTES) -> None:
+    """`.prev` -> `.prev2` -> `.prev3` avant d'ecrire le nouveau `.prev`. Avant le 22/11/2026 une seule
+    generation etait gardee : le journal de l'avant-dernier demarrage disparaissait a chaque relance,
+    c'est-a-dire exactement quand on en a besoin pour comprendre une panne a repetition."""
+    def nom(i: int) -> Path:
+        return log.with_suffix(log.suffix + (".prev" if i == 1 else f".prev{i}"))
+
+    for i in range(max(1, int(garder)) - 1, 0, -1):
+        try:
+            if nom(i).is_file():
+                os.replace(nom(i), nom(i + 1))
+        except OSError:
+            continue
+
+
+def attendre_sous_bail(secondes: float, *, valide, dormir=time.sleep, horloge=time.monotonic) -> str | None:
+    """Attend `secondes` en reverifiant le bail chaque seconde. Rend None si l'attente s'est
+    ecoulee, sinon le MOTIF d'invalidite du bail (l'appelant s'arrete alors proprement)."""
+    echeance = horloge() + max(0.0, float(secondes))
+    while horloge() < echeance:
+        ok, motif = valide()
+        if not ok:
+            return str(motif)
+        dormir(min(1.0, max(0.0, echeance - horloge())))
+    return None
+
+
 def run(
     *,
     root: Path,
@@ -127,6 +157,7 @@ def run(
     lease_file: Path,
     lease_token: str,
     script_args: list[str],
+    initial_delay_s: float = 0.0,
 ) -> int:
     log = root / "runtime" / "logs" / f"economic-{name}.log"
     log.parent.mkdir(parents=True, exist_ok=True)
@@ -137,6 +168,7 @@ def run(
                 previous_size = previous.tell()
                 previous.seek(max(0, previous_size - _LOG_MAX_BYTES))
                 previous_tail = previous.read(_LOG_MAX_BYTES)
+            decaler_les_generations(log)
             log.with_suffix(log.suffix + ".prev").write_bytes(previous_tail)
         except OSError:
             # Rotation is diagnostic only; collection must not die because an
@@ -145,6 +177,15 @@ def run(
     with _RotatingLog(log) as output:
         output.write_text(f"bounded collector={name} script={script} interval={interval_s}s\n")
         output.write_text("safety=READ_ONLY lease_enforced=true\n")
+        if initial_delay_s > 0:
+            # DEPART DIFFERE (22/11/2026) : le certificateur partait avec les collecteurs et traitait
+            # 132 fichiers (dont 251 Mo de bougies) pendant qu'ils s'abonnaient. Le bail reste verifie.
+            output.write_text(f"[initial-delay] {initial_delay_s:.0f}s\n")
+            motif = attendre_sous_bail(
+                initial_delay_s, valide=lambda: validate_lease(lease_file, lease_token, root)[:2])
+            if motif is not None:
+                output.write_text(f"[bounded-stop-wait] {motif}\n")
+                return 0
         while True:
             valid, reason, payload = validate_lease(lease_file, lease_token, root)
             if not valid:
@@ -211,6 +252,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--interval-s", type=float, required=True)
     parser.add_argument("--lease-file", required=True)
     parser.add_argument("--lease-token")
+    parser.add_argument("--initial-delay-s", type=float, default=0.0)
     parser.add_argument("script_args", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
     script_args = args.script_args[1:] if args.script_args[:1] == ["--"] else args.script_args
@@ -231,6 +273,7 @@ def main(argv: list[str] | None = None) -> int:
         lease_file=Path(args.lease_file),
         lease_token=lease_token,
         script_args=script_args,
+        initial_delay_s=max(0.0, float(args.initial_delay_s)),
     )
 
 

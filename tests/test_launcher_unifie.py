@@ -148,9 +148,15 @@ def test_le_lanceur_unique_n_est_pas_archive():
 # ------------------------------------------------------------------ 4. racine nettoyee
 
 def test_la_racine_contient_uniquement_les_lanceurs_principaux_et_alinasync():
-    """La racine expose quatre rôles principaux et AlinaSync, plus cinq lanceurs d'appoint
+    """La racine expose quatre rôles principaux et AlinaSync, plus les lanceurs d'appoint
     ENREGISTRÉS (certificateur = sixième module de l'opérateur, suivi du coffre ouvert par la
-    fermeture des collecteurs, rapport, nœud). Tout autre .cmd à la racine reste interdit."""
+    fermeture des collecteurs, rapport, nœud, rattrapage, ETA de collecte). Tout autre .cmd à la
+    racine reste interdit — la politique n'interdit pas un appoint, elle interdit un NON CLASSÉ.
+
+    ⚠️ Un lanceur racine se déclare à QUATRE endroits : cet ensemble, `ENTRYPOINT_ROLES`,
+    `ROOT_SUPPORT_ENTRYPOINTS` et le registre de `tools/tester_cmds.py`. Le 16/11 le travail est
+    resté à moitié fait et l'audit est demeuré rouge en se croyant réparé ; le 22/11 un
+    `ETA_COLLECTE.cmd` non classé a fait tomber cinq tests d'un coup."""
     cmd_racine = {p.name for p in RACINE.glob("*.cmd")}
     assert cmd_racine == {
         "ALINA_SYNC_COMPLETE.cmd",
@@ -167,6 +173,8 @@ def test_la_racine_contient_uniquement_les_lanceurs_principaux_et_alinasync():
         # origin/main sans role — ce test etait donc rouge sur le HEAD publie.
         "CERTIFIER_EN_CONTINU.cmd",
         "RATTRAPAGE.cmd",
+        # 22/11/2026 : l'ETA de collecte (lecture seule, aucun collecteur demarre ni arrete).
+        "ETA_COLLECTE.cmd",
     }
     assert {name for name in cmd_racine if name in ENTRYPOINT_ROLES} == cmd_racine   # tous classés
     assert (RACINE / "ALINA_SYNC_COMPLETE.sh").is_file()

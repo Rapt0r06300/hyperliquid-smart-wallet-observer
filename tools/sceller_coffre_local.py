@@ -57,6 +57,7 @@ from hl_observer.datasets.coffre_certifie import (  # noqa: E402
     identite,
     motif_non_certifie,
     nouvellement_accepte,
+    rattrapage_par_identite,
     sniffer_famille,
     version_certificateur,
 )
@@ -806,6 +807,36 @@ def _precharger_identites(
     return charges
 
 
+def _precharger_identites_du_ruban(
+    coffre: Path, source: Path, famille: str, deja_vus: "EnsembleDIdentites | set", deja_faits: set,
+) -> int:
+    """Identités de TOUS les lots déjà déposés pour ce ruban, tous lots confondus (une fois par passage).
+
+    Sert quand c'est l'IDENTITÉ qui a été corrigée : le lot d'origine d'une session archivée n'est
+    pas toujours retrouvable, et une ligne déjà au coffre ne doit jamais y entrer deux fois."""
+    nu = source.name.replace(".gz", "").replace(".jsonl", "")
+    if (famille, nu) in deja_faits:
+        return 0
+    deja_faits.add((famille, nu))
+    charges = 0
+    dossier = coffre / "local" / "shards" / famille
+    for shard in sorted(dossier.glob(f"*__{nu}*.jsonl.gz")) if dossier.is_dir() else ():
+        reste = shard.name.split("__", 1)[1][len(nu):]
+        if not (reste == ".jsonl.gz" or reste.startswith("__")):
+            continue                                   # un autre ruban dont le nom commence pareil
+        try:
+            with gzip.open(shard, "rt", encoding="utf-8") as handle:
+                for ligne in handle:
+                    try:
+                        deja_vus.add(identite(json.loads(ligne), famille))
+                        charges += 1
+                    except (ValueError, TypeError):
+                        continue
+        except OSError:
+            continue
+    return charges
+
+
 def _lots_ayant_scelle(source: Path, sha_src: str, frontiere: int, etat: dict[str, Any]) -> list[str]:
     """Lots qui ont déjà scellé ce contenu : même SHA, ou préfixe reconnu d'un ruban homonyme."""
     lots: set[str] = set()
@@ -829,6 +860,10 @@ def _verifier_magasin_ticks(root: Path, coffre: Path, budget_s: float, log) -> d
     suivant : la fermeture des collecteurs n'attend jamais. Ne fait jamais échouer le scellage
     des rubans ; une anomalie est écrite en clair dans le journal et dans les index.
     """
+    # ANNONCE (22/11/2026) : cette etape ne disait rien avant d'avoir fini ; pendant 3 min 29 s
+    # l'ecran est reste sur « ETAPE 3/3 » et le certificateur a paru bloque.
+    _log(log, f"   [ticks] verification du magasin de ticks natifs (au plus {budget_s:.0f} s, reprise au "
+              f"prochain passage)...")
     try:
         import verifier_store_ticks
 
@@ -991,6 +1026,7 @@ def main(argv: list[str] | None = None) -> int:
     # a 1,8 Go libres et menacer les collecteurs (18/11/2026, scellement arrete a 68,6 %).
     # Mesure : 323,2 octets/entree contre 16,4, soit x19,6. Meme reponse a `in` et `add`.
     deja_vus = EnsembleDIdentites()
+    rubans_precharges: set = set()
     entrees_manifeste: list[dict[str, Any]] = []
     total = StatsCertif()
     scelles_pour_reset: list[Path] = []
@@ -1119,7 +1155,15 @@ def main(argv: list[str] | None = None) -> int:
                     # Règle de certification corrigée : je relis TOUT le ruban, mais les lignes
                     # déjà déposées par un lot précédent ne doivent pas l'être une seconde fois.
                     lots = _lots_ayant_scelle(source, sha_src, frontiere, etat)
-                    if lots:
+                    if rattrapage_par_identite(source.name) and (lots or "archive" in source.parts):
+                        # C'est l'IDENTITE qui a ete corrigee : tout ce que ce ruban a deja depose
+                        # (tous lots) est precharge, et seules les lignes que l'ancienne identite
+                        # confondait avec une autre sont deposees.
+                        connues = _precharger_identites_du_ruban(coffre, source, famille, deja_vus, rubans_precharges)
+                        rattrapage = True
+                        _log(log, f"        rattrapage d'identite (regle v{version}) : {connues:,} ligne(s) deja au "
+                                  f"coffre prechargee(s) ; seules les lignes confondues a tort sont deposees.")
+                    elif lots:
                         connues = _precharger_identites(coffre, lots, source, famille, deja_vus)
                         _log(log, f"        regle de certification mise a jour (v{version}) : je reprends ce "
                                   f"fichier ; {connues:,} ligne(s) deja au coffre ne seront pas dupliquees.")

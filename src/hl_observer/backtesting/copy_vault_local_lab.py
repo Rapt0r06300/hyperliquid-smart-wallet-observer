@@ -22,6 +22,8 @@ from hl_observer.alerts.durability import SingleWriterFileLock, WriterBusy
 from hl_observer.backtesting import copy_vault_executable as cv
 from hl_observer.backtesting import copy_vault_fenetre_locale as _FENETRE_LOCALE
 from hl_observer.backtesting import copy_vault_rubans_lourds as _LOURDS
+from hl_observer.backtesting import diagnostic_signal as _diagnostic_signal
+from hl_observer.backtesting.chargement_en_deux_temps import charger_carnets_en_deux_temps
 from hl_observer.backtesting.copy_vault_champion_deploye import (
     CHEMIN_CHAMPION_DEPLOYE,
     _ecrire_champion_deploye,
@@ -70,6 +72,7 @@ from hl_observer.backtesting.train_statistics import (
     summarize_daily_values,
 )
 from hl_observer.collection.userfills_live import userfill_required_fields_reason
+from hl_observer.dataset.copy_vault_continuity import load_release_history_audits
 from hl_observer.datasets.v2_pipeline import copy_vault_heartbeat_reason
 from hl_observer.economics.numeric import (
     USD_RECONCILIATION_ABS_TOLERANCE,
@@ -80,20 +83,19 @@ from hl_observer.economics.numeric import (
 )
 from hl_observer.normalization.l2_book import normalize_l2_levels
 from hl_observer.simulation.economic_freeze_registry import parameter_hash
-from hl_observer.dataset.copy_vault_continuity import load_release_history_audits
 
 # EXTRAIT LE 21/11/2026 vers copy_vault_preuve_journaliere (invariant #13 : un fichier > son plafond
 # devient intouchable). Les definitions ont ete DEPLACEES, pas dupliquees ; cet
 # import les relie au meme endroit pour tous les appelants existants.
 from .copy_vault_preuve_journaliere import (  # noqa: F401
     _candidate,
+    _daily_du_segment,
     _daily_lcb,
     _daily_lcb_rank,
-    _train_active_day_mean,
-    _pnl_uplift_freeze_count,
     _latest_daily,
-    _daily_du_segment,
+    _pnl_uplift_freeze_count,
     _segment_commun_le_plus_profond,
+    _train_active_day_mean,
 )
 
 OBJECTIVE_USD_PER_DAY = PAPER_TARGET_NET_USD_PER_DAY
@@ -111,7 +113,10 @@ _MATERIALIZED_TAPE_NAMES = (
     "copy_vault_active_asset_ctx_tape.jsonl",
     "copy_vault_funding_tape.jsonl", "copy_vault_ledger_tape.jsonl",
 )
-_MINIMUM_SIGNAL_UTC_DAYS = 6
+# Extraits dans `diagnostic_signal.py` (la constante y vit : sinon cycle d import).
+_MINIMUM_SIGNAL_UTC_DAYS = _diagnostic_signal.MINIMUM_SIGNAL_UTC_DAYS
+_signal_coverage = _diagnostic_signal.signal_coverage
+_diagnostic_du_split = _diagnostic_signal.diagnostic_du_split
 _LEADER_REVIEW_MAX_EVIDENCE_AGE_MS = 30 * 24 * 60 * 60 * 1000
 _TRIAL_CHAIN_GENESIS = "0" * 64
 _IMPROVEMENT_CHAIN_GENESIS = "0" * 64
@@ -1934,82 +1939,11 @@ def _load_pipeline():
 
 
 def _bounds(timestamps: list[int], *, seuil_jours: int | None = None) -> dict[str, int | bool | str] | None:
-    """Split by UTC day and purge the longest searched holding horizon."""
-    day_ms = 86_400_000
-    # The search includes holding horizons up to four hours. Purge at least
-    # the maximum candidate horizon so replayed positions cannot cross a split.
-    purge_ms = (
-        max(dict(_PARAMETER_DOMAINS)["horizon_ms"])
-        + int(cv.COPY_DELAY_MS)
-        + int(cv.MAX_TARGET_LAG_MS)
-    )
-    days = sorted({int(timestamp) // day_ms for timestamp in timestamps if int(timestamp) > 0})
-    # Seuil de L'APPELANT, minimum ABSOLU 3 : TRAIN + VALIDATION + OOS = 2 journees impossibles.
-    minimum = max(3, int(seuil_jours or _MINIMUM_SIGNAL_UTC_DAYS))
-    if len(days) < minimum:
-        return None
-    train_cut = max(2, int(len(days) * 0.60))
-    validation_cut = max(train_cut + 1, int(len(days) * 0.80))
-    if validation_cut >= len(days):
-        return None
-    validation_boundary = days[train_cut] * day_ms
-    oos_boundary = days[validation_cut] * day_ms
-    result: dict[str, int | bool | str] = {
-        "train_start_ms": days[0] * day_ms,
-        "train_end_ms": validation_boundary - purge_ms - 1,
-        "validation_start_ms": validation_boundary + purge_ms,
-        "validation_end_ms": oos_boundary - purge_ms - 1,
-        "oos_start_ms": oos_boundary + purge_ms,
-        "oos_end_ms": max(int(timestamp) for timestamp in timestamps),
-        "purge_ms": purge_ms,
-        "split_unit": "UTC_DAY",
-        "validation_empty_after_purge": False,
-    }
-    if not (
-        int(result["train_start_ms"]) < int(result["train_end_ms"])
-        < int(result["validation_start_ms"]) < int(result["validation_end_ms"])
-        < int(result["oos_start_ms"]) <= int(result["oos_end_ms"])
-    ):
-        return None
-    return result
-
-
-def _signal_coverage(timestamps: list[int]) -> dict[str, int | float | None]:
-    """Describe actual leader-signal coverage used by the temporal split."""
-    valid = sorted(
-        {timestamp for timestamp in timestamps if type(timestamp) is int and timestamp > 0}
-    )
-    day_ms = 86_400_000
-    jours = sorted({timestamp // day_ms for timestamp in valid})
-    distinct_days = len(jours)
-    median_gap_s: float | None = None
-    p95_gap_s: float | None = None
-    gap_count_gt_60s = 0
-    if len(valid) >= 2:
-        gaps = [valid[i + 1] - valid[i] for i in range(len(valid) - 1)]
-        gaps.sort()
-        median_gap_s = round(gaps[len(gaps) // 2] / 1000.0, 3)
-        p95_gap_s = round(gaps[int(len(gaps) * 0.95)] / 1000.0, 3)
-        gap_count_gt_60s = sum(1 for g in gaps if g > 60_000)
-    return {
-        "distinct_utc_days": distinct_days,
-        # La LISTE, pas seulement le nombre : une conduite par tranches doit pouvoir faire l'UNION
-        # des journees de ses tranches, et deux tranches de la meme journee ne font qu'une journee.
-        # Sans cette cle, `agregation_tranches.unir_les_jours` lisait zero partout et le seuil des
-        # six journees etait infranchissable -- constate a la premiere conduite reelle.
-        "utc_days": [
-            datetime.fromtimestamp(jour * day_ms / 1000, UTC).strftime("%Y-%m-%d")
-            for jour in jours
-        ],
-        "minimum_utc_days_required": _MINIMUM_SIGNAL_UTC_DAYS,
-        "signal_start_ms": valid[0] if valid else None,
-        "signal_end_ms": valid[-1] if valid else None,
-        "signal_span_hours": round((valid[-1] - valid[0]) / 3_600_000, 3) if valid else None,
-        "signal_count": len(valid),
-        "median_gap_s": median_gap_s,
-        "p95_gap_s": p95_gap_s,
-        "gaps_gt_60s": gap_count_gt_60s,
-    }
+    """Delegue a `diagnostic_signal.bounds`. La purge reste calculee ICI : seul le labo
+    connait ses horizons de recherche."""
+    purge = (max(dict(_PARAMETER_DOMAINS)["horizon_ms"]) + int(cv.COPY_DELAY_MS)
+             + int(cv.MAX_TARGET_LAG_MS))
+    return _diagnostic_signal.bounds(timestamps, seuil_jours=seuil_jours, purge_ms=purge)
 
 
 def _radical_inverse(index: int, base: int) -> float:
@@ -2653,10 +2587,11 @@ def run_local_campaign(
             workspace, fenetre=tranche)
         metaorders, meta_audit = cv.cluster_metaorders(entries)
         entries = len(entries)        # seul le décompte sert encore : la liste (1,2 Go) est libérée
-        books, books_audit = cv.load_observed_books(
-            workspace, coins={str(row["coin"]) for row in metaorders},
-            depuis_ms=tranche[0] if tranche else None,
-            as_of_ms=tranche[1] if tranche else None)
+        # Carnets en DEUX TEMPS (24,2 Go -> 0,084 Go) : voir `chargement_en_deux_temps`.
+        books, books_audit = charger_carnets_en_deux_temps(
+            workspace, metaorders, tranche=tranche, seuil_jours=seuil_jours,
+            charger=cv.load_observed_books, apparier=evaluable_signals,
+            bornes=_bounds, diagnostic=_diagnostic_du_split, dire=say)
     leader_review_persistence: dict[str, Any] = {"status": "NOT_REQUESTED"}
     leader_quality_train: dict[str, Any] = {}
     if leader_review_ledger_path is not None:
@@ -2806,7 +2741,11 @@ def run_local_campaign(
     #: retombe alors exactement sur son verdict historique.
     taux_funding_scoring = taux_funding or None
     # Découpe sur les jours ÉVALUABLES (signal + carnet causal) : sans carnet, TRAIN restait vide.
-    alignment = evaluable_signals(metaorders, books)
+    # `books` porte des horloges quand la phase 1 a refuse le split : on le DIT a
+    # l appariement plutot que de le lui faire deviner (il leverait sur un `row["ts_ms"]`).
+    _en_horloges = bool((books_audit or {}).get("horloges_seulement"))
+    alignment = (evaluable_signals(metaorders, horloges=books) if _en_horloges
+                 else evaluable_signals(metaorders, books))
     aligned_adds = alignment["aligned_adds"]
     bounds = _bounds(alignment["timestamps"], seuil_jours=seuil_jours)
     signal_coverage = {**_signal_coverage(timestamps), "evaluable": alignment["summary"]}
@@ -2939,6 +2878,10 @@ def run_local_campaign(
     if bounds is None:
         return {
             **base, "status": "MORE_DATA", "reason": "TEMPORAL_SPLIT_INVALID_AFTER_PURGE",
+            # Dire POURQUOI : sinon `MORE_DATA` accuse le corpus alors que la fenetre
+            # donnee au labo est plus etroite que l'unite de decoupe du split.
+            "split_diagnostic": _diagnostic_du_split(
+                alignment["timestamps"], seuil_jours=seuil_jours),
             "candidates_tested": 0, "freeze_created": False, "economically_proven": False,
         }
     sonde = sonder_train(metaorders, books, bounds)   # un seul trade exécutable en TRAIN ? sinon : à vide

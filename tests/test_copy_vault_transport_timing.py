@@ -153,3 +153,14 @@ def test_journal_keeps_unknown_receive_time_and_does_not_compute_fake_latency(tm
     assert row["latence_fill_receive_ms"] is None
     assert row["latence_receive_process_ms"] is None
     assert row["latence_fill_decision_ms"] is None
+
+
+def test_le_fill_du_direct_garde_frais_cote_agressif_et_pnl_realise() -> None:
+    """Défaut réel du 22/11 : 805 fills sur 805 gardés au coffre sans `fee`, `crossed`, `closedPnl`."""
+    msg = {"channel": "userFills", "data": {"user": "0xabc", "fills": [
+        {"coin": "kPEPE", "px": "0.01", "sz": "100", "side": "A", "dir": "Close Long", "time": 1_000,
+         "tid": 7, "oid": 11, "hash": "0xfill", "startPosition": "300", "fee": "-0.0039", "feeToken": "USDC",
+         "crossed": True, "closedPnl": "1.25"}]}}
+    [fill] = UL.parser_message_userfills(msg, vault="0xabc", received_at_ms=1_050)
+    assert (fill["fee"], fill["feeToken"], fill["crossed"], fill["closedPnl"]) == ("-0.0039", "USDC", True, "1.25")
+    assert fill["signe"] == -1 and fill["coin"] == "kPEPE" and fill["start_position"] == 300.0

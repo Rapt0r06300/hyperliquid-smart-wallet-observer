@@ -381,6 +381,56 @@ async def _battre(root: Path, nom: str, lane: "LaneL2", deadline: float, *, peri
         await asyncio.sleep(periode_s)
 
 
+#: Relecture de la liste des coins pendant une session (22/11/2026). La session locale dure 6 h ;
+#: sans relecture, un coin qu'un leader se met à tenir attendait jusqu'à 6 h son premier carnet.
+RELECTURE_COINS_S = 600.0
+
+
+def coins_a_ajouter(deja: set[str], lus: list[str], univers, *, shard_count: int = 1,
+                    shard_index: int = 0) -> list[str]:
+    """Les coins de la liste relue qui ne sont pas encore suivis, dans l'ordre de la liste.
+
+    Mêmes règles que le démarrage : même tranche de lane, et seulement des marchés confirmés par
+    l'univers officiel (un abonnement inconnu fait fermer TOUTE la connexion). Les coins sortis de
+    la liste ne sont PAS désabonnés : couper un carnet en cours casserait sa continuité, il
+    s'arrête avec la session."""
+    tranche = shard_leaders(lus, shard_count, shard_index)
+    nouveaux = [c for c in tranche if c not in deja]
+    if not nouveaux:
+        return []
+    abonnables, _inconnus = filtrer_abonnables(nouveaux, univers)
+    return abonnables
+
+
+async def _ajouter_les_nouveaux_coins(root: Path, args: argparse.Namespace, lane: "LaneL2", suivis: set[str],
+                                      deadline: float, taches: list, *, periode_s: float = RELECTURE_COINS_S,
+                                      dormir=asyncio.sleep, horloge=time.monotonic) -> None:
+    """Toutes les `periode_s`, ouvre une connexion SUPPLÉMENTAIRE pour les coins apparus dans la
+    liste. Les connexions existantes ne sont jamais touchées : leurs carnets gardent la même
+    identité de connexion, donc leur continuité."""
+    rang = 0
+    while horloge() + periode_s < deadline:
+        await dormir(periode_s)
+        try:
+            lus = _charger_coins(root, args.coins_file)
+            nouveaux = coins_a_ajouter(suivis, lus, charger_univers(root), shard_count=args.shard_count,
+                                       shard_index=args.shard_index) if lus else []
+        except Exception as exc:  # noqa: BLE001 - une relecture ratée ne coupe jamais la collecte
+            print(f"[l2-lane] relecture de la liste impossible ({type(exc).__name__}) : on garde la liste actuelle.",
+                  flush=True)
+            continue
+        if not nouveaux:
+            continue
+        pas = max(1, int(args.coins_par_connexion))
+        for i in range(0, len(nouveaux), pas):
+            groupe = nouveaux[i:i + pas]
+            suivis.update(groupe)
+            rang += 1
+            print(f"[l2-lane] {len(groupe)} nouveau(x) coin(s) dans la liste -> connexion supplementaire "
+                  f"N{rang} : {', '.join(groupe[:8])}", flush=True)
+            taches.append(asyncio.create_task(_connexion(lane, groupe, f"N{rang}", deadline)))
+
+
 async def _boucle(args: argparse.Namespace) -> int:
     root = Path(args.root)
     tous = _charger_coins(root, args.coins_file)
@@ -411,7 +461,17 @@ async def _boucle(args: argparse.Namespace) -> int:
               for i, grp in enumerate(groupes)]
     if args.heartbeat:
         taches.append(asyncio.create_task(_battre(root, args.heartbeat, lane, deadline)))
-    await asyncio.gather(*taches, return_exceptions=True)
+    suivis = set(lane_coins)
+    relecture = asyncio.create_task(_ajouter_les_nouveaux_coins(root, args, lane, suivis, deadline, taches))
+    # Les connexions ajoutées en cours de route rejoignent `taches` : on attend jusqu'à ce que
+    # toutes, y compris les nouvelles, soient finies.
+    attendues = 0
+    while attendues < len(taches):
+        lot = taches[attendues:]
+        attendues = len(taches)
+        await asyncio.gather(*lot, return_exceptions=True)
+    relecture.cancel()
+    await asyncio.gather(relecture, return_exceptions=True)
     print(f"[l2-lane] fini : {lane.emis} carnets L2 + {lane.emis_bbo} BBO emis, "
           f"{lane.rejets} rejets, {lane.reconnects} reconnexions, {lane.gaps} trous L2 "
           f"-> {lane.out_path}", flush=True)

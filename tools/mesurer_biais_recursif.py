@@ -62,6 +62,15 @@ def _mids_par_coin() -> dict[str, list[float]]:
 
 
 def main() -> int:
+    # Sortie journalisable : hors console, Windows encode la sortie en cp1252 et un
+    # caractere exotique imprime tue l'outil. Mesure du 21/11/2026 :
+    # `conduire_labo_par_tranches.py` lisait 10 631 645 fills en 12 s puis mourait sur
+    # la fleche de << -> N tranches >> des que sa sortie partait dans un fichier.
+    for flux in (sys.stdout, sys.stderr):
+        try:  # noqa: SIM105 -- idiome du depot ; contextlib ici couterait un import par outil
+            flux.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     series = _mids_par_coin()
     retenus = sorted(
         ((c, s) for c, s in series.items() if len(s) >= MIN_POINTS),

@@ -252,17 +252,36 @@ def _tvl_vault(vault: str, root: Path) -> float:
     return 0.0
 
 
-def _params_trigger(root: Path) -> dict:
-    """Params du déclencheur RAW — variante VERSIONNÉE (défauts = v1). Externalisés pour NE PAS re-tuner la
-    cohorte en dur : versionner runtime/data/raw_trigger.json {variante, floor_usd, frac_tvl, plafond_usd}."""
+CLES_TRIGGER = ("variante", "floor_usd", "frac_tvl", "plafond_usd")
+
+
+def _reglage_auto(coh: "Cohorte | None", root: Path) -> dict:
+    """Réglage PROPRE à une cohorte, écrit par l'auto-amélioration : runtime/data/<prefixe>_auto.json.
+    Absent ou illisible -> {} (la cohorte garde ses défauts). 22/11/2026 : avant ce fichier, le seul
+    réglage externe (raw_trigger.json) s'appliquait aux TROIS cohortes ; piloter le bac à sable aurait
+    donc déplacé ALPHA et PROBE sans le dire."""
+    if coh is None:
+        return {}
+    try:
+        j = json.loads(_p(coh, Path(root), "auto.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return j if isinstance(j, dict) else {}
+
+
+def _params_trigger(root: Path, coh: "Cohorte | None" = None) -> dict:
+    """Params du déclencheur — variante VERSIONNÉE (défauts = v1). Ordre : défauts du code, puis
+    runtime/data/raw_trigger.json (réglage manuel, COMMUN aux cohortes), puis le réglage auto PROPRE à
+    `coh` (<prefixe>_auto.json) s'il existe."""
     d = {"variante": "v1", "floor_usd": SEUIL_ABS_MIN_USD, "frac_tvl": FRAC_TVL_SIGNIF, "plafond_usd": PLAFOND_RAW_USD}
     try:
         j = json.loads((root / "runtime" / "data" / "raw_trigger.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return d
-    for k in ("variante", "floor_usd", "frac_tvl", "plafond_usd"):
-        if k in j:
-            d[k] = j[k]
+        j = {}
+    for source in (j if isinstance(j, dict) else {}, _reglage_auto(coh, root)):
+        for k in CLES_TRIGGER:
+            if k in source:
+                d[k] = source[k]
     return d
 
 
@@ -273,7 +292,7 @@ def _declencheur_significatif(coh: Cohorte, vault: str, notional_agg: float, roo
     tvl = _tvl_vault(vault, root)
     if tvl <= 0:
         return notional_agg >= coh.seuil_open_usd, coh.seuil_open_usd
-    p = _params_trigger(root)
+    p = _params_trigger(root, coh)
     seuil = min(max(float(p["floor_usd"]), float(p["frac_tvl"]) * tvl), float(p["plafond_usd"]))
     return notional_agg >= seuil, seuil
 
@@ -283,9 +302,28 @@ MODELE_EXECUTION = "exec_v1"       # VERSION du modèle d'exécution paper (entr
 MODELE_FRAIS = "hl_taker_roundtrip_2x+spread+2xslippage+latence"    # hypothèse EXACTE de frais applicable
 
 
-def _cfg_defaut(coh: Cohorte) -> dict:
-    """cfg par défaut d'une cohorte (RAW = exactement le cfg synthétique utilisé à l'ouverture)."""
-    return {"horizon_ms": 3_600_000.0, "stop_bps": coh.stop_bps_defaut, "take_profit_bps": None, "edge_brut_bps": None}
+def _cfg_defaut(coh: Cohorte, root: Path | None = None) -> dict:
+    """cfg par défaut d'une cohorte (RAW = exactement le cfg synthétique utilisé à l'ouverture).
+    Pour le BAC À SABLE seul (pas d'edge requis), `stop_bps` et `horizon_ms` peuvent venir de son
+    réglage auto ; ALPHA et PROBE tiennent les leurs de leurs tables par coin, jamais d'ici."""
+    cfg = {"horizon_ms": 3_600_000.0, "stop_bps": coh.stop_bps_defaut, "take_profit_bps": None, "edge_brut_bps": None}
+    if root is not None and not coh.edge_requis:
+        auto = _reglage_auto(coh, root)
+        for k in ("stop_bps", "horizon_ms"):
+            try:
+                if float(auto.get(k) or 0.0) > 0:
+                    cfg[k] = float(auto[k])
+            except (TypeError, ValueError):
+                continue
+        # 22/11/2026 : une avance n'est prise que si elle est MESURÉE — la borne basse d'une variante
+        # championne de l'apprentissage parallèle (`edge_source: FANTOME_LCB`). Toute autre source est
+        # ignorée : le bac à sable reste en observation plutôt que d'ouvrir sur une avance supposée.
+        try:
+            if auto.get("edge_source") == "FANTOME_LCB" and float(auto.get("edge_brut_bps")) > 0:
+                cfg["edge_brut_bps"] = float(auto["edge_brut_bps"])
+        except (TypeError, ValueError):
+            pass
+    return cfg
 
 
 def _config_hash(coh: Cohorte, cfg: dict, fhl: float, root: Path) -> str:
@@ -294,7 +332,7 @@ def _config_hash(coh: Cohorte, cfg: dict, fhl: float, root: Path) -> str:
     horizon (du cfg = par coin pour ALPHA/PROBE), TABLES/paire, profondeur/slippage, MODÈLE L2 et VERSION du
     modèle d'exécution. PAS le commit Git (gardé à part). VRAIE clé de séparation (trigger_version = étiquette)."""
     import hashlib
-    p = _params_trigger(root)
+    p = _params_trigger(root, coh)
     payload = {"notional_usd": coh.notional_usd,
                "trigger": {"floor": p["floor_usd"], "frac_tvl": p["frac_tvl"], "plafond": p["plafond_usd"], "variante": p["variante"]},
                "age_max_open_ms": AGE_MAX_OPEN_MS, "age_max_paper_fill_ms": AGE_MAX_PAPER_FILL_MS,
@@ -316,7 +354,7 @@ def config_hash_courant(coh: Cohorte, root: Path) -> str:
         fhl = frais_venues(root)[0]
     except Exception:  # noqa: BLE001
         fhl = 0.0
-    return _config_hash(coh, _cfg_defaut(coh), fhl, root)
+    return _config_hash(coh, _cfg_defaut(coh, root), fhl, root)
 
 
 def _maj_coins_actifs(root: Path, coin: str, *, ajouter: bool, now_ms: float) -> None:
@@ -1073,7 +1111,7 @@ def traiter_fill(coh: Cohorte, etat: dict, fill: dict, root: Path, *, now_ms: fl
     etat["agg"].pop(key, None)
     t_dec = time.monotonic()                                     # HORLOGE MONOTONE LOCALE : décision
     cle = _cle(coh, vault, coin)
-    _trig = _params_trigger(root).get("variante", "v1")          # étiquette éditable (indicative)
+    _trig = _params_trigger(root, coh).get("variante", "v1")     # étiquette éditable (indicative)
     _chash_gate = config_hash_courant(coh, root)                 # clé de config pour le gate (RAW = identique au stamp)
     if not cohorte_active(coh, root, trigger_version=_trig, config_hash=_chash_gate):   # AUTO-KILL : config COURANTE seule
         return {"refus": "COHORTE_EN_PAUSE_AUTO_KILL", "coin": coin}
@@ -1090,7 +1128,7 @@ def traiter_fill(coh: Cohorte, etat: dict, fill: dict, root: Path, *, now_ms: fl
         if not cfg:
             return {"refus": "EDGE_PRELIM_ABSENT", "coin": coin}
     else:
-        cfg = {"horizon_ms": 3_600_000.0, "stop_bps": coh.stop_bps_defaut, "take_profit_bps": None, "edge_brut_bps": None}
+        cfg = _cfg_defaut(coh, root)                             # bac à sable : stop/horizon du réglage auto s'il existe
     if cle in store["ouvertes"]:
         return {"refus": "DEJA_OUVERT", "coin": coin}
     if len(store["ouvertes"]) >= coh.max_positions:
@@ -1194,6 +1232,17 @@ def traiter_fill(coh: Cohorte, etat: dict, fill: dict, root: Path, *, now_ms: fl
             "age_at_paper_fill_ms": age_paper}
 
 
+def vaults_scores_tous(root: Path) -> set[str]:
+    """Tous les vaults présents au classement (donc SCORÉS), quel que soit leur rang. Fichier absent ou
+    illisible -> ensemble vide (deny-by-default)."""
+    try:
+        d = json.loads((Path(root) / "runtime" / "data" / "vaults_scores.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()
+    classement = d.get("classement") if isinstance(d, dict) else None
+    return {str(c["vault"]) for c in (classement or []) if isinstance(c, dict) and c.get("vault")}
+
+
 def _vaults_cohorte(coh: Cohorte, root: Path) -> set[str]:
     """Vaults TRADABLES par la cohorte (deny-by-default). ALPHA = retenus stricts ; PROBE = CORE +
     CHALLENGERS sûrs + CANDIDATS PROMUS ; RAW_PROBE = TOUS les abonnés (CORE + candidats) — on MESURE."""
@@ -1203,12 +1252,17 @@ def _vaults_cohorte(coh: Cohorte, root: Path) -> set[str]:
     core, chal = tiers(root)
     if coh is RAW_PROBE:
         # tous les abonnés (retenus + candidats scorés) — RAW ouvre pour mesurer la paire, pas pour valider
-        try:
-            d = json.loads((root / "runtime" / "data" / "vaults_scores.json").read_text(encoding="utf-8"))
-            tous = {c["vault"] for c in (d.get("classement") or [])[:8]}
-        except (OSError, ValueError):
-            tous = set()
-        return core | chal | tous
+        #
+        # 22/11/2026 — LE BAC À SABLE ÉTAIT AFFAMÉ. Ce code prenait les HUIT PREMIERS du classement, ce
+        # qui valait « tous les abonnés » tant que l'écoute en direct suivait ce même top. Depuis le
+        # 17/11 les places d'écoute tournent selon l'ACTIVITÉ : les comptes écoutés sont ceux qui
+        # tradent, quel que soit leur rang. Mesuré 20 minutes après un lancement : les 6 comptes
+        # actifs étaient aux rangs 30 à 47, 22 déclenchements significatifs, 22 refus
+        # `VAULT_NON_SUIVI`, zéro cycle — donc rien à juger pour l'auto-amélioration.
+        # On revient à ce que dit la phrase : tout vault SCORÉ. Un vault public NON scoré reste
+        # observation-only (il n'est pas au classement), et l'entrée n'est appelée que sur un fill
+        # reçu en direct : l'ensemble effectif est « scoré ET écouté ».
+        return core | chal | vaults_scores_tous(root)
     from hl_observer.experimental.promotion_candidats import charger_promus
     return core | chal | set(charger_promus(root))
 

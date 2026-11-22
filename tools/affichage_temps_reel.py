@@ -147,76 +147,20 @@ def _cls():
 _nettoyage_fait = False
 
 
-# Marqueurs identifiant un process COLLECTEUR du projet (à arrêter sur stop).
-_MARQUEURS_COLLECTEUR = (
-    "watch_economic_collectors", "collecter_", "explorer_autonome",
-    "poll_leaders", "_run_supervisor", "_run_poll", "_run_explorer", "_run_asset_ctx",
-    # MESURE DU 21/11/2026 -- ANGLE MORT TROUVE EN CONDITIONS REELLES. 20 familles
-    # etaient actives, portees par ~30 processus `tools/run_bounded_collector.py`
-    # (lances par `ops/bounded_collection.py`, qui les reconnait lui-meme sous ce
-    # nom). AUCUN marqueur de cette liste ne matchait : le `taskkill` de dernier
-    # recours voyait zero collecteur. Ils se sont arretes grace a l'invalidation du
-    # bail, pas grace a ce balayage -- donc un ouvrier sourd au bail, ou un bail
-    # recree, n'aurait ete arrete par rien.
-    "run_bounded_collector",
-)
-# Jamais tuer ceci même si le chemin projet matche (pas des collecteurs) :
-# l'écran lui-même, le scellage détaché, la sync, le labo.
-_MARQUEURS_EXCLUS = (
-    "affichage_temps_reel", "sceller_coffre_local", "archiver_tapes",
-    "rapport_collecteurs", "sync_complete_clone", "alina_git_code_sync",
-    "pousser-github", "alina_quant_lab", "alina_sync_complete",
-)
+# DEPLACE le 21/11/2026 dans `tools/collecteurs_balayage.py` : le chemin d'arret du
+# watchdog a besoin du meme selecteur, et il ne doit pas dependre de cet ECRAN. Code
+# inchange ; les noms prives restent exposes ici pour les appelants et tests existants.
+try:
+    import collecteurs_balayage as _balayage  # noqa: E402
+except ImportError:  # importe comme `tools.affichage_temps_reel`
+    from tools import collecteurs_balayage as _balayage  # noqa: E402
 
-
-def _pids_collecteurs_a_tuer(processus, *, self_pid, racine) -> list[int]:
-    """Sélectionne les PID de collecteurs du projet à arrêter — FONCTION PURE.
-
-    ``processus`` : itérable de ``(pid:int, cmdline:str)``. On ne retient qu'un
-    process dont la ligne de commande référence ``racine`` ET un marqueur
-    collecteur ; jamais le process courant (``self_pid``) ni un marqueur exclu
-    (écran, scellage, sync, labo). Indépendant de l'état de campagne (qui peut
-    ne lister aucun pid). Insensible à la casse et au sens des slashes.
-    """
-    racine_norm = str(racine).replace("\\", "/").casefold().rstrip("/")
-    a_tuer: set[int] = set()
-    for pid, cmd in processus:
-        try:
-            pid = int(pid)
-        except (TypeError, ValueError):
-            continue
-        if pid <= 0 or pid == int(self_pid):
-            continue
-        c = (cmd or "").replace("\\", "/").casefold()
-        if racine_norm and racine_norm not in c:
-            continue
-        if any(x in c for x in _MARQUEURS_EXCLUS):
-            continue
-        if any(m in c for m in _MARQUEURS_COLLECTEUR):
-            a_tuer.add(pid)
-    return sorted(a_tuer)
-
-
-def _lister_processus_projet(timeout: float = 30) -> list[tuple[int, str]]:
-    """[(pid, cmdline)] des python/cmd (Windows) ; [] ailleurs ou en cas d'erreur."""
-    if os.name != "nt":
-        return []
-    ps = (
-        "Get-CimInstance Win32_Process -Filter \"Name='python.exe' or Name='py.exe' "
-        "or Name='cmd.exe'\" | ForEach-Object { \"$($_.ProcessId)`t$($_.CommandLine)\" }"
-    )
-    try:
-        done = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
-                              capture_output=True, text=True, timeout=timeout)
-    except (OSError, subprocess.SubprocessError):
-        return []
-    res: list[tuple[int, str]] = []
-    for ligne in (done.stdout or "").splitlines():
-        pid, _, cmd = ligne.partition("\t")
-        pid = pid.strip()
-        if pid.isdigit():
-            res.append((int(pid), cmd))
-    return res
+# Affectations, et non imports aliases : les deux tuples ne sont plus LUS ici (la
+# fonction qui les lisait a demenage), et un import non utilise est une erreur de lint.
+_MARQUEURS_COLLECTEUR = _balayage.MARQUEURS_COLLECTEUR
+_MARQUEURS_EXCLUS = _balayage.MARQUEURS_EXCLUS
+_pids_collecteurs_a_tuer = _balayage.pids_collecteurs_a_tuer
+_lister_processus_projet = _balayage.lister_processus_projet
 
 
 def _arreter_collecteurs(root: Path, *, timeout: float = 60) -> list[int]:
@@ -375,7 +319,33 @@ def _attendre_ou_quitter(duree: float) -> bool:
 
 
 def _et(ok: bool) -> str:
-    return "ACTIF " if ok else "arrete"
+    """L etat tel qu il est OBSERVE : la presence d un fichier de verrou ou de PID.
+
+    Corrige le 22/11/2026. Cette fonction disait « ACTIF » pour
+    `(data_dir / "collecteurs.lock").exists()`. Un verrou PRESENT n est pas un processus
+    VIVANT : un arret brutal le laisse derriere lui, et l ecran affirmait alors une collecte
+    qui ne tournait plus. Toute la reparation du lanceur cette nuit reposait sur cette
+    distinction, et `tools/etat_collecte_reel.py` existe precisement pour la trancher (il nomme
+    meme l etat `PROCESSUS_VIVANTS_MAIS_AUCUNE_DONNEE_FRAICHE`).
+
+    On ne mesure RIEN de plus ici — un ecran rafraichi toutes les deux secondes ne doit pas
+    verifier des identites de processus. On dit seulement ce qu on voit : un verrou.
+    """
+    return "verrou present" if ok else "aucun verrou"
+
+
+def ligne_flux_vides(vides: int, *, un_collecteur_au_moins: bool) -> str:
+    """La ligne des flux a zero ligne. Vide si aucun flux n est concerne.
+
+    « En attente de donnees » est une PROMESSE : elle n a de sens que si quelque chose collecte.
+    Quand aucun verrou n est present, ces flux n attendent rien — et le dire evite a l operateur
+    de croire que la collecte est en cours de demarrage alors qu elle est eteinte.
+    """
+    if vides <= 0:
+        return ""
+    if un_collecteur_au_moins:
+        return f"    (+ {vides} flux encore vides, en attente de donnees)"
+    return f"    (+ {vides} flux vides : aucun verrou de collecteur, rien n arrivera)"
 
 
 def boucle(data_dir: Path, *, intervalle: float = 2.0, n_derniers: int = 10) -> int:
@@ -479,8 +449,9 @@ def boucle(data_dir: Path, *, intervalle: float = 2.0, n_derniers: int = 10) -> 
                 else:
                     frais = f"il y a {int(age):>4d}s"
                 print(f"  {barre} {label:<24} {t:>10d}  ({dps:>6.1f}/s)  {frais}")
-            if vides:
-                print(f"    (+ {vides} flux encore vides, en attente de donnees)")
+            ligne_vides = ligne_flux_vides(vides, un_collecteur_au_moins=any((sup, poll, expl)))
+            if ligne_vides:
+                print(ligne_vides)
             if total_initial is None:
                 total_initial = grand_total
             print("-" * 74)

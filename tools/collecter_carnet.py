@@ -21,6 +21,7 @@ RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
 
 from hl_observer.collection import collecte_fiable as CF  # noqa: E402
+from hl_observer.ops import budget_rest as _BUDGET  # noqa: E402  (n° 22 : poids REST réel, sans bloquer)
 from hl_observer.config.cross_venue_instruments import (  # noqa: E402
     MAPPING_SCHEMA_VERSION,
     binance_perp_symbol,
@@ -185,7 +186,9 @@ def _post_hl(coin: str, *, timeout_s: float = 8.0, tentatives: int = 3) -> Any:
         request = urllib.request.Request(URL_HL, data=body, headers=_HEADERS_HL)
         try:
             with urllib.request.urlopen(request, timeout=timeout_s) as response:  # noqa: S310
-                return json.loads(response.read().decode("utf-8"))
+                rendu = json.loads(response.read().decode("utf-8"))
+            _BUDGET.compter("l2Book")
+            return rendu
         except urllib.error.HTTPError as exc:
             derniere = exc
             if exc.code == 429:

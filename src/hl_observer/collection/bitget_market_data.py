@@ -96,7 +96,10 @@ def parse_bitget_instruments(payload: dict[str, Any]) -> list[tuple[str, str]]:
         if (
             not isinstance(x, dict)
             or str(x.get("quoteCoin", "")).upper() != "USDT"
-            or str(x.get("symbolStatus", "normal")).lower() not in {"normal", "listed"}
+            # 21/11/2026 : le defaut "normal" faisait passer un statut ABSENT pour
+            # negociable. Precedent interne : `coin_universe.py` (OKX) ecarte un `state`
+            # absent. Les charges reelles portent toujours le champ.
+            or str(x.get("symbolStatus") or "").lower() not in {"normal", "listed"}
             or (
                 x.get("productType") is not None
                 and str(x.get("productType")).upper() != BITGET_INST_TYPE

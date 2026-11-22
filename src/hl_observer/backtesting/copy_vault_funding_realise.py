@@ -33,6 +33,8 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+from hl_observer.funding.funding_times import next_funding_time_ms
+
 #: La famille du coffre qui porte les taux de funding regles.
 FAMILLE_FUNDING = "funding_history"
 
@@ -247,4 +249,72 @@ def funding_des_trades(
         "settlement_crossing_count": sum(r["settlement_crossing_count"] for r in recus),
         "reasons": {},
         "provenance": PROVENANCE_RECONSTITUEE,
+    }
+
+
+def porte_de_funding(
+    *, coin: str, entree_ms: int, sortie_ms: int, notionnel_usd: float, direction: int,
+    taux_funding: Mapping[str, Sequence[tuple[int, Decimal]]] | None,
+    couverture_ms: tuple[int, int] | None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """(portage, refus) pour UN episode : la porte d'executabilite du moteur.
+
+    POURQUOI CETTE PORTE A CHANGE (22/11/2026, feu vert operateur). Elle refusait TOUT episode
+    franchissant une frontiere de funding : 231 candidats TRAIN sur 1 613 mouraient la. Ce refus
+    etait JUSTE tant que le moteur ne deduisait le funding nulle part -- desserrer une porte
+    derriere laquelle aucun cout n'est retire, c'est sous-estimer les frais, donc fabriquer du
+    profit. On a donc d'abord cable le cout, ensuite seulement ouvert la porte.
+
+    Trois cas, la ou le code en confondait deux :
+
+    * frontiere EXACTEMENT a l'entree ou a la sortie -> avec des horodatages seuls, l'ordre
+      fill/funding est inconnu, et AUCUN taux ne leve cette ambiguite : refus
+      `FUNDING_BOUNDARY_UNPRICED`. C'est le cas que decrivait le commentaire d'origine.
+    * frontiere STRICTEMENT INTERIEURE -> la position etait indiscutablement ouverte au
+      reglement : son cout est chiffre, a condition d'avoir le taux OBSERVE. Sinon refus
+      `FUNDING_BOUNDARY_RATE_UNOBSERVED` -- ne pas savoir n'autorise pas a supposer zero.
+    * `taux_funding is None` -> refus identique a l'ancien comportement, bit pour bit.
+
+    Rend `(None, None)` quand aucune frontiere n'est traversee : zero MESURE, pas une ignorance.
+    """
+    premiere = next_funding_time_ms(entree_ms - 1, interval_hours=1)
+    if premiere > sortie_ms:
+        return None, None
+    ambigue = (premiere == entree_ms
+               or next_funding_time_ms(sortie_ms - 1, interval_hours=1) == sortie_ms)
+    if ambigue or taux_funding is None:
+        return None, "FUNDING_BOUNDARY_UNPRICED"
+    portage = funding_du_trade(
+        {"coin": coin, "entry_ts_ms": entree_ms, "exit_ts_ms": sortie_ms,
+         "notional_usd": notionnel_usd, "direction": direction},
+        taux_funding, couverture_ms=couverture_ms,
+    )
+    if str(portage.get("status")) != "MEASURED":
+        return None, "FUNDING_BOUNDARY_RATE_UNOBSERVED"
+    return portage, None
+
+
+def champs_de_portage(net: float, portage: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Les champs de portage d'un trade, A COTE de `net_pnl_usd` et jamais dedans.
+
+    `net_pnl_usd` est reconcilie contre `executable_before_fees - fees` et sa provenance est
+    causale ; les taux viennent d'un rattrapage REST (`causal_forward_eligible: False`). Les
+    melanger casserait l'equation de conservation ET brouillerait la provenance. On publie donc
+    la somme EXPLICITE `net_after_carry_usd`, et le lecteur voit les deux termes.
+    """
+    if portage is None:
+        return {
+            "carry_pnl_usd": 0.0,
+            "carry_status": "MEASURED_ZERO_NO_SETTLEMENT_CROSSED",
+            "carry_provenance": None,
+            "settlement_crossing_count": 0,
+            "net_after_carry_usd": net,
+        }
+    cout = float(portage["carry_pnl_usd"])
+    return {
+        "carry_pnl_usd": cout,
+        "carry_status": str(portage["status"]),
+        "carry_provenance": portage.get("provenance"),
+        "settlement_crossing_count": int(portage["settlement_crossing_count"]),
+        "net_after_carry_usd": net + cout,
     }

@@ -41,6 +41,13 @@ ENTRYPOINT_ROLES: dict[str, EntrypointRole] = {
     # n'interdit pas un lanceur d'appoint a la racine : elle interdit un lanceur NON CLASSE.
     "CERTIFIER_EN_CONTINU.cmd": EntrypointRole.MAINTENANCE,
     "RATTRAPAGE.cmd": EntrypointRole.MAINTENANCE,
+    # 22/11/2026 — ETA_COLLECTE.cmd : combien de temps encore collecter pour que le labo ait ses
+    # journees UTC denses. LECTURE SEULE, il ne demarre ni n'arrete aucun collecteur. Ajoute a la
+    # racine dans la nuit du 21 au 22 sans etre classe : la suite complete (20 172 verts) l'a mis
+    # en rouge sur CINQ tests a la fois. Le classement se fait aux QUATRE endroits (ici,
+    # ROOT_SUPPORT_ENTRYPOINTS, le test de politique, le registre du harnais) -- le 16/11, la
+    # moitie du travail avait laisse l'audit rouge en croyant l'avoir repare.
+    "ETA_COLLECTE.cmd": EntrypointRole.MAINTENANCE,
     # AlinaSync is also a supported root entrypoint, separate from the four main CMD roles.
     # Remaining commands are support/compatibility tools kept under tools/launchers/.
     "tools/launchers/Alina-restore.cmd": EntrypointRole.COMPAT,
@@ -113,6 +120,9 @@ ROOT_SUPPORT_ENTRYPOINTS = {
     # l'operateur depuis la racine, classes, et rien d'autre n'y est tolere.
     "CERTIFIER_EN_CONTINU.cmd",
     "RATTRAPAGE.cmd",
+    # 22/11/2026 — l'ETA de collecte, lecture seule (voir ENTRYPOINT_ROLES ci-dessus). C'est CET
+    # ensemble que lit l'audit de topologie : l'oublier ici, c'est la panne du 17/11 a nouveau.
+    "ETA_COLLECTE.cmd",
 }
 
 OFFICIAL_ENTRYPOINTS = {

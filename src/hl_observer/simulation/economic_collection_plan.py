@@ -20,6 +20,10 @@ from hl_observer.collection.copy_vault_checkpoint_tail import (
     COMPANION_PROTOCOL as COPY_VAULT_COMPANION_PROTOCOL,
 )
 
+from .copy_vault_collection_contract import (
+    COPY_VAULT_REQUIRED_ARTIFACTS,
+    COPY_VAULT_REQUIRED_COLLECTORS,
+)
 from .economic_campaigns import REPORT_DIR
 from .economic_objective import (
     CANONICAL_FAMILIES,
@@ -333,23 +337,11 @@ def _copy_state(
             "next_hypothesis_v3": next_hypothesis,
             "next_hypothesis_v5": v5_progress,
         },
-        "required_collectors": [
-            "vault-collector",
-            "scorer-vaults",
-            "userfills-live",
-            "copy-vault-checkpoints",
-            "carnet-collector",
-            "backfill-fills",
-            "backfill-candles-vaults",
-        ],
-        "required_artifacts": [
-            "runtime/data/vault_fills.jsonl",
-            "runtime/data/vault_fills_live.jsonl",
-            "runtime/data/vault_episodes.jsonl",
-            "runtime/data/vault_snapshots.jsonl",
-            "runtime/data/carnet_venues.jsonl",
-            "runtime/data/copy_vault_l2_tape.jsonl",
-        ],
+        # Le CONTRAT (quoi allumer, quoi avoir produit) vit dans son propre module avec la
+        # mesure qui le justifie : `copy_vault_collection_contract`. Extrait le 22/11/2026
+        # plutot que de relever un plafond de lignes.
+        "required_collectors": list(COPY_VAULT_REQUIRED_COLLECTORS),
+        "required_artifacts": list(COPY_VAULT_REQUIRED_ARTIFACTS),
         "exact_missing_evidence": (
             [
                 "stop the legacy bound checkpoint scheduler in userfills-live",

@@ -112,7 +112,13 @@ REGISTRE: tuple[dict[str, Any], ...] = (
     # locale est régénérée au lancement (tools/generer_coins_lanes.py), sinon la liste commitée.
     {"nom": "l2-leaders", "script": "tools/collecter_l2_lane.py",
      "intervalle_s": 5,
-     "args": ("--coins-file", "runtime/data/copy_vault_coins_local.json", "--duree-s", "1500",
+     # SESSION DE 6 HEURES, plus 25 minutes (22/11/2026). Chaque fin de session change l'identite de
+     # connexion des 160 coins et ouvre un trou d'une vingtaine de secondes ; or le replay refuse un
+     # episode qui traverse deux connexions. Mesure sur 12 h de carnets du coffre : un coin n'etait
+     # observe en continu que 25,0 min en mediane -- la duree de la session -- alors que le labo
+     # teste des horizons jusqu'a 60 min. La session locale n'a aucune raison d'etre courte : le bail
+     # reste verifie chaque seconde par l'enveloppeur, et les reconnexions se font a l'interieur.
+     "args": ("--coins-file", "runtime/data/copy_vault_coins_local.json", "--duree-s", "21600",
               "--heartbeat", "l2-leaders"),
      "limite_minutes": 5.0,
      "heartbeat": "runtime/research_lab/heartbeats/l2-leaders.json",
@@ -179,6 +185,8 @@ REGISTRE: tuple[dict[str, Any], ...] = (
      "limite_minutes": 100.0},
     {"nom": "coffre-certificateur", "script": "tools/sceller_coffre_local.py",
      "intervalle_s": 1800,
+     # Depart differe de 10 min : il ne dispute plus le disque et le CPU aux collecteurs qui s'abonnent.
+     "delai_initial_s": 600,
      "args": (),
      "limite_minutes": 50.0},
     {"nom": "lab-microstructure", "script": "tools/collecter_lab_microstructure.py",

@@ -60,14 +60,24 @@ OVERSIZE_HISTORICAL_CEILINGS = {
     "control_plane/campaign_adapters.py": 2007,
     "simulation/paper_ledger.py": 1539,
     "simulation/economic_proof_controls.py": 841,
-    "simulation/economic_collection_plan.py": 805,
+    # 22/11/2026 : 805 -> 796. Le CONTRAT de collecte (quoi allumer, quoi avoir produit) est
+    # parti dans `simulation/copy_vault_collection_contract.py`, avec la mesure qui le justifie
+    # (le poll REST capte 16,6 % de fills que le WS rate). On ABAISSE le plafond apres une
+    # extraction : sans cela la dette repousse en silence, et c'est tout l'objet de ce test.
+    "simulation/economic_collection_plan.py": 796,
     "backtesting/train_statistics.py": 869,
-    "backtesting/copy_vault_executable.py": 1304,   # 2026-11-11 : carnets indexés (copy_vault_book_index.py)
+    # 22/11/2026 : 1304 -> 1294. La porte de funding (ambigue / interieure / taux absents)
+    # et ses champs de portage vivent dans `copy_vault_funding_realise` : en la cablant,
+    # j avais porte ce fichier a 1338. Extraire, puis ABAISSER le plafond.
+    "backtesting/copy_vault_executable.py": 1294,
     "backtesting/copy_vault_v21_frozen.py": 1516,
     # 2026-11-21 : plafond BAISSE de 5009 a 4971. La grappe "candidat gele + preuve
     # journaliere" (8 fonctions, 149 lignes) est partie dans copy_vault_preuve_journaliere.py.
     # Un plafond ne remonte jamais : il descend a la taille reelle apres chaque extraction.
-    "backtesting/copy_vault_local_lab.py": 4971,   # 2026-11-11 : chargeur LOCAL extrait ; rubans écrits en flux
+    # 2026-11-21 : `diagnostic_signal.py` extrait (couverture du signal + diagnostic du
+    # split). Plafond BAISSE de 4 971 a 4 944 : apres une extraction, laisser l'ancien
+    # plafond laisserait la dette repousser en silence.
+    "backtesting/copy_vault_local_lab.py": 4944,   # 2026-11-11 : chargeur LOCAL extrait ; rubans écrits en flux
     "backtesting/lead_lag_multiasset_train.py": 929,
     "realtime/feed_quality.py": 886,
     "collection/native_venue_coordinator.py": 866,

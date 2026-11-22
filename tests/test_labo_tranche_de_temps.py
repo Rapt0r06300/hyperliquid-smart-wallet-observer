@@ -26,14 +26,34 @@ def test_run_local_campaign_accepte_une_tranche_et_elle_vaut_None_par_defaut():
 
 
 def test_la_tranche_descend_AUX_DEUX_chargeurs_de_l_etape_2():
-    """Un seul des deux bornés laisserait l'autre charger tout le corpus."""
+    """Un seul des deux bornés laisserait l'autre charger tout le corpus.
+
+    22/11/2026 — CE TEST SUIT DÉSORMAIS UNE DÉLÉGATION. Le chargement des carnets passe par
+    `chargement_en_deux_temps.charger_carnets_en_deux_temps` : les instants d'abord
+    (0,084 Go mesurés), le contenu seulement si la séparation temporelle peut exister. Le
+    chargement complet avait atteint **24,2 Go de RSS** sur 8 jours, RAM libre tombée à
+    0,6 Go, alors que la porte qui refuse ensuite ne lit qu'un `ts_ms` par carnet.
+
+    Le littéral `load_observed_books(` a donc quitté `run_local_campaign`. La propriété
+    gardée est inchangée : la tranche doit atteindre les DEUX chargeurs. On la vérifie en
+    suivant le relais, ce qui est PLUS strict qu'avant — on contrôle les deux maillons au
+    lieu d'un seul texte.
+    """
+    from hl_observer.backtesting import chargement_en_deux_temps as deux_temps
+
     source = inspect.getsource(local_lab.run_local_campaign)
     entrees = source.index("charger_entrees_alpha_notional_fixe_avec_audit(")
-    carnets = source.index("load_observed_books(")
     assert "fenetre=tranche" in source[entrees:entrees + 200]
-    extrait = source[carnets:carnets + 300]
-    assert "depuis_ms=tranche[0] if tranche else None" in extrait
-    assert "as_of_ms=tranche[1] if tranche else None" in extrait
+
+    # Maillon 1 : la campagne passe la tranche au chargeur en deux temps.
+    relais = source.index("charger_carnets_en_deux_temps(")
+    assert "tranche=tranche" in source[relais:relais + 300]
+
+    # Maillon 2 : le chargeur en deux temps borne CHACUNE de ses deux lectures.
+    relayee = inspect.getsource(deux_temps.charger_carnets_en_deux_temps)
+    assert relayee.count("depuis_ms=tranche[0] if tranche else None") == 2, (
+        "les DEUX lectures (horloges, puis carnets complets) doivent être bornées")
+    assert relayee.count("as_of_ms=tranche[1] if tranche else None") == 2
 
 
 def test_les_deux_chargeurs_acceptent_REELLEMENT_ces_bornes():

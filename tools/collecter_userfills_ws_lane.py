@@ -38,6 +38,14 @@ from hl_observer.collection.userfills_resilience import (  # noqa: E402
     DedupFills, fenetre_gapfill,
 )
 from hl_observer.collection.forward_poll_fills import shard_leaders  # noqa: E402
+from hl_observer.collection.subscription_universe import (  # noqa: E402
+    selectionner_challengers_ucb,
+)
+from hl_observer.collection.orchestrateur_lanes import (  # noqa: E402
+    leaders_par_lane,
+    orchestrer,
+)
+from hl_observer.collection.activite_predictive import classer_leaders  # noqa: E402
 
 WS_URL = "wss://api.hyperliquid.xyz/ws"
 REST_URL = "https://api.hyperliquid.xyz/info"
@@ -246,14 +254,209 @@ def _charger_leaders(root: Path, chemin: str) -> list[str]:
     return list(vus)
 
 
+CLASSEMENT_ACTIFS = "config/leaders_actifs_classement.json"
+
+#: Sous combien de fills PRÉVUS sur la fenêtre un leader déjà écouté est-il considéré
+#: muet, et cède-t-il son slot ? Comparer à zéro ne marche pas : la prédiction est une
+#: moyenne exponentielle, donc toujours strictement positive.
+#:
+#: MESURE DU 21/11/2026, qui encadre le seuil : un leader avec 2 fills dans la dernière
+#: minute se prédit à **42,7** fills sur la fenêtre ; un leader muet depuis 50 h, à
+#: **3,7e-91**. Les deux cas sont séparés de quatre-vingt-dix ordres de grandeur : tout
+#: seuil entre les deux se comporte pareil. On prend donc une valeur volontairement
+#: BASSE (moins d'un fill par jour) : elle ne démet que les leaders réellement morts, et
+#: ne décide rien dans la zone grise — qui, elle, demanderait une mesure de terrain.
+SEUIL_PREVU_MUET = 0.01
+
+
+def charger_rangs(root: Path, chemin: str = CLASSEMENT_ACTIFS) -> dict[str, float]:
+    """Scores d'activité mesurés par l'explorer : ``{vault_minuscule: score}``.
+
+    Dictionnaire VIDE si le fichier manque ou est illisible — l'appelant doit alors le
+    dire, pas faire semblant d'avoir classé.
+    """
+    try:
+        data = json.loads((root / chemin).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    actifs = data.get("actifs") if isinstance(data, dict) else None
+    if not isinstance(actifs, list):
+        return {}
+    rangs: dict[str, float] = {}
+    for entree in actifs:
+        if not isinstance(entree, dict):
+            continue
+        vault = str(entree.get("vault") or "").strip().lower()
+        score = entree.get("score")
+        if vault and isinstance(score, (int, float)) and not isinstance(score, bool):
+            rangs[vault] = float(score)
+    return rangs
+
+
+def historiques_recents(root: Path, chemin: Path | str | None = None, *,
+                        limite_octets: int = 4_000_000, fenetre_ms: int = 6 * 3_600_000,
+                        now_ms: int | None = None) -> dict[str, list[int]]:
+    """Horodatages des fills récemment captés, par leader : ``{vault: [ts_ms, ...]}``.
+
+    Lecture BORNÉE par la fin du ruban (``limite_octets``) : ce fichier atteint plusieurs
+    gigaoctets sur le PC, et une sélection de slots ne doit jamais dépendre d'une lecture
+    qui grandit sans fin. La première ligne lue est jetée — elle est presque toujours
+    tronquée par la découpe en octets, et une ligne coupée n'est pas une mesure.
+
+    Dictionnaire vide si le ruban n'existe pas (cas d'un runner GitHub, qui démarre sans
+    historique) : l'appelant garde alors le classement global, sans rien inventer.
+    """
+    tape = Path(chemin) if chemin else (root / OUT_DEFAUT)
+    if not tape.is_absolute():
+        tape = root / tape
+    try:
+        taille = tape.stat().st_size
+    except OSError:
+        return {}
+    borne = int(now_ms if now_ms is not None else time.time() * 1000) - int(fenetre_ms)
+    out: dict[str, list[int]] = {}
+    try:
+        with tape.open("rb") as flux:
+            if taille > limite_octets:
+                flux.seek(taille - limite_octets)
+                flux.readline()         # ligne tronquee par la decoupe : jetee
+            for brut in flux:
+                try:
+                    enregistrement = json.loads(brut.decode("utf-8", errors="replace"))
+                except ValueError:
+                    continue
+                if not isinstance(enregistrement, dict):
+                    continue
+                vault = str(enregistrement.get("vault") or enregistrement.get("user") or "").strip()
+                ts = enregistrement.get("ts_ms")
+                if not vault or not isinstance(ts, int) or isinstance(ts, bool):
+                    continue
+                if ts < borne:
+                    continue
+                out.setdefault(vault.lower(), []).append(ts)
+    except OSError:
+        return {}
+    return out
+
+
+def choisir_les_slots(tous: list[str], rangs: dict[str, float], *, slots: int,
+                      shard_count: int = 1, shard_index: int = 0,
+                      challengers: int = 2,
+                      historiques: dict[str, list[int]] | None = None,
+                      now_ms: int | None = None) -> dict[str, Any]:
+    """Les ``slots`` leaders qui méritent les abonnements rares de CETTE lane.
+
+    DÉFAUT CORRIGÉ LE 21/11/2026. La lane faisait ``shard_leaders(...)[:10]`` : elle
+    découpait les leaders par ``i % nb_lanes`` — donc dans l'ordre du fichier — puis
+    gardait les dix premiers de sa tranche. Avec 120 leaders suivis et 4 lanes, chacune
+    recevait ~30 candidats arbitraires, en jetait 20, et personne ne regardait jamais
+    lesquels produisent des fills. Deux modules du dépôt, livrés et testés, n'étaient
+    appelés par AUCUN code de production : ``orchestrateur_lanes`` et
+    ``subscription_universe``.
+
+    Ce qui est fait ici, et pourquoi c'est mieux qu'un classement par tranche :
+
+    * ``orchestrer`` attribue les ``nb_lanes × slots`` MEILLEURS leaders du classement
+      GLOBAL, en tourniquet par rang (lane = rang % nb_lanes). L'union des lanes couvre
+      donc le top 40 réel, et non le meilleur de quatre tranches arbitraires — à nombre
+      de slots égal, ce sont les leaders les plus actifs qui sont écoutés ;
+    * les lanes restent DISJOINTES par construction (une assignation par leader) ;
+    * un leader dont le score n'est pas strictement positif ne prend pas de slot WS : il
+      retombe sur le poll, qui n'a pas le quota de 10/IP ;
+    * ``challengers`` slots sont réservés à l'EXPLORATION (UCB1) parmi les leaders que
+      cette lane n'aurait pas écoutés — un classement a toujours un âge, et sans
+      exploration un leader devenu actif depuis resterait invisible pour toujours ;
+    * sans classement lisible, l'ancien découpage est conservé **et déclaré**
+      (``source_rang``), jamais déguisé en choix éclairé.
+    """
+    slots = max(1, int(slots))
+    shard_count = max(1, int(shard_count))
+    tous = [c for c in tous if c]
+    if not tous:
+        return {"retenus": [], "core": [], "challengers": [], "source_rang": "aucun candidat",
+                "classes": 0, "candidats": 0, "non_couverts": 0,
+                "demis_sans_activite": []}
+    if not rangs:
+        tranche = shard_leaders(tous, shard_count, shard_index)
+        return {"retenus": tranche[:slots], "core": tranche[:slots], "challengers": [],
+                "source_rang": "absent : decoupage par ordre du fichier conserve",
+                "classes": 0, "candidats": len(tranche), "non_couverts": 0,
+                "demis_sans_activite": []}
+
+    # Demotion par PREDICTION locale (`activite_predictive`), et seulement en demotion.
+    #
+    # POURQUOI PAS EN PROMOTION. Classer les leaders par les fills qu'on a deja captes
+    # reviendrait a nourrir le signal avec sa propre selection : les leaders deja ecoutes
+    # auraient un historique, les autres non, et les slots se figeraient sur eux pour
+    # toujours. La prediction ne sert donc QUE a liberer un slot : un leader qu'on ecoute
+    # et dont la fenetre a venir est prevue VIDE cede sa place -- le classement global
+    # garde la main sur qui monte, l'observation locale decide seulement qui descend.
+    demis: list[str] = []
+    if historiques:
+        maintenant = int(now_ms if now_ms is not None else time.time() * 1000)
+        prevus = dict(classer_leaders(historiques, now_ms=maintenant))
+        observes = {k.lower() for k in historiques}
+        for leader in tous:
+            if leader.lower() not in observes:
+                continue
+            prevu = float(prevus.get(leader, prevus.get(leader.lower(), 0.0)))
+            if prevu < SEUIL_PREVU_MUET:
+                demis.append(leader)
+    demis_bas = {d.lower() for d in demis}
+    classement = sorted(
+        ((c, -1.0 if c.lower() in demis_bas else float(rangs.get(c.lower(), 0.0)))
+         for c in tous),
+        key=lambda p: (-p[1], p[0].lower()))
+    n_chall = max(0, min(int(challengers), slots - 1))
+    plan = orchestrer(classement, lanes_ws=shard_count, slots_par_lane=slots)
+    # `leaders_par_lane` rend la liste TRIEE PAR NOM : tronquer dessus jetterait par
+    # ordre alphabetique et non par rang. On remet l'ordre du classement avant de couper
+    # (defaut trouve par le test, pas par relecture).
+    rang_de = {leader: position for position, (leader, _) in enumerate(classement)}
+    lane_ws = sorted(leaders_par_lane(plan, int(shard_index)),
+                     key=lambda leader: rang_de.get(leader, len(classement)))
+    core = lane_ws[: slots - n_chall]
+
+    # Exploration : parmi ceux que le classement n'a PAS retenus pour le WS, et seulement
+    # la part qui revient a cette lane -- deux lanes ne doivent pas tirer le meme leader.
+    hors_ws = [leader for leader, a in plan["assignations"].items() if a.get("source") != "ws"]
+    hors_ws += list(plan.get("non_couverts") or ())
+    a_explorer = shard_leaders(sorted(set(hors_ws)), shard_count, int(shard_index))
+    stats = {c: {"fills_recents": 0, "fenetre_min": 1.0} for c in a_explorer}
+    tires = (selectionner_challengers_ucb(a_explorer, stats, slots=n_chall)
+             if n_chall and a_explorer else [])
+
+    retenus = list(core) + [c for c in tires if c not in set(core)]
+    if len(retenus) < slots:
+        for leader in lane_ws:
+            if leader not in set(retenus):
+                retenus.append(leader)
+            if len(retenus) >= slots:
+                break
+    return {"retenus": retenus[:slots], "core": list(core), "challengers": list(tires),
+            "source_rang": CLASSEMENT_ACTIFS,
+            "classes": sum(1 for _, s in classement if s > 0.0),
+            "candidats": len(tous),
+            "non_couverts": len(plan.get("non_couverts") or ()),
+            "demis_sans_activite": sorted(demis)}
+
+
 async def _boucle(args: argparse.Namespace) -> int:
     root = Path(args.root)
     tous = _charger_leaders(root, args.leaders_file)
-    lane_leaders = shard_leaders(tous, args.shard_count, args.shard_index)
-    lane_leaders = lane_leaders[: max(1, int(args.max_users))]
+    # Le classement est GLOBAL : la lane donne sa position, pas une tranche deja decoupee.
+    choix = choisir_les_slots(tous, charger_rangs(root),
+                              slots=max(1, int(args.max_users)),
+                              shard_count=int(args.shard_count),
+                              shard_index=int(args.shard_index),
+                              historiques=historiques_recents(root))
+    lane_leaders = choix["retenus"]
     if not lane_leaders:
         print("[ws-lane] aucun leader pour cette lane.", flush=True)
         return 0
+    print(f"[ws-lane] slots : {len(choix['core'])} CORE + {len(choix['challengers'])} "
+          f"challenger(s) sur {choix['candidats']} leader(s), {choix['classes']} classe(s), "
+          f"{choix['non_couverts']} non couvert(s), rang = {choix['source_rang']}", flush=True)
     out = Path(args.out) if args.out else (root / OUT_DEFAUT)
     lane = LaneWS(out if out.is_absolute() else root / out)
     # groupes de ≤ subs-par-connexion users = une connexion WS chacun
@@ -272,6 +475,13 @@ async def _boucle(args: argparse.Namespace) -> int:
         sante = {"lane": f"{args.shard_index}/{args.shard_count}", "leaders": len(lane_leaders),
                  "fills_emis": lane.emis, "gapfills": lane.gapfills,
                  "reconnects": lane.reconnects, "resubscribes": lane.resubscribes,
+                 # Choix des slots RENDU : un classement absent ou perime doit se VOIR,
+                 # pas se deviner en comparant des listes de leaders a la main.
+                 "slots_core": choix["core"], "slots_challengers": choix["challengers"],
+                 "slots_candidats": choix["candidats"], "slots_classes": choix["classes"],
+                 "slots_source_rang": choix["source_rang"],
+                 "slots_non_couverts": choix["non_couverts"],
+                 "slots_demis_sans_activite": choix["demis_sans_activite"],
                  "genere_ms": int(time.time() * 1000)}
         (lane.out_path.parent / f"ws_lane_sante_{args.shard_index}.json").write_text(
             json.dumps(sante, ensure_ascii=False, indent=2), encoding="utf-8")

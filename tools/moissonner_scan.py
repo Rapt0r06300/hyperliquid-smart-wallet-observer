@@ -137,6 +137,15 @@ def _sauver(etat: dict[str, Any]) -> None:
 
 
 def main() -> int:  # noqa: C901, PLR0912, PLR0915
+    # Sortie journalisable : hors console, Windows encode la sortie en cp1252 et un
+    # caractere exotique imprime tue l'outil. Mesure du 21/11/2026 :
+    # `conduire_labo_par_tranches.py` lisait 10 631 645 fills en 12 s puis mourait sur
+    # la fleche de << -> N tranches >> des que sa sortie partait dans un fichier.
+    for flux in (sys.stdout, sys.stderr):
+        try:  # noqa: SIM105 -- idiome du depot ; contextlib ici couterait un import par outil
+            flux.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     ap = argparse.ArgumentParser(description="LE SCAN v5 — code + zero etoile + partition dates")
     ap.add_argument("--minutes", type=float, default=30.0)
     ap.add_argument("--sans-code", action="store_true",

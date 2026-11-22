@@ -424,6 +424,14 @@ def parser_message_userfills(
                  "frame_sequence": frame_event.frame_sequence,
                  "event_index_in_frame": frame_event.event_index_in_frame,
                  "stable_event_id": frame_event.stable_event_id}
+        # CHAMPS DU FILL GARDÉS TELS QUE REÇUS (22/11/2026). La ligne ne gardait que prix, taille, sens
+        # et position : `fee`, `crossed` (agressif ou passif) et `closedPnl` étaient jetés. Or quand un
+        # fill est vu par le direct ET par le poll, le coffre garde la version du direct (la plus tôt
+        # observée) : mesuré sur une session, 805 fills sur 805 en double au coffre SANS frais, sans
+        # côté agressif, sans PnL réalisé. Les noms sont ceux de la plateforme, comme dans le poll.
+        for champ in ("fee", "feeToken", "crossed", "closedPnl", "side", "cloid", "builderFee", "twapId"):
+            if f.get(champ) is not None:
+                entry[champ] = f.get(champ)
         liq = f.get("liquidation")
         if liq:
             entry["liquidation"] = liq

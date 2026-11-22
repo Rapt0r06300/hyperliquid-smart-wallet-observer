@@ -125,6 +125,15 @@ def _fichier(repo: str, chemin: str) -> str | None:
 
 
 def main() -> int:  # noqa: C901
+    # Sortie journalisable : hors console, Windows encode la sortie en cp1252 et un
+    # caractere exotique imprime tue l'outil. Mesure du 21/11/2026 :
+    # `conduire_labo_par_tranches.py` lisait 10 631 645 fills en 12 s puis mourait sur
+    # la fleche de << -> N tranches >> des que sa sortie partait dans un fichier.
+    for flux in (sys.stdout, sys.stderr):
+        try:  # noqa: SIM105 -- idiome du depot ; contextlib ici couterait un import par outil
+            flux.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     ap = argparse.ArgumentParser(description="PHASE 3 — lire le CODE des meilleurs repos.")
     ap.add_argument("--top", type=int, default=15,
                     help="combien de repos on ouvre VRAIMENT (defaut 15)")

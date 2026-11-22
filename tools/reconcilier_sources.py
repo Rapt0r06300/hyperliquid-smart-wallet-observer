@@ -124,15 +124,52 @@ def reconcilier(sources: dict[str, Iterable[dict]], *,
     return rapport
 
 
+class SchemaUsersInconnu(RuntimeError):
+    """L'artefact des users existe mais on ne sait pas le lire.
+
+    Pourquoi une exception et pas un ensemble vide (mesure du 22/11/2026) : le vrai fichier du
+    depot, `runtime/data/explorer_users_decouverts.json` (schema `hypersmart.explorer_users.v1`),
+    declare `n_users_vus: 430` et porte ses adresses sous **`top_actifs`**. Cette clef n'etait pas
+    cherchee, la fonction rendait donc un ensemble VIDE, et le rapport affichait :
+
+        "leaders_actifs_vus": 0,  "leaders_actifs_sans_fill": 0,  "echantillon_sans_fill": []
+
+    Trois zeros rassurants qui cachaient 430 leaders -- et qui, lus comme une mesure, faisaient
+    conclure « aucun leader actif n'est sans fill », l'inverse exact de ce qu'on ignorait. Un
+    zero favorable est pire qu'une erreur : il se propage sans bruit.
+    """
+
+
+#: Les clefs sous lesquelles un artefact d'users a ete ecrit au fil du temps. On en AJOUTE,
+#: on n'en retire jamais : d'anciens artefacts existent encore sur disque.
+CLEFS_USERS = ("top_actifs", "users", "users_actifs", "decouverts")
+
+
 def _charger_users_explorer(path: Path) -> set[str]:
+    """Les adresses `0x...` de l'artefact. Leve `SchemaUsersInconnu` si le fichier est la mais
+    illisible ; rend un ensemble vide SEULEMENT si le fichier n'existe pas.
+
+    La nuance compte : ne pas fournir l'artefact est un choix de l'appelant (la couverture des
+    leaders est optionnelle) ; en fournir un qu'on ne sait pas lire est un defaut. Les confondre
+    transforme une ignorance en affirmation.
+    """
+    if not path.exists():
+        return set()
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return set()
-    users = data.get("users") or data.get("users_actifs") or data.get("decouverts") or []
-    if isinstance(users, dict):
-        users = list(users.keys())
-    return {str(u).strip().lower() for u in users if str(u).strip().lower().startswith("0x")}
+    except (OSError, ValueError) as erreur:
+        raise SchemaUsersInconnu(f"{path} illisible : {erreur}") from erreur
+    if not isinstance(data, dict):
+        raise SchemaUsersInconnu(f"{path} : racine {type(data).__name__}, attendu un objet")
+    for clef in CLEFS_USERS:
+        brut = data.get(clef)
+        if brut:
+            users = list(brut.keys()) if isinstance(brut, dict) else brut
+            return {str(u).strip().lower() for u in users
+                    if str(u).strip().lower().startswith("0x")}
+    raise SchemaUsersInconnu(
+        f"{path} : aucune clef connue parmi {CLEFS_USERS}. Clefs trouvees : "
+        f"{sorted(data)}. Refus plutot qu'un zero favorable.")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -154,7 +191,9 @@ def main(argv: list[str] | None = None) -> int:
         sources[nom.strip()] = _lire_jsonl(pp)
     if not sources:
         print("[reconcilier] aucune source (--source nom=chemin).", flush=True)
-        return 0
+        # 21/11/2026 : rendait 0 -- << rien a reconcilier >> ressemblait a << tout va
+        # bien >>. Sans source lisible il n y a pas de reconciliation : c est un refus.
+        return 2
     users = None
     if args.explorer_users:
         up = Path(args.explorer_users)

@@ -40,10 +40,22 @@ BESOINS = Path("runtime") / "data" / "copy_vault_besoins_collecte.json"
 RAPPORTS = Path("runtime") / "reports" / "copy_vault_quant_lab"
 #: Mesuré le 2026-11-11 : 61,1 % du notionnel des leaders portait sur 184 coins sans carnet ; les
 #: 60 premiers en couvrent 60,4 points. Au-delà, le gain est négligeable pour un volume doublé.
-MAX_COINS = 180
+# PLAFOND 300 (etait 180). Simulation du 22/11/2026 sur les rubans du jour, a convergence :
+#   180 coins -> 84,4 % des fills de perps ordinaires des leaders ont un carnet, 119 demandes hors plafond
+#   240 coins -> 89,4 %, 59 hors plafond
+#   300 coins -> 99,8 %, 0 hors plafond
+# 300 abonnements `l2Book` = 8 connexions de 40, loin de la limite de la plateforme (1 000 abonnements
+# et 100 connexions par IP). Un coin sans carnet, c'est un episode qui ne pourra jamais etre mesure.
+MAX_COINS = 300
 
 #: Ruban des fills live : ce que les leaders viennent de trader (source PROACTIVE, voir plus bas).
 FILLS_LIVE = Path("runtime") / "data" / "vault_fills_live.jsonl"
+#: Le poll REST voit ~120 leaders ; le WebSocket, 10. Mesure du 22/11/2026 sur les rubans du jour :
+#: 247 coins dans les fills du poll contre 11 dans ceux du WebSocket, et 675 fills de perps
+#: ordinaires (CFX, GMX, kLUNC, BIGTIME...) sur des coins ABSENTS de la liste L2 -- donc sans carnet
+#: possible. Ne lire que le WebSocket, c'etait pre-chauffer les coins de 10 comptes sur 120.
+FILLS_POLL = Path("runtime") / "data" / "vault_fills_poll.jsonl"
+RUBANS_DE_FILLS = (FILLS_LIVE, FILLS_POLL)
 #: On ne lit que la QUEUE du ruban : cout borne quelle que soit la taille du fichier.
 OCTETS_QUEUE_RUBAN = 8 * 1024 * 1024
 #: Part maximale de la liste qui peut etre DEPLACEE en un seul passage (anti-brassage).
@@ -131,7 +143,8 @@ def coins_habituels_des_leaders(root: Path, *, octets: int = OCTETS_QUEUE_RUBAN,
     Lecture seule, cout borne (queue du ruban seulement). ``vaults`` restreint aux comptes suivis.
     """
     totaux: dict[str, float] = {}
-    for ligne in _queue_du_ruban(root / FILLS_LIVE, octets):
+    lignes = [x for ruban in RUBANS_DE_FILLS for x in _queue_du_ruban(root / ruban, octets)]
+    for ligne in lignes:
         texte = ligne.strip()
         if not texte.startswith("{"):
             continue
@@ -152,6 +165,58 @@ def coins_habituels_des_leaders(root: Path, *, octets: int = OCTETS_QUEUE_RUBAN,
             notionnel = 0.0
         totaux[nom] = totaux.get(nom, 0.0) + notionnel
     return [nom for nom, _n in sorted(totaux.items(), key=lambda kv: (-kv[1], kv[0]))]
+
+
+POSITIONS_DES_LEADERS = (Path("runtime") / "data" / "copy_vault_positions_lane.jsonl",
+                         Path("runtime") / "data" / "vault_snapshots.jsonl")
+
+
+def coins_tenus_par_les_leaders(root: Path, *, octets: int = OCTETS_QUEUE_RUBAN) -> list[str]:
+    """Coins sur lesquels un leader TIENT une position, d'après le dernier état connu de chaque
+    (compte, coin). Classés par valeur de position décroissante.
+
+    POURQUOI (22/11/2026). Un épisode copié n'est mesurable que si le carnet existe de l'entrée à la
+    SORTIE. Or la liste se réarrange à chaque passage : un coin où un leader est encore en position
+    pouvait céder sa place, et le carnet de sortie manquer. Ces coins passent donc EN TÊTE des
+    demandes : ils sont « utiles » par construction et ne sont jamais déplacés.
+    Une position de taille nulle ou illisible ne compte pas ; fichier absent = liste vide.
+    """
+    dernier: dict[tuple[str, str], tuple[int, float]] = {}
+    for ruban in POSITIONS_DES_LEADERS:
+        for ligne in _queue_du_ruban(root / ruban, octets):
+            texte = ligne.strip()
+            if not texte.startswith("{"):
+                continue
+            try:
+                etat = json.loads(texte)
+            except ValueError:
+                continue
+            if not isinstance(etat, dict):
+                continue
+            vault = str(etat.get("vault") or "")
+            instant = etat.get("exchange_ts_ms") or etat.get("received_at_ms") or etat.get("ts_ms") or 0
+            positions = etat.get("positions") if isinstance(etat.get("positions"), list) else [etat]
+            for position in positions:
+                if not isinstance(position, dict):
+                    continue
+                nom = preserve_native_instrument_symbol(position.get("coin"))
+                try:
+                    taille = float(position.get("szi") or 0.0)
+                    valeur = abs(float(position.get("position_value") or 0.0)) or abs(
+                        taille * float(position.get("entry_px") or position.get("entryPx") or 0.0))
+                    instant_ms = int(instant)
+                except (TypeError, ValueError):
+                    continue
+                if not nom or not vault:
+                    continue
+                cle = (vault, nom)
+                if cle not in dernier or instant_ms >= dernier[cle][0]:
+                    dernier[cle] = (instant_ms, valeur if taille != 0.0 else 0.0)
+    totaux: dict[str, float] = {}
+    for (_vault, nom), (_instant, valeur) in dernier.items():
+        if valeur > 0.0:
+            totaux[nom] = totaux.get(nom, 0.0) + valeur
+    return [nom for nom, _v in sorted(totaux.items(), key=lambda kv: (-kv[1], kv[0]))]
 
 
 def composer(existants: list[str], demandes: list[str], univers: set[str] | None, *,
@@ -246,8 +311,10 @@ def main(argv: list[str] | None = None) -> int:
     #     n°1 (77 008 signaux sur 98 138 : « aucun carnet dans les 30 s avant le signal »).
     _vus: set[str] = set()
     demandes = []
-    for nom in (coins_bloquant_la_mesure(root) + coins_demandes_par_le_labo(root)
-                + coins_habituels_des_leaders(root)):
+    #  0. EN TÊTE (22/11/2026) : les coins où un leader tient ENCORE une position — leur carnet de
+    #     sortie doit exister, sinon l'épisode entier est perdu pour la mesure.
+    for nom in (coins_tenus_par_les_leaders(root) + coins_bloquant_la_mesure(root)
+                + coins_demandes_par_le_labo(root) + coins_habituels_des_leaders(root)):
         if nom not in _vus:
             _vus.add(nom)
             demandes.append(nom)

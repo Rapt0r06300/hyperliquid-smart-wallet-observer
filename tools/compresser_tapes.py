@@ -92,6 +92,15 @@ def compresser(jsonl_path: Path, out_path: Path | None = None, *, codec: str = "
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Sortie journalisable : hors console, Windows encode la sortie en cp1252 et un
+    # caractere exotique imprime tue l'outil. Mesure du 21/11/2026 :
+    # `conduire_labo_par_tranches.py` lisait 10 631 645 fills en 12 s puis mourait sur
+    # la fleche de << -> N tranches >> des que sa sortie partait dans un fichier.
+    for flux in (sys.stdout, sys.stderr):
+        try:  # noqa: SIM105 -- idiome du depot ; contextlib ici couterait un import par outil
+            flux.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     p = argparse.ArgumentParser(description="Compresse une tape JSONL (Parquet+zstd, sinon gzip).")
     p.add_argument("--root", default=str(RACINE))
     p.add_argument("--tape", required=True)

@@ -9,6 +9,7 @@ from hl_observer.config.settings import Settings
 
 DB_SUFFIXES = (".sqlite3", ".db")
 SQLITE_RUNTIME_SUFFIXES = (".sqlite3", ".sqlite3-wal", ".sqlite3-shm", ".db", ".db-wal", ".db-shm")
+_SQLITE_SIDECAR_SUFFIXES = (".sqlite3-wal", ".sqlite3-shm", ".db-wal", ".db-shm")
 _HYGIENE_PRUNED_DIRS = {
     ".git",
     ".pytest_cache",
@@ -81,16 +82,24 @@ def scan_runtime_hygiene(settings: Settings, *, root: Path = Path(".")) -> Runti
             dirnames[:] = [name for name in dirnames if name not in _HYGIENE_PRUNED_DIRS]
             current = Path(dirpath)
             for filename in filenames:
+                # Le tri se fait d'abord sur le NOM, en chaine : construire un Path et son chemin
+                # relatif pour chaque fichier coutait ~80 microsecondes, soit 150 s sur les
+                # 1,9 million de fichiers de runtime/data, alors que moins d'un sur mille est
+                # une base, un sidecar ou un journal.
+                name = filename.lower()
+                is_database = name.endswith(DB_SUFFIXES)
+                is_sidecar = name.endswith(_SQLITE_SIDECAR_SUFFIXES)
+                is_log = name.endswith(".log")
+                if not (is_database or is_sidecar or is_log):
+                    continue
                 path = current / filename
-                rel = _safe_relative(path, resolved_root).as_posix().lower()
-                name = path.name.lower()
-                if name.endswith(DB_SUFFIXES):
+                if is_database:
                     databases.append(path)
-                    if rel.startswith("logs/"):
+                    if _safe_relative(path, resolved_root).as_posix().lower().startswith("logs/"):
                         databases_in_logs.append(path)
-                if name.endswith((".sqlite3-wal", ".sqlite3-shm", ".db-wal", ".db-shm")):
+                if is_sidecar:
                     sqlite_sidecars.append(path)
-                if name.endswith(".log"):
+                if is_log:
                     log_files.append(path)
     if db_path is not None and "logs" in [part.lower() for part in db_path.parts]:
         warnings.append("configured database_url points inside logs/; move runtime DB to data/.")

@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HyperSmart en direct</title>
+<style>
+  :root {
+    --fond: #0d1117; --carte: #161b22; --carte2: #1c232c; --bord: #2a3441; --texte: #e6edf3; --doux: #8b98a5; --tres-doux: #5d6875;
+    --vert: #3fb950; --rouge: #f85149; --orange: #d29922; --bleu: #58a6ff; --violet: #bc8cff; --grille: #232c37;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --fond: #f3f5f8; --carte: #ffffff; --carte2: #f6f8fa; --bord: #d8dee4; --texte: #1f2328; --doux: #59636e; --tres-doux: #8c959f;
+      --vert: #1a7f37; --rouge: #cf222e; --orange: #9a6700; --bleu: #0969da; --violet: #8250df; --grille: #eaeef2;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--fond); color: var(--texte); font: 15px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .entete { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--fond) 88%, transparent);
+            backdrop-filter: blur(8px); border-bottom: 1px solid var(--bord); }
+  .entete-in { max-width: 1440px; margin: 0 auto; padding: 14px 24px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  h1 { font-size: 20px; margin: 0; letter-spacing: -.01em; }
+  .pill { display: inline-flex; align-items: center; gap: 7px; padding: 4px 11px; border-radius: 999px; font-size: 13px; font-weight: 600;
+          border: 1px solid var(--bord); background: var(--carte); }
+  .point { width: 8px; height: 8px; border-radius: 50%; background: var(--vert); animation: pulse 1.6s infinite; }
+  .point.arret { background: var(--rouge); animation: none; }
+  @keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: .25 } }
+  .espace { flex: 1; }
+  .page { max-width: 1440px; margin: 0 auto; padding: 18px 24px 32px; }
+  .resume { padding: 16px 20px; border-radius: 12px; background: var(--carte); border: 1px solid var(--bord);
+            display: flex; gap: 14px; align-items: flex-start; margin-bottom: 16px; }
+  .resume .icone { font-size: 22px; line-height: 1.2; }
+  .resume .titre { font-size: 17px; font-weight: 600; }
+  .resume .sous { color: var(--doux); font-size: 14px; margin-top: 2px; }
+  .grille { display: grid; grid-template-columns: repeat(12, 1fr); gap: 16px; }
+  .carte { background: var(--carte); border: 1px solid var(--bord); border-radius: 12px; padding: 18px 20px; min-width: 0; }
+  .c4 { grid-column: span 4; } .c5 { grid-column: span 5; } .c7 { grid-column: span 7; } .c8 { grid-column: span 8; } .c12 { grid-column: span 12; }
+  @media (max-width: 1100px) { .c4, .c5, .c7, .c8 { grid-column: span 12; } }
+  h2 { font-size: 15px; margin: 0 0 4px; font-weight: 650; }
+  .aide { color: var(--doux); font-size: 13px; margin: 0 0 14px; }
+  .comptes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  @media (max-width: 760px) { .comptes { grid-template-columns: 1fr; } }
+  .compte { padding: 16px; border-radius: 10px; background: var(--carte2); border: 1px solid var(--bord); }
+  .compte.vedette { border-color: var(--bleu); box-shadow: inset 0 0 0 1px var(--bleu); }
+  .compte .nom { font-size: 13px; color: var(--doux); display: flex; justify-content: space-between; gap: 8px; }
+  .compte .solde { font-size: 34px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.02em; margin: 4px 0 2px; }
+  .compte .sous { font-size: 13px; color: var(--doux); }
+  .pos { color: var(--vert); } .neg { color: var(--rouge); } .neutre { color: var(--doux); }
+  .chiffres { display: flex; gap: 28px; flex-wrap: wrap; margin-bottom: 14px; }
+  .chiffre .etiq { color: var(--doux); font-size: 12px; }
+  .chiffre .val { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  td, th { padding: 8px 6px; border-bottom: 1px solid var(--bord); text-align: left; font-size: 14px; vertical-align: middle; }
+  th { color: var(--doux); font-weight: 500; font-size: 12px; }
+  td.num, th.num { text-align: right; }
+  tr:last-child td { border-bottom: none; }
+  .badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .b-vert { background: color-mix(in srgb, var(--vert) 16%, transparent); color: var(--vert); }
+  .b-rouge { background: color-mix(in srgb, var(--rouge) 16%, transparent); color: var(--rouge); }
+  .b-orange { background: color-mix(in srgb, var(--orange) 16%, transparent); color: var(--orange); }
+  .b-gris { background: color-mix(in srgb, var(--doux) 16%, transparent); color: var(--doux); }
+  .b-violet { background: color-mix(in srgb, var(--violet) 16%, transparent); color: var(--violet); }
+  .barre { height: 8px; border-radius: 4px; background: var(--grille); overflow: hidden; margin: 6px 0 4px; }
+  .barre > span { display: block; height: 100%; background: var(--bleu); border-radius: 4px; }
+  .etapes { list-style: none; padding: 0; margin: 12px 0 0; }
+  .etapes li { display: grid; grid-template-columns: 26px 1fr; gap: 8px; padding: 7px 0; font-size: 14px; }
+  .etapes .num { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700;
+                 background: var(--carte2); border: 1px solid var(--bord); color: var(--doux); }
+  .etapes li.fait .num { background: var(--vert); color: var(--carte); border-color: var(--vert); }
+  .etapes li.encours .num { background: var(--bleu); color: var(--carte); border-color: var(--bleu); }
+  .amelios { display: grid; grid-template-columns: 1fr 1fr; gap: 0 28px; }
+  @media (max-width: 900px) { .amelios { grid-template-columns: 1fr; } }
+  .amelio { display: grid; grid-template-columns: 24px 1fr; gap: 2px 10px; padding: 10px 0; border-bottom: 1px solid var(--bord); }
+  .amelio .coche { font-size: 15px; }
+  .amelio .titre { font-weight: 600; font-size: 14px; }
+  .amelio .petit { grid-column: 2; font-size: 13px; color: var(--doux); }
+  .flux { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--bord); font-size: 14px; }
+  .flux:last-child { border-bottom: none; }
+  .vide { color: var(--doux); font-style: italic; padding: 10px 0; }
+  .note { font-size: 13px; color: var(--doux); margin-top: 10px; }
+  .graphe { position: relative; }
+  .graphe svg { width: 100%; height: 220px; display: block; overflow: visible; }
+  .graphe .axe { fill: var(--tres-doux); font-size: 11px; }
+  .bulle { position: absolute; pointer-events: none; background: var(--carte2); border: 1px solid var(--bord); border-radius: 8px;
+           padding: 6px 10px; font-size: 13px; white-space: nowrap; transform: translate(-50%, -120%); display: none; box-shadow: 0 4px 14px rgba(0,0,0,.25); }
+  footer { max-width: 1440px; margin: 0 auto; padding: 0 24px 24px; color: var(--doux); font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="entete"><div class="entete-in">
+  <h1>HyperSmart</h1>
+  <span class="pill"><span class="point" id="point"></span><span id="maj">connexion…</span></span>
+  <span class="espace"></span>
+  <span class="pill" title="Aucun ordre réel, aucune clé, aucun transfert">🔒 Simulation papier</span>
+</div></div>
+
+<div class="page">
+  <div class="resume"><div class="icone" id="resume-icone">⏳</div>
+    <div><div class="titre" id="resume-titre">Chargement…</div><div class="sous" id="resume-sous"></div></div></div>
+
+  <div class="grille">
+    <section class="carte c12">
+      <h2>Comptes papier</h2><p class="aide">L'argent fictif de chaque compte du moteur. Rien n'est réel.</p>
+      <div class="comptes" id="comptes"></div>
+    </section>
+
+    <section class="carte c8">
+      <h2>Compte d'entraînement de l'apprentissage <span class="badge b-violet">simulation</span></h2>
+      <p class="aide">Solde d'un compte fictif de 100 $ qui suit la règle du moteur sur les vrais signaux et les vrais prix.</p>
+      <div class="chiffres" id="fantomes-chiffres"></div>
+      <div class="graphe" id="graphe"><svg id="svg" role="img" aria-label="Évolution du solde du compte d'entraînement"></svg><div class="bulle" id="bulle"></div></div>
+    </section>
+
+    <section class="carte c4">
+      <h2>Comment le moteur apprend</h2><p class="aide">Il ne copie pour de vrai qu'après avoir prouvé un gain.</p>
+      <div id="apprentissage"></div>
+    </section>
+
+    <section class="carte c8">
+      <h2>Ce que le moteur voit et décide</h2><p class="aide">Chaque mouvement d'un leader suivi, et la réponse du moteur.</p>
+      <div class="chiffres" id="repartition"></div>
+      <table><thead><tr><th>Heure</th><th>Leader</th><th>Action</th><th>Coin</th><th class="num">Montant</th><th>Réponse du moteur</th></tr></thead>
+        <tbody id="signaux"></tbody></table>
+    </section>
+
+    <section class="carte c4">
+      <h2>Collecte des données</h2><p class="aide">« ok » = le flux a écrit il y a moins de 2 minutes.</p>
+      <div id="flux"></div>
+    </section>
+
+    <section class="carte c7">
+      <h2>Derniers trades d'entraînement <span class="badge b-violet">simulation</span></h2>
+      <p class="aide">20 $ par trade · sortie quand le leader sort, au stop (−40 bps) ou après 15 min · frais compris. Ce ne sont pas des trades du moteur.</p>
+      <table><thead><tr><th>Entrée → sortie</th><th>Coin</th><th>Sens</th><th>Pourquoi la sortie</th><th class="num">Prix</th><th class="num">Gain</th></tr></thead>
+        <tbody id="fantomes"></tbody></table>
+    </section>
+
+    <section class="carte c5">
+      <h2>Où en est la recherche</h2><p class="aide">Le bilan honnête des stratégies testées.</p>
+      <div id="recherche"></div>
+    </section>
+
+    <section class="carte c12">
+      <h2>Améliorations du 22/11 — vérifiées en direct</h2>
+      <p class="aide">✅ seulement si l'amélioration se voit dans les données de maintenant ; ⏳ sinon.</p>
+      <div class="amelios" id="ameliorations"></div>
+    </section>
+  </div>
+</div>
+<footer id="pied"></footer>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+const heure = (ms) => ms ? new Date(ms).toLocaleTimeString("fr-FR", {hour: "2-digit", minute: "2-digit", second: "2-digit"}) : "—";
+const hm = (ms) => new Date(ms).toLocaleTimeString("fr-FR", {hour: "2-digit", minute: "2-digit"});
+const nb = (v, d = 2) => Number(v).toLocaleString("fr-FR", {minimumFractionDigits: d, maximumFractionDigits: d});
+const usd = (v, d = 2) => (v === null || v === undefined || Number.isNaN(Number(v))) ? "inconnu" : nb(v, d) + " $";
+const signe = (v) => v > 0 ? "pos" : (v < 0 ? "neg" : "neutre");
+const plus = (v, d = 2) => (v > 0 ? "+" : v < 0 ? "−" : "") + nb(Math.abs(v), d);
+const chiffre = (etiq, val, cls = "") => `<div class="chiffre"><div class="etiq">${esc(etiq)}</div><div class="val ${cls}">${val}</div></div>`;
+
+function resume(e) {
+  const ouvertes = (e.comptes || []).reduce((s, c) => s + (Number(c.positions) || 0), 0);
+  if (ouvertes) return ["🟢", `${ouvertes} position(s) papier ouverte(s)`, "Le moteur copie en papier un réglage dont le gain a été prouvé."];
+  return ["🔍", "Le moteur observe : aucune copie pour l'instant",
+          "Il ne copie qu'après avoir prouvé un gain. En attendant, il s'entraîne sur les vrais signaux avec un compte fictif."];
+}
+
+function comptes(liste) {
+  if (!Array.isArray(liste)) return `<div class="vide">indisponible</div>`;
+  return liste.map((c) => {
+    if (!c.lisible) return `<div class="compte"><div class="nom">${esc(c.nom)}</div><div class="vide">illisible</div></div>`;
+    const gain = (c.solde ?? 0) - (c.depart ?? 0);
+    const pos = (c.detail || []).map((p) => `${esc(p.coin)} ${esc(p.sens)} · ${usd(p.usd, 0)}`).join(" — ");
+    return `<div class="compte ${c.code === "DISCOVERY_PROBE" ? "vedette" : ""}">
+      <div class="nom"><span>${esc(c.nom)}</span><span>départ ${usd(c.depart, 0)}</span></div>
+      <div class="solde">${usd(c.solde)}</div>
+      <div class="sous"><span class="${signe(gain)}">${plus(gain)} $</span> · ${c.positions || 0} position(s) ouverte(s)</div>
+      ${pos ? `<div class="sous">${pos}</div>` : ""}</div>`;
+  }).join("");
+}
+
+function signaux(s) {
+  if (!s || s.erreur) return ["", `<tr><td colspan="6" class="vide">${esc(s && s.erreur || "indisponible")}</td></tr>`];
+  const rep = chiffre("ouvertures de leaders vues", s.ouvertures_vues ?? 0) +
+    (s.repartition || []).slice(0, 3).map((r) => chiffre(r.motif, r.n)).join("");
+  const lignes = (s.derniers || []).map((x) => `<tr>
+    <td>${heure(x.heure)}</td><td class="neutre">${esc(x.leader)}</td>
+    <td>${x.action} <span class="badge ${x.sens === "long" ? "b-vert" : "b-rouge"}">${esc(x.sens)}</span></td>
+    <td><b>${esc(x.coin)}</b></td><td class="num">${usd(x.usd, 0)}</td>
+    <td>${x.ouvert ? `<span class="badge b-vert">POSITION OUVERTE</span>` : `<span class="neutre">${esc(x.decision)}</span>`}</td></tr>`).join("")
+    || `<tr><td colspan="6" class="vide">aucun signal reçu pour l'instant</td></tr>`;
+  return [rep, lignes];
+}
+
+function fantomes(f) {
+  if (!f || f.erreur) return ["", `<tr><td colspan="6" class="vide">${esc(f && f.erreur || "indisponible")}</td></tr>`];
+  const reussite = f.trades ? Math.round(100 * f.gagnants / f.trades) + " %" : "—";
+  const ch = chiffre("solde", usd(f.solde)) + chiffre("gain depuis le départ", plus(f.pnl) + " $", signe(f.pnl)) +
+    chiffre("trades terminés", f.trades) + chiffre("trades gagnants", reussite) + chiffre("en cours", f.en_attente);
+  const lignes = (f.derniers || []).map((c) => `<tr><td>${heure(c.entree)} → ${heure(c.sortie)}</td><td><b>${esc(c.coin)}</b></td>
+    <td><span class="badge ${c.sens === "long" ? "b-vert" : "b-rouge"}">${esc(c.sens)}</span></td><td>${esc(c.pourquoi)}</td>
+    <td class="num ${signe(c.brut_bps)}">${plus(c.brut_bps, 1)} bps</td><td class="num ${signe(c.usd)}">${plus(c.usd, 3)} $</td></tr>`).join("")
+    || `<tr><td colspan="6" class="vide">les premiers trades se terminent 15 minutes après les signaux</td></tr>`;
+  return [ch, lignes];
+}
+
+let points = [];
+function courbe(f) {
+  const svg = $("svg"); points = (f && f.courbe) || [];
+  const W = svg.clientWidth || 800, H = 220, g = 44, d = 12, h = 14, b = 26;
+  if (points.length < 2) {
+    svg.innerHTML = `<text x="${W / 2}" y="${H / 2}" text-anchor="middle" class="axe">la courbe apparaît après les premiers trades terminés</text>`;
+    return;
+  }
+  const xs = points.map((p) => p[0]), ys = points.map((p) => p[1]).concat([100]);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs);
+  let y0 = Math.min(...ys), y1 = Math.max(...ys); const marge = Math.max(0.05, (y1 - y0) * 0.15); y0 -= marge; y1 += marge;
+  const X = (t) => g + (W - g - d) * (t - x0) / Math.max(1, x1 - x0);
+  const Y = (v) => h + (H - h - b) * (1 - (v - y0) / (y1 - y0));
+  const ticks = [y0 + marge, (y0 + y1) / 2, y1 - marge];
+  let s = ticks.map((v) => `<line x1="${g}" x2="${W - d}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--grille)" stroke-width="1"/>
+    <text x="${g - 8}" y="${Y(v) + 4}" text-anchor="end" class="axe">${nb(v, 2)}</text>`).join("");
+  s += `<line x1="${g}" x2="${W - d}" y1="${Y(100)}" y2="${Y(100)}" stroke="var(--tres-doux)" stroke-width="1" stroke-dasharray="4 4"/>
+        <text x="${W - d}" y="${Y(100) - 6}" text-anchor="end" class="axe">départ 100 $</text>`;
+  [x0, (x0 + x1) / 2, x1].forEach((t, i) => { s += `<text x="${X(t)}" y="${H - 6}" text-anchor="${["start", "middle", "end"][i]}" class="axe">${hm(t)}</text>`; });
+  const chemin = points.map((p, i) => `${i ? "L" : "M"}${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(" ");
+  const fin = points[points.length - 1][1];
+  const couleur = fin >= 100 ? "var(--vert)" : "var(--rouge)";
+  s += `<path d="${chemin}" fill="none" stroke="${couleur}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+  s += `<circle cx="${X(points[points.length - 1][0])}" cy="${Y(fin)}" r="4" fill="${couleur}" stroke="var(--carte)" stroke-width="2"/>`;
+  s += `<line id="viseur" y1="${h}" y2="${H - b}" stroke="var(--tres-doux)" stroke-width="1" style="display:none"/>
+        <circle id="marque" r="5" fill="${couleur}" stroke="var(--carte)" stroke-width="2" style="display:none"/>
+        <rect x="${g}" y="0" width="${W - g - d}" height="${H}" fill="transparent" id="zone"/>`;
+  svg.innerHTML = s;
+  const zone = $("zone"), bulle = $("bulle"), viseur = $("viseur"), marque = $("marque");
+  zone.onmousemove = (ev) => {
+    const r = svg.getBoundingClientRect(), t = x0 + (ev.clientX - r.left - g) / (W - g - d) * (x1 - x0);
+    let k = 0; points.forEach((p, i) => { if (Math.abs(p[0] - t) < Math.abs(points[k][0] - t)) k = i; });
+    const p = points[k], px = X(p[0]), py = Y(p[1]);
+    viseur.setAttribute("x1", px); viseur.setAttribute("x2", px); viseur.style.display = "";
+    marque.setAttribute("cx", px); marque.setAttribute("cy", py); marque.style.display = "";
+    bulle.style.display = "block"; bulle.style.left = px + "px"; bulle.style.top = py + "px";
+    bulle.innerHTML = `<b>${usd(p[1])}</b> · ${heure(p[0])} · trade n° ${k + 1}`;
+  };
+  zone.onmouseleave = () => { bulle.style.display = "none"; viseur.style.display = "none"; marque.style.display = "none"; };
+}
+
+function apprentissage(a) {
+  if (!a || a.erreur) return `<div class="vide">${esc(a && a.erreur || "indisponible")}</div>`;
+  const jours = a.demarre ? (a.jours || 0) : 0, requis = a.jours_requis || 5;
+  const arme = a.decision === "ARMER";
+  const etapes = [
+    ["S'entraîner sur les vrais signaux (45 réglages à la fois)", a.demarre ? (arme ? "fait" : "encours") : "encours"],
+    [`Prouver un gain sur ${requis} jours et ${a.cycles_requis || 50} trades`, arme ? "fait" : (a.demarre ? "encours" : "")],
+    ["Copier en papier avec le réglage prouvé", arme ? "encours" : ""],
+    ["Monter vers le compte découverte puis le compte principal", ""],
+  ];
+  const liste = `<ol class="etapes">${etapes.map(([t, c], i) => `<li class="${c}"><span class="num">${c === "fait" ? "✓" : i + 1}</span><span>${esc(t)}</span></li>`).join("")}</ol>`;
+  if (!a.demarre) return `<div><span class="badge b-orange">démarre au prochain lancement du moteur</span></div>${liste}`;
+  return `<div class="chiffres">${chiffre("signaux jugés", a.fills ?? 0)}${chiffre("réglages en lice", a.variantes ?? "—")}</div>
+    <div class="etiq neutre">jours de preuve : ${jours} / ${requis}</div><div class="barre"><span style="width:${Math.min(100, 100 * jours / requis)}%"></span></div>
+    <div>${arme ? `<span class="badge b-vert">réglage gagnant armé</span>` : `<span class="badge b-orange">aucun réglage n'a encore prouvé de gain</span>`}</div>${liste}`;
+}
+
+function flux(c) {
+  if (!c || c.erreur) return `<div class="vide">indisponible</div>`;
+  const cls = {ok: "b-vert", lent: "b-orange", arrete: "b-rouge", inconnu: "b-gris"};
+  const txt = {ok: "ok", lent: "lent", arrete: "arrêté", inconnu: "inconnu"};
+  return (c.flux || []).map((f) => `<div class="flux"><span>${esc(f.nom)}</span>
+    <span><span class="neutre">${f.age_s === null ? "" : "il y a " + f.age_s + " s"}</span> <span class="badge ${cls[f.etat]}">${txt[f.etat]}</span></span></div>`).join("");
+}
+
+function recherche(r) {
+  if (!r || r.erreur) return `<div class="vide">indisponible</div>`;
+  return `<div class="chiffres">${chiffre("stratégies testées", r.essais ?? "—")}</div>
+    <p><span class="badge b-orange">${esc(r.verdict)}</span></p>
+    <p style="margin:10px 0">${esc(r.trouve)}</p><p class="note">${esc(r.piste)}</p>`;
+}
+
+function ameliorations(liste) {
+  if (!Array.isArray(liste)) return `<div class="vide">indisponible</div>`;
+  return liste.map((x) => `<div class="amelio"><div class="coche">${x.actif ? "✅" : "⏳"}</div>
+    <div class="titre">${esc(x.titre)}</div><div class="petit">${esc(x.preuve)} · ${esc(x.detail)}</div></div>`).join("");
+}
+
+let dernier = null;
+async function rafraichir() {
+  try {
+    const rep = await fetch("/direct/etat", {cache: "no-store"});
+    if (!rep.ok) throw new Error("HTTP " + rep.status);
+    const e = await rep.json(); dernier = e;
+    const [ic, ti, so] = resume(e); $("resume-icone").textContent = ic; $("resume-titre").textContent = ti; $("resume-sous").textContent = so;
+    $("comptes").innerHTML = comptes(e.comptes);
+    const [rep2, sig] = signaux(e.signaux); $("repartition").innerHTML = rep2; $("signaux").innerHTML = sig;
+    const [fc, fl] = fantomes(e.fantomes); $("fantomes-chiffres").innerHTML = fc; $("fantomes").innerHTML = fl;
+    courbe(e.fantomes);
+    $("apprentissage").innerHTML = apprentissage(e.apprentissage);
+    $("flux").innerHTML = flux(e.collecteurs);
+    $("recherche").innerHTML = recherche(e.recherche);
+    $("ameliorations").innerHTML = ameliorations(e.ameliorations);
+    $("maj").textContent = "En direct · " + heure(e.genere_ms);
+    $("point").classList.remove("arret");
+    $("pied").textContent = "Mise à jour toutes les 3 secondes, lue directement dans les fichiers du moteur et des collecteurs. Lecture seule.";
+  } catch (err) {
+    $("maj").textContent = "Connexion perdue — nouvel essai…";
+    $("point").classList.add("arret");
+  }
+}
+window.addEventListener("resize", () => dernier && courbe(dernier.fantomes));
+rafraichir();
+setInterval(rafraichir, 3000);
+</script>
+</body>
+</html>

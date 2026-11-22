@@ -138,10 +138,43 @@ def _age_s(chemin: Path, maintenant: float) -> float | None:
         return None
 
 
+GRACE_DEMARRAGE_S = 600.0
+
+
+def age_de_la_campagne_s(root: Path, maintenant: float) -> float | None:
+    """Secondes ecoulees depuis l'emission du bail de la campagne en cours. Inconnu -> None."""
+    # Le BAIL d'abord : il est ecrit AVANT le lancement des collecteurs. Le fichier d'etat, lui, n'est
+    # ecrit qu'a la FIN du demarrage -- mesure reelle du 22/11/2026, 17:37 : ce controle a tourne
+    # pendant que l'etat portait encore l'heure de la campagne precedente (4,7 h plus tot), donc sans
+    # aucune grace, et il a de nouveau crie « ABSENT » au demarrage.
+    donnees = root / "runtime" / "data"
+    for fichier, chemin in (("economic_collection_lease.json", ("issued_at_ms",)),
+                            ("economic_collection_pids.json", ("lease", "issued_at_ms"))):
+        try:
+            valeur = json.loads((donnees / fichier).read_text(encoding="utf-8"))
+            for clef in chemin:
+                valeur = valeur[clef]
+            emis = float(valeur) / 1000.0
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        return maintenant - emis if maintenant >= emis else None
+    return None
+
+
 def controler(root: Path, *, maintenant: float | None = None) -> dict:
     maintenant = time.time() if maintenant is None else maintenant
     anomalies: list[str] = []
     mesures: list[str] = []
+    # DELAI DE GRACE (22/11/2026) : lance a t+0, ce controle jugeait « ABSENT » des rubans que les
+    # collecteurs n'avaient pas encore eu le temps de creer, et sortait en erreur a CHAQUE demarrage.
+    # Une alerte qui sonne toujours n'est plus lue. Pendant les 10 premieres minutes d'une campagne
+    # dont on CONNAIT l'heure de depart, l'absence de donnees est un etat normal, dit comme tel.
+    # Heure de depart inconnue -> aucune grace (on juge comme avant).
+    age_campagne = age_de_la_campagne_s(root, maintenant)
+    en_demarrage = age_campagne is not None and age_campagne < GRACE_DEMARRAGE_S
+    if en_demarrage:
+        mesures.append(f"campagne demarree il y a {age_campagne:.0f} s : fraicheur des journaux et des "
+                       f"rubans non jugee avant {GRACE_DEMARRAGE_S:.0f} s")
 
     # 1) fraîcheur par collecteur, comparée à SA cadence
     frais = figes = sans_journal = morts = 0
@@ -170,6 +203,8 @@ def controler(root: Path, *, maintenant: float | None = None) -> dict:
         if age_ruban is not None and age_ruban <= seuil:
             frais += 1
             continue
+        if en_demarrage:
+            continue
         if age is None:
             sans_journal += 1
             anomalies.append(f"collecteur {nom} : AUCUN JOURNAL (jamais lance ?)")
@@ -193,6 +228,8 @@ def controler(root: Path, *, maintenant: float | None = None) -> dict:
     for nom in RUBANS_VITAUX:
         ruban = root / "runtime" / "data" / nom
         age = _age_s(ruban, maintenant)
+        if en_demarrage and (age is None or age > PLANCHER_FRAICHEUR_S):
+            continue
         if age is None:
             anomalies.append(f"ruban vital {nom} : ABSENT")
             continue

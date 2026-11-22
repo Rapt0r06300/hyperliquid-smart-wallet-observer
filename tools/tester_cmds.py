@@ -82,6 +82,11 @@ REGISTRE: list[tuple[str, str, list[str], float, str]] = [
     # CERTIFIER_EN_CONTINU est une BOUCLE de 30 min : la tuer en plein scellage laisserait son
     # verrou en place. Categorie `long`, jamais dans la passe sure.
     ("CERTIFIER_EN_CONTINU",  "CERTIFIER_EN_CONTINU.cmd",          [],          1800,   "long"),
+    # 22/11/2026 — ETA_COLLECTE rafraichit SANS FIN par defaut (c'est tout son interet : un ETA
+    # vivant qui RECULE si le debit faiblit). Le tester tel quel bloquerait le harnais jusqu'au
+    # delai ; `--une-fois` rend une mesure puis sort, et le lanceur transmet bien `%*`. Lecture
+    # seule, zero requete reseau, aucun collecteur touche : categorie `sur`.
+    ("ETA_COLLECTE_une_fois", "ETA_COLLECTE.cmd",                  ["--une-fois"], 240,  "sur"),
     # Dangereux : effets externes -> jamais en auto.
     ("POUSSER_GITHUB",        "POUSSER-GITHUB.cmd",          [],             0,   "danger"),
     ("Installer_Noeud_HL",    "Installer Noeud HL.cmd",            [],             0,   "danger"),

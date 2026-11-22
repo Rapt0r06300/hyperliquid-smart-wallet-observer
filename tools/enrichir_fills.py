@@ -101,7 +101,7 @@ def _bbo_mid_spread(r: dict) -> tuple[float | None, float | None]:
 
 
 def enrichir_fill(fill: dict, *, idx_bbo: dict, idx_funding: dict, idx_candle: dict,
-                  lag_carnet_ms: int = LAG_CARNET_MS) -> dict:
+                  lag_carnet_ms: int = LAG_CARNET_MS, idx_twap: dict | None = None) -> dict:
     """Rend une copie du fill augmentée d'un bloc `contexte`."""
     out = dict(fill)
     ts = _ts_fill(fill)
@@ -127,6 +127,12 @@ def enrichir_fill(fill: dict, *, idx_bbo: dict, idx_funding: dict, idx_candle: d
             o, h, l, c = (_nb(candle.get(k)) for k in ("open", "high", "low", "close"))
             if h is not None and l is not None and c and c > 0:
                 ctx["realized_vol_bps"] = (h - l) / c * 10_000
+    # Appartenance TWAP : trois etats, parce que << inconnu >> n'est pas << non >>.
+    twap, twap_id = marquer_twap(fill, idx_twap or {})
+    ctx["twap"] = twap
+    ctx["twap_id"] = twap_id
+    if twap is None:
+        ctx["twap_source"] = "ruban_twap_absent"
     out["contexte"] = ctx
     return out
 
@@ -150,24 +156,68 @@ def _lire_jsonl(path: Path) -> list[dict]:
     return rows
 
 
+def index_twap_du_ruban(rows):
+    """Index identite_de_fill -> `twap_id`, depuis un ruban de tranches TWAP.
+
+    Deux formes acceptees, parce que les deux existent dans le depot :
+    * la reponse BRUTE d'Hyperliquid, `{"twapId": .., "fill": {..}}` ;
+    * le ruban NORMALISE de la lane contexte, ou `twap_id` est a plat sur le fill.
+    Un identifiant absent n'entre pas dans l'index : mieux vaut ne pas savoir que
+    fabriquer un groupe commun qui fusionnerait des TWAP differents.
+    """
+    index = {}
+    for ligne in rows or ():
+        if not isinstance(ligne, dict):
+            continue
+        fill = ligne.get("fill") if isinstance(ligne.get("fill"), dict) else ligne
+        twap = ligne.get("twapId")
+        if twap is None:
+            twap = ligne.get("twap_id")
+        if twap is None:
+            twap = fill.get("twap_id")
+        if twap is None:
+            continue
+        for cle in (fill.get("tid"), fill.get("hash"), fill.get("oid")):
+            if cle is not None:
+                index[cle] = twap
+    return index
+
+
+def marquer_twap(fill, index_twap):
+    """(`twap`, `twap_id`) pour ce fill. `(None, None)` = inconnu, jamais << non >>."""
+    if not index_twap:
+        return None, None
+    for cle in (fill.get("tid"), fill.get("hash"), fill.get("oid")):
+        if cle is not None and cle in index_twap:
+            return True, index_twap[cle]
+    return False, None
+
+
 def enrichir(fills_path: Path, out_path: Path, *, bbo_path: Path | None = None,
              funding_path: Path | None = None, candle_path: Path | None = None,
-             lag_carnet_ms: int = LAG_CARNET_MS) -> dict[str, Any]:
+             lag_carnet_ms: int = LAG_CARNET_MS, twap_path: Path | None = None) -> dict[str, Any]:
     fills = _lire_jsonl(fills_path)
     idx_bbo = construire_index(_lire_jsonl(bbo_path)) if bbo_path and bbo_path.exists() else {}
     idx_funding = construire_index(_lire_jsonl(funding_path)) if funding_path and funding_path.exists() else {}
     idx_candle = construire_index(_lire_jsonl(candle_path)) if candle_path and candle_path.exists() else {}
+    idx_twap = (index_twap_du_ruban(_lire_jsonl(twap_path))
+                if twap_path and twap_path.exists() else {})
     out_path.parent.mkdir(parents=True, exist_ok=True)
     apparies = 0
+    tranches_twap = 0
     with out_path.open("w", encoding="utf-8") as fh:
         for f in fills:
             e = enrichir_fill(f, idx_bbo=idx_bbo, idx_funding=idx_funding, idx_candle=idx_candle,
-                              lag_carnet_ms=lag_carnet_ms)
+                              lag_carnet_ms=lag_carnet_ms, idx_twap=idx_twap)
             if e["contexte"].get("apparie_carnet"):
                 apparies += 1
+            if e["contexte"].get("twap") is True:
+                tranches_twap += 1
             fh.write(json.dumps(e, ensure_ascii=False) + "\n")
     return {"fills": len(fills), "apparies_carnet": apparies,
             "taux_appariement": round(apparies / len(fills), 4) if fills else 0.0,
+            "tranches_twap": tranches_twap,
+            "twap_connu": bool(idx_twap),
             "out": str(out_path)}
 
 
@@ -178,6 +228,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--bbo", default="")
     p.add_argument("--funding", default="")
     p.add_argument("--candle", default="")
+    p.add_argument("--twap", default="",
+                   help="ruban des tranches TWAP (copy_vault_twap_lane.jsonl)")
     p.add_argument("--out", default="")
     p.add_argument("--lag-carnet-ms", type=int, default=LAG_CARNET_MS)
     args = p.parse_args(argv)
@@ -192,10 +244,13 @@ def main(argv: list[str] | None = None) -> int:
     fills_path = _rel(args.fills)
     if not fills_path or not fills_path.exists():
         print(f"[enrich] fills introuvables : {fills_path}", flush=True)
-        return 0
+        # 21/11/2026 : rendait 0, donc la chaine AlinaSync comptait un SUCCES pour un
+        # ruban absent. Une entree manquante est un refus, jamais un zero favorable.
+        return 2
     out = _rel(args.out) if args.out else fills_path.with_name(fills_path.stem + "_enrichi.jsonl")
     rap = enrichir(fills_path, out, bbo_path=_rel(args.bbo), funding_path=_rel(args.funding),
-                   candle_path=_rel(args.candle), lag_carnet_ms=args.lag_carnet_ms)
+                   candle_path=_rel(args.candle), lag_carnet_ms=args.lag_carnet_ms,
+                   twap_path=_rel(args.twap))
     print(f"[enrich] {rap['fills']} fills, {rap['apparies_carnet']} appariés à un carnet "
           f"({rap['taux_appariement']*100:.1f}%) -> {rap['out']}", flush=True)
     return 0

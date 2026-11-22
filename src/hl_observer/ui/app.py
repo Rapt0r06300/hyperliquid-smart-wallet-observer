@@ -95,6 +95,9 @@ def create_ui_app(settings: Settings | None = None, state: UiState | None = None
     if hasattr(dashboard_v2_module, "_PAGE"):
         dashboard_v2_module._PAGE = _apply_branding(dashboard_v2_module._PAGE)
     app.include_router(dashboard_v2_module.create_dashboard_v2_router())
+    # 22/11/2026 : le tableau EN DIRECT, simple et lisible, ouvert par LANCER_HYPERSMART (`/v2` reste servi).
+    from hl_observer.ui.tableau_direct import create_tableau_direct_router
+    app.include_router(create_tableau_direct_router())
 
     @app.on_event("startup")
     def _start_economic_writer() -> None:

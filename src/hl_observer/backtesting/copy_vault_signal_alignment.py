@@ -31,8 +31,9 @@ MIN_SIGNALS_PER_DAY = 10
 
 def evaluable_signals(
     metaorders: Sequence[Mapping[str, Any]],
-    books: Mapping[str, Sequence[Mapping[str, Any]]],
+    books: Mapping[str, Sequence[Mapping[str, Any]]] | None = None,
     *,
+    horloges: Mapping[str, Sequence[int]] | None = None,
     max_book_age_ms: int = MAX_BOOK_AGE_MS,
     min_signals_per_day: int | None = None,
 ) -> dict[str, Any]:
@@ -45,12 +46,27 @@ def evaluable_signals(
     """
     if min_signals_per_day is None:
         min_signals_per_day = MIN_SIGNALS_PER_DAY          # lu à l'appel : règle unique du module
-    horloges: dict[str, list[int]] = {}
-    for coin, rows in books.items():
-        stamps = [int(row["ts_ms"]) for row in rows]
-        if any(stamps[i] > stamps[i + 1] for i in range(len(stamps) - 1)):
-            stamps.sort()
-        horloges[str(coin)] = stamps
+    # 22/11/2026 — DEUX ENTREES, JAMAIS DEVINEES. Cette fonction ne lit qu'un champ de chaque
+    # carnet (`ts_ms`), mais le chargeur gardait la ligne entiere : 32,7 M dicts x ~700 o =
+    # 23 Go, ce qui explique le RSS de 24,2 Go mesure sur 8 jours (RAM libre a 0,6 Go). Les
+    # memes instants en `array("q")` tiennent dans 0,26 Go, et la sonde a mesure que le split
+    # SE FORME ainsi (7 journees denses pour 0,084 Go).
+    #
+    # On EXIGE l'un ou l'autre, explicitement. Renifler le type ferait silencieusement autre
+    # chose que ce que l'appelant croit — et ici << autre chose >> voudrait dire des signaux
+    # declares evaluables sans carnet, donc de l'executabilite fabriquee.
+    if (books is None) == (horloges is None):
+        raise ValueError(
+            "FOURNIR_BOOKS_OU_HORLOGES: exactement l'un des deux, jamais les deux ni aucun"
+        )
+    if horloges is None:
+        construites: dict[str, list[int]] = {}
+        for coin, rows in (books or {}).items():
+            stamps = [int(row["ts_ms"]) for row in rows]
+            if any(stamps[i] > stamps[i + 1] for i in range(len(stamps) - 1)):
+                stamps.sort()
+            construites[str(coin)] = stamps
+        horloges = construites
     timestamps: list[int] = []
     par_action: dict[str, int] = {}
     par_jour: dict[int, int] = {}

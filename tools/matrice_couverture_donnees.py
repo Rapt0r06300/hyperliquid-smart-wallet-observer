@@ -218,7 +218,7 @@ def rendre(matrice: dict[str, Any]) -> str:
 def _sortie_utf8() -> None:
     """Affichage robuste : jamais de plantage sur une console ou un journal non UTF-8."""
     for flux in (sys.stdout, sys.stderr):
-        try:
+        try:  # noqa: SIM105 -- idiome du depot ; contextlib ici couterait un import par outil
             flux.reconfigure(encoding="utf-8", errors="replace")
         except (AttributeError, ValueError):
             pass

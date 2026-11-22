@@ -322,6 +322,15 @@ def _vaults_shard(root: Path, lettre: str) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Sortie journalisable : hors console, Windows encode la sortie en cp1252 et un
+    # caractere exotique imprime tue l'outil. Mesure du 21/11/2026 :
+    # `conduire_labo_par_tranches.py` lisait 10 631 645 fills en 12 s puis mourait sur
+    # la fleche de << -> N tranches >> des que sa sortie partait dans un fichier.
+    for flux in (sys.stdout, sys.stderr):
+        try:  # noqa: SIM105 -- idiome du depot ; contextlib ici couterait un import par outil
+            flux.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     p = argparse.ArgumentParser(description="Sonde de confirmation WS (diagnostic transport, lecture seule).")
     p.add_argument("--root", default=str(RACINE))
     p.add_argument("--shard", default="B", help="shard à sonder (défaut B = candidats calmes)")

@@ -212,3 +212,157 @@ def test_rafraichissement_vide_preserve_strictement_ancien_fichier(tmp_path):
         raise AssertionError("un univers vide doit échouer fail-closed")
 
     assert destination.read_text(encoding="utf-8") == original
+
+
+# ---------------------------------- biais du survivant (mesure du 21/11/2026)
+def _payload_mixte(maintenant: int) -> list[dict]:
+    vieux = maintenant - 90 * 86_400_000
+    def ligne(suffixe, *, ferme, tvl, cree, relation="normal"):
+        return {"summary": {"isClosed": ferme, "vaultAddress": "0x" + suffixe * 40,
+                            "name": "v" + suffixe, "tvl": str(tvl),
+                            "createTimeMillis": cree,
+                            "relationship": {"type": relation}}, "apr": 0.2}
+    return [
+        ligne("a", ferme=False, tvl=500_000, cree=vieux),
+        ligne("b", ferme=True, tvl=900_000, cree=vieux),            # ferme
+        ligne("c", ferme=False, tvl=10, cree=vieux),                # tvl insuffisant
+        ligne("d", ferme=False, tvl=500_000, cree=maintenant - 3_600_000),  # trop jeune
+        ligne("e", ferme=False, tvl=500_000, cree=vieux, relation="child"),  # relation
+    ]
+
+
+def test_un_vault_ferme_est_ecarte_mais_PLUS_efface():
+    """Sans trace des ecartes, toute statistique sur << les vaults qu'on suit >> est
+    biaisee vers le haut : un vault qui ferme apres une perte disparaissait.
+
+    Le /goal interdit explicitement le biais du survivant. Le filtre ne change pas --
+    aucun vault ferme n'entre dans l'univers d'observation -- il devient VISIBLE.
+    """
+    m = _mod()
+    maintenant = 1_800_000_000_000
+    rejets: list[dict] = []
+    retenus = m.parser_univers_public(_payload_mixte(maintenant), now_ms=maintenant,
+                                      rejets=rejets)
+    assert [r["address"] for r in retenus] == ["0x" + "a" * 40]
+    motifs = {r["address"]: r["motif"] for r in rejets}
+    assert motifs["0x" + "b" * 40] == "vault_ferme"
+    assert motifs["0x" + "c" * 40] == "tvl_insuffisant_ou_creation_invalide"
+    assert motifs["0x" + "d" * 40] == "trop_jeune"
+    assert motifs["0x" + "e" * 40] == "relation_non_normale"
+    # Le vault ferme garde son drapeau : on doit pouvoir le reconnaitre plus tard.
+    ferme = next(r for r in rejets if r["motif"] == "vault_ferme")
+    assert ferme["is_closed"] is True
+
+
+def test_l_univers_rendu_est_INCHANGE_pour_les_consommateurs():
+    """Le correctif AJOUTE une trace ; il ne doit rien changer a la liste rendue."""
+    m = _mod()
+    maintenant = 1_800_000_000_000
+    sans = m.parser_univers_public(_payload_mixte(maintenant), now_ms=maintenant)
+    avec = m.parser_univers_public(_payload_mixte(maintenant), now_ms=maintenant, rejets=[])
+    assert sans == avec
+
+
+def test_l_horodatage_de_creation_absolu_est_conserve():
+    """`age_j` depend de l'heure du collecteur : un rejeu ne peut pas le reproduire."""
+    m = _mod()
+    maintenant = 1_800_000_000_000
+    retenus = m.parser_univers_public(_payload_mixte(maintenant), now_ms=maintenant)
+    assert retenus[0]["created_at_ms"] == maintenant - 90 * 86_400_000
+    # Et la valeur relative reste la, pour ne casser aucun consommateur.
+    assert retenus[0]["age_j"] == 90.0
+
+
+def test_la_trace_des_rejets_est_BORNEE():
+    """L'univers officiel compte des milliers d'entrees : la trace ne doit pas enfler."""
+    m = _mod()
+    maintenant = 1_800_000_000_000
+    fermes = [{"summary": {"isClosed": True, "vaultAddress": f"0x{i:040d}",
+                           "name": "x", "tvl": "1", "createTimeMillis": 1,
+                           "relationship": {"type": "normal"}}}
+              for i in range(m.MAX_REJETS_TRACES + 50)]
+    rejets: list[dict] = []
+    m.parser_univers_public(fermes, now_ms=maintenant, rejets=rejets)
+    assert len(rejets) == m.MAX_REJETS_TRACES
+
+
+def test_une_trace_ne_fait_jamais_tomber_la_collecte():
+    """Une ligne inattendue ne doit pas lever : la trace est un bonus, pas une porte."""
+    m = _mod()
+    rejets: list[dict] = []
+    m._noter_rejet(rejets, None, None, "motif_sans_contexte")
+    assert rejets[0]["address"] == "" and rejets[0]["motif"] == "motif_sans_contexte"
+
+
+# ------------- refus du levier et du PnL latent (quatre cas mesures le 21/11/2026)
+def _etat_compte(nav, *, pv="15000", upnl="-500"):
+    return {"marginSummary": {"accountValue": nav},
+            "assetPositions": [{"position": {"coin": "ETH", "szi": "5.0", "entryPx": "3000",
+                                             "positionValue": pv, "unrealizedPnl": upnl,
+                                             "leverage": {"value": "20"}}}]}
+
+
+def test_un_nav_nul_avec_exposition_REFUSE_au_lieu_de_dire_zero():
+    """Un compte a NAV nul AVEC 15 000 $ d'exposition a un levier INFINI : l'etat le plus
+    dangereux qui existe. Il etait rapporte `0.0` -- << aucun levier >>.
+
+    La version honnete existait deja dans le depot :
+    `portefeuille_compte.construire_portefeuille` rend `None` dans ce cas.
+    """
+    m = _mod()
+    for nav in ("0", "-250"):
+        r = m.parser_clearinghouse(_etat_compte(nav))
+        assert r["levier"] is None, nav
+        assert r["levier_refus"] == "nav_non_exploitable"
+        # L'exposition reste PUBLIEE : on refuse le ratio, on ne cache pas le fait.
+        assert r["expo_brute_usd"] == 15000.0
+
+
+def test_une_valeur_de_position_illisible_refuse_le_levier():
+    """Comptee 0, elle SOUS-ESTIME l'exposition, donc le levier : un faux rassurant."""
+    m = _mod()
+    r = m.parser_clearinghouse(_etat_compte("10000", pv="n/a"))
+    assert r["levier"] is None
+    assert r["levier_refus"] == "exposition_incomplete"
+    assert r["positions_valeur_illisible"] == 1
+    assert r["expo_complete"] is False
+
+
+def test_un_upnl_illisible_ne_devient_pas_un_resultat_neutre():
+    """Somme a 0, un inconnu passait pour un PnL latent nul."""
+    m = _mod()
+    r = m.parser_clearinghouse(_etat_compte("10000", upnl="n/a"))
+    assert r["pnl_latent_usd"] is None
+    assert r["positions_upnl_illisible"] == 1
+    # La somme partielle reste disponible, nommee pour ce qu'elle est.
+    assert r["pnl_latent_partiel_usd"] == 0.0
+
+
+def test_un_compte_sain_repond_toujours_normalement():
+    """Le refus ne doit pas se declencher sur le cas courant."""
+    m = _mod()
+    r = m.parser_clearinghouse(_etat_compte("10000"))
+    assert r["levier"] == 1.5
+    assert r["levier_refus"] is None
+    assert r["pnl_latent_usd"] == -500.0
+    assert r["expo_complete"] is True
+
+
+def test_le_snapshot_complet_SURVIT_aux_refus_du_parseur():
+    """Garde contre une regression que le correctif du 21/11/2026 pouvait introduire.
+
+    `construire_snapshot` copie `cs["levier"]` et `cs["pnl_latent_usd"]`, qui valent
+    desormais `None` quand le parseur refuse. Un consommateur qui ferait
+    `f"{levier:.2f}"` leverait TypeError. Verifie ici que le snapshot se construit ET se
+    serialise dans les quatre cas -- mesure, pas deduction.
+    """
+    import json as _json
+    m = _mod()
+    for etat in (_etat_compte("10000"), _etat_compte("0"),
+                 _etat_compte("10000", pv="n/a"), _etat_compte("10000", upnl="n/a")):
+        cs = m.parser_clearinghouse(etat)
+        snap = m.construire_snapshot("0xaa", cs, {"pnl_realise_usd": 12.0},
+                                     now=1_700_000_000.0, etat_prec=None)
+        assert _json.dumps(snap)
+        assert snap["nav_usd"] == cs["nav_usd"]
+        assert snap["levier"] == cs["levier"]

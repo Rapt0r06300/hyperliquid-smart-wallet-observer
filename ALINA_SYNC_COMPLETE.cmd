@@ -114,6 +114,21 @@ call "%ALINA_ROOT%tools\launcher_log.cmd" "ALINA_SYNC_COMPLETE" STEP github-lane
 set "LANE_RC=!ERRORLEVEL!"
 call "%ALINA_ROOT%tools\launcher_log.cmd" "ALINA_SYNC_COMPLETE" RESULT github-lanes "telecharger_lanes_certifiees_github.py" "!LANE_RC!"
 if not "!LANE_RC!"=="0" set /a LANE_FAILURES+=1
+rem AlinaSync : une fois les rubans rapatries, on les CROISE et on les ENRICHIT.
+rem Les deux outils existaient, testes, et n etaient appeles par AUCUN lanceur : la
+rem reconciliation (trous entre sources, couverture des leaders) et le contexte au
+rem plus pres de chaque fill ne servaient donc a rien. Fail-soft comme le reste de la
+rem chaine : un refus (ruban absent) compte comme lane manquee, jamais comme succes.
+call "%ALINA_ROOT%tools\launcher_log.cmd" "ALINA_SYNC_COMPLETE" STEP github-lanes "reconcilier_sources.py" ""
+"!ALINA_SYNC_PYTHON!" !ALINA_SYNC_PY_ARGS! "%ALINA_ROOT%toolseconcilier_sources.py" --root "%ALINA_ROOT%." --source "poll=runtime/data/vault_fills_live.jsonl" --source "ws_lane=runtime/data/vault_fills_ws_lane.jsonl" --source "node=runtime/data/node_fills_tape.jsonl" --out "runtime/reports/reconciliation_sources.json" >>"%ALINA_ROOT%runtime\logs\launchers\ALINA_SYNC_COMPLETE.output.log" 2>&1
+set "LANE_RC=!ERRORLEVEL!"
+call "%ALINA_ROOT%tools\launcher_log.cmd" "ALINA_SYNC_COMPLETE" RESULT github-lanes "reconcilier_sources.py" "!LANE_RC!"
+if not "!LANE_RC!"=="0" set /a LANE_FAILURES+=1
+call "%ALINA_ROOT%tools\launcher_log.cmd" "ALINA_SYNC_COMPLETE" STEP github-lanes "enrichir_fills.py" ""
+"!ALINA_SYNC_PYTHON!" !ALINA_SYNC_PY_ARGS! "%ALINA_ROOT%tools\enrichir_fills.py" --root "%ALINA_ROOT%." --fills "runtime/data/vault_fills_live.jsonl" --bbo "runtime/data/copy_vault_bbo_tape.jsonl" --candle "runtime/data/copy_vault_candle_tape.jsonl" --twap "runtime/data/copy_vault_twap_lane.jsonl" >>"%ALINA_ROOT%runtime\logs\launchers\ALINA_SYNC_COMPLETE.output.log" 2>&1
+set "LANE_RC=!ERRORLEVEL!"
+call "%ALINA_ROOT%tools\launcher_log.cmd" "ALINA_SYNC_COMPLETE" RESULT github-lanes "enrichir_fills.py" "!LANE_RC!"
+if not "!LANE_RC!"=="0" set /a LANE_FAILURES+=1
 for /f "delims=" %%R in ("!RC!") do set "RC=%%R"
 call "%ALINA_ROOT%tools\launcher_log.cmd" "ALINA_SYNC_COMPLETE" SUMMARY github-lanes "failed-lanes=!LANE_FAILURES!" "!LANE_FAILURES!"
 rem 19/11/2026 -- LES DONNEES D ALINASYNC SONT TRAITEES COMME CELLES DES COLLECTEURS.

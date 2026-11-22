@@ -43,6 +43,7 @@ from hl_observer.backtesting.copy_vault_coffre_vers_labo import (
     _fenetre_apres_signal,
     une_seule_connexion_par_coin,
 )
+from hl_observer.backtesting.copy_vault_raccords_l2 import raccord_demande, raccorder_les_connexions
 from hl_observer.backtesting.copy_vault_signal_alignment import MAX_BOOK_AGE_MS
 
 #: Le nom du manifeste d'une tranche preparee.
@@ -493,6 +494,16 @@ def entrees_de_phase_2(
     # connexions de ses quatre heures, et deux tranches voisines peuvent retenir des connexions
     # differentes pour le meme coin. Choisir avant la fusion remelangerait donc exactement ce
     # qu'on cherche a demeler. Le choix se fait apres, sur le corpus reuni, une fois pour toutes.
+    # RACCORD DES TROUS COURTS — optionnel, éteint par défaut (`HL_LABO_RACCORDER_L2=1`). Mesure du
+    # 22/11/2026 : la règle ci-dessous écartait 83 % des carnets pour des raccords de 2,84 s médians.
+    # Voir `copy_vault_raccords_l2` : même seuil que la fraîcheur du labo (30 s), tout est compté.
+    if raccord_demande():
+        carnets, audit["raccords_l2"] = raccorder_les_connexions(carnets)
+        parler(
+            f"Phase 2 : raccord L2 actif -> {audit['raccords_l2']['raccords_franchis']} raccord(s) "
+            f"franchi(s), {audit['raccords_l2']['raccords_refuses']} refuse(s) "
+            f"(seuil {audit['raccords_l2']['trou_max_ms']} ms)"
+        )
     carnets, audit_connexion = une_seule_connexion_par_coin(carnets)
     audit["connexion_unique"] = audit_connexion
     ecartes = audit_connexion["ecartes_connexion_minoritaire"]

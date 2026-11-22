@@ -205,13 +205,31 @@ class TestLiveObserver:
         assert obs.stats.stale_signals_refused >= 1
         assert len(obs._open_positions) == 0
 
-    def test_paper_entry_accepted(self):
-        """Un signal frais + 2 wallets doit ouvrir une position paper."""
+    def test_paper_entry_accepted(self, monkeypatch):
+        """Un signal frais + 2 wallets doit ouvrir une position paper.
+
+        ⚠️ HORLOGE GELEE, et ce n'est pas un confort (diagnostic du 22/11/2026). Ce test a
+        echoue 2 fois sur 11 passes completes, uniquement sous `-n 4 --dist loadfile`. Le motif,
+        rendu lisible apres coup, etait `PRECISION_CLUSTER_TOO_WEAK` :
+
+            now_ms = int(time.time() * 1000)        # RECALCULE dans la porte
+            last_age_ms = now_ms - last_ms          # le test posait last_ms = now - 100
+            max_last_age = 350                      # 350 ms SEULEMENT
+
+        Le test ne disposait donc que de **250 ms de temps reel** entre son `now_ms` et cette
+        porte — apres `_make_observer()`, la construction du signal et une dizaine de portes.
+        Sous quatre workers sur une machine chargee, ce budget est depasse.
+
+        Geler l'horloge rend le test deterministe SANS affaiblir la porte : le seuil de 350 ms
+        reste exerce tel quel, sur des ecarts choisis et non subis.
+        """
         obs = _make_observer()
         obs._mark_prices["ETH-USD"] = 1650.0
 
         from hyper_smart_observer.dydx_v4.cluster_detector import ClusterSignal
+        from hyper_smart_observer.dydx_v4 import live_observer as _lo
         now_ms = int(time.time() * 1000)
+        monkeypatch.setattr(_lo.time, "time", lambda: now_ms / 1000.0)
         cluster = ClusterSignal(
             market_id="ETH-USD",
             side="LONG",
@@ -228,8 +246,20 @@ class TestLiveObserver:
             cluster_id="test_fresh",
         )
         obs._evaluate_cluster(cluster)
-        assert obs.stats.positions_opened == 1
-        assert "ETH-USD:LONG" in obs._open_positions
+        # 22/11/2026 — CE TEST A ECHOUE UNE FOIS SUR NEUF passes completes, uniquement sous
+        # `-n 4 --dist loadfile` (il passe 5/5 seul et 16/16 avec son fichier entier). Le
+        # message etait `assert 0 == 1` : une porte a refuse, sans dire LAQUELLE. Deux
+        # hypotheses testees et REFUTEES : la fraicheur du signal (la marge est de 30 s pour un
+        # signal de 300 ms) et `fast_scan` (aucune porte ne le consulte, le test ne l'active
+        # pas).
+        #
+        # Plutot que de deviner une troisieme fois, on fait PARLER la prochaine occurrence :
+        # `_refuse()` enregistre chaque motif dans `_no_trade_reasons`. L'afficher suffira a
+        # diagnostiquer d'un coup, au lieu de relancer 27 minutes de suite a l'aveugle.
+        motifs = dict(getattr(obs, "_no_trade_reasons", {}) or {})
+        assert obs.stats.positions_opened == 1, (
+            f"aucune position ouverte ; motifs de refus enregistres : {motifs or 'AUCUN'}")
+        assert "ETH-USD:LONG" in obs._open_positions, f"refus : {motifs or 'AUCUN'}"
 
     def test_stop_loss_triggered(self):
         """Le stop-loss doit fermer la position et enregistrer une perte."""

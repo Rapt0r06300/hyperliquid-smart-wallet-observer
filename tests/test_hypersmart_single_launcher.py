@@ -167,7 +167,7 @@ def test_start_script_initializes_everything_without_execution():
     assert "Start-Process -NoNewWindow" in text
     assert "RedirectStandardOutput" in text
     assert "RedirectStandardError" in text
-    assert "/v2" in text  # UI officielle = /v2 (refonte ecaa0ff)
+    assert '$Url = "http://127.0.0.1:$Port/direct"' in text  # 22/11/2026 : le lanceur ouvre le tableau EN DIRECT
     # (l'ancien jeton anti-cache de l'UI statique n'existe plus depuis la refonte /v2)
     assert "/exchange" not in text
 

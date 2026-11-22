@@ -118,6 +118,37 @@ def _collecte(root: Path, fichiers: list[str], *, maintenant: float) -> dict[str
     return {"present": present, "lignes": lignes, "fraicheur_min": frais_min}
 
 
+#: L etat « au coffre, pas en vol » : la famille a ete collectee et certifiee, mais son fichier
+#: vivant est absent ou vide parce que le collecteur ne tourne PAS en ce moment.
+AU_COFFRE_PAS_EN_VOL = "AU COFFRE · PAS EN VOL"
+
+
+def etat_de_la_famille(*, presente: bool, lignes: int, shards: int,
+                       utilise_par_le_labo: bool, fraicheur_min: float | None,
+                       frais_seuil_min: float) -> str:
+    """L etiquette d une famille, en distinguant une ABSENCE EN VOL d une absence TOTALE.
+
+    DEFAUT CORRIGE LE 22/11/2026. L etiquette ne regardait que le fichier vivant et imprimait
+    « JAMAIS COLLECTÉ » pour des familles qui ont 333 shards au coffre -- un compte affiche sur
+    la ligne SUIVANTE du meme rapport. Dix-sept familles dans ce cas, dont `vault_ledger` (39),
+    `position` et `vault_portfolio` (311 chacune).
+
+    Un fichier vivant vide signifie « le collecteur ne tourne pas maintenant », ce qui est l etat
+    NORMAL quand les collecteurs sont eteints sur consigne. Lu comme « jamais collecte », il fait
+    conclure que ces donnees n existent pas alors que le coffre en est plein -- un faux negatif
+    dans le document meme qui sert a decider quoi rallumer.
+    """
+    if not presente or lignes == 0:
+        return AU_COFFRE_PAS_EN_VOL if shards > 0 else "JAMAIS COLLECTÉ"
+    if shards == 0:
+        return "COLLECTÉ · NON CERTIFIÉ"
+    if not utilise_par_le_labo:
+        return "CERTIFIÉ · NON UTILISÉ PAR LE LABO"
+    if fraicheur_min is not None and fraicheur_min <= frais_seuil_min:
+        return "FRAIS · UTILISÉ"
+    return "UTILISÉ (données plus anciennes)"
+
+
 def auditer(root: Path, *, maintenant: float | None = None, frais_seuil_min: float = 30.0) -> list[dict[str, Any]]:
     maintenant = time.time() if maintenant is None else float(maintenant)
     charge = _charge_labo()
@@ -128,12 +159,10 @@ def auditer(root: Path, *, maintenant: float | None = None, frais_seuil_min: flo
         shards = coffre.get(famille, 0)
         utilise = famille in charge
         frais = col["fraicheur_min"]
-        etat = (
-            "JAMAIS COLLECTÉ" if not col["present"] or col["lignes"] == 0
-            else "COLLECTÉ · NON CERTIFIÉ" if shards == 0
-            else "CERTIFIÉ · NON UTILISÉ PAR LE LABO" if not utilise
-            else "FRAIS · UTILISÉ" if (frais is not None and frais <= frais_seuil_min)
-            else "UTILISÉ (données plus anciennes)"
+        etat = etat_de_la_famille(
+            presente=bool(col["present"]), lignes=int(col["lignes"]), shards=int(shards),
+            utilise_par_le_labo=bool(utilise), fraicheur_min=frais,
+            frais_seuil_min=frais_seuil_min,
         )
         rapport.append({
             "famille": famille, "etat": etat, "lignes_collectees": col["lignes"],
@@ -156,11 +185,13 @@ def rendre(rapport: list[dict[str, Any]]) -> list[str]:
     gaspilles = [r["famille"] for r in rapport if r["etat"].startswith("CERTIFIÉ · NON")]
     non_certifies = [r["famille"] for r in rapport if r["etat"].startswith("COLLECTÉ · NON")]
     manquants = [r["famille"] for r in rapport if r["etat"] == "JAMAIS COLLECTÉ"]
+    au_coffre = [r["famille"] for r in rapport if r["etat"] == AU_COFFRE_PAS_EN_VOL]
     out.append("")
     out.append("RÉCAPITULATIF DES ÉCARTS :")
     out.append(f"  · certifiés mais NON utilisés par le labo (gâchés) : {', '.join(gaspilles) or 'aucun ✅'}")
     out.append(f"  · collectés mais NON certifiés : {', '.join(non_certifies) or 'aucun ✅'}")
-    out.append(f"  · jamais collectés sur cette session : {', '.join(manquants) or 'aucun ✅'}")
+    out.append(f"  · au coffre mais PAS EN VOL (collecteur arrêté) : {', '.join(au_coffre) or 'aucun'}")
+    out.append(f"  · JAMAIS collectés, nulle part (ni vivant, ni coffre) : {', '.join(manquants) or 'aucun ✅'}")
     return out
 
 

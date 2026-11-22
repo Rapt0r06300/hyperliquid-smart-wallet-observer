@@ -509,18 +509,75 @@ def conduire(
     }
 
 
-def journees_utc(densite: Mapping[int, int]) -> list[str]:
+#: Millisecondes par journee UTC. L'unite que le labo compte pour former son split.
+JOUR_MS = 86_400_000
+
+
+def journees_utc(densite: Mapping[int, int], *, pas_ms: int) -> list[str]:
     """Les journees UTC distinctes ou le corpus porte au moins un fill.
 
-    MESUREES, pas supposees : elles sortent du ruban que le conducteur vient de lire. Le labo en a
-    besoin pour appliquer son seuil de six journees a l'ENSEMBLE plutot qu'a chaque tranche, et
-    l'agregat les reunit ensuite pour refermer la porte.
+    `pas_ms` est OBLIGATOIRE et borne a une journee, parce que ce compte se lit sur les CLEFS
+    des seaux de densite : des seaux plus larges qu'une journee ne peuvent pas resoudre les
+    journees, et repondre quand meme rendrait un nombre PLUS PETIT que la verite.
+
+    DEFAUT MESURE LE 22/11/2026. L'ancienne version ne prenait pas `pas_ms`. Avec
+    `--pas-heures 384` il n'existe qu'UN seau, et le conducteur annoncait
+    `journees UTC du corpus : 1 (2026-11-11 -> 2026-11-11)` pour **16 jours continus**. Ce
+    nombre part au labo (`jours_du_corpus`) et commande sa porte des SIX journees : la porte
+    se fermait donc sur une mesure fausse, et le verdict `MORE_DATA` accusait les donnees.
+    Le meme soir, trois sources disaient trois choses -- conducteur 1, labo 8, index du
+    coffre **214** journees de fills. Une grandeur qui change avec le pas d'echantillonnage
+    n'est pas une mesure.
+
+    On refuse donc au lieu de sous-compter : un refus se voit, un sous-compte se croit.
     """
+    if int(pas_ms) > JOUR_MS:
+        raise ValueError(
+            f"PAS_PLUS_LARGE_QU_UNE_JOURNEE: {int(pas_ms)} ms ne peut pas resoudre des "
+            f"journees UTC ; mesurer la densite a {JOUR_MS} ms au plus pour les compter"
+        )
     jours = {
         datetime.fromtimestamp(seau / 1000, UTC).strftime("%Y-%m-%d")
         for seau, lignes in densite.items() if int(lignes) > 0
     }
     return sorted(jours)
+
+
+def etendue_lisible(etendue_ms: int, *, pas_ms: int) -> str:
+    """L etendue des TRANCHES, en disant a quelle resolution elle a ete mesuree.
+
+    MESURE DU 22/11/2026. Une tranche issue d un seau de 384 h fait 384 h PAR
+    CONSTRUCTION, meme si les fills qu elle contient n en couvrent que 216. La ligne
+    `couverture : etendue=384,0 h` m a donc fait croire a un corpus de 16 jours alors qu il
+    en fait 9 -- et j ai dimensionne une passe sur ce chiffre avant de toucher le mur
+    memoire. Un seau ne peut pas resoudre plus fin que lui-meme ; le dire evite de prendre
+    une borne nominale pour une mesure.
+    """
+    heures = etendue_ms / 3_600_000
+    if int(pas_ms) > JOUR_MS:
+        return (
+            f"{heures:.1f} h NOMINALES (bornes des tranches, pas de "
+            f"{pas_ms / 3_600_000:.0f} h : la vraie etendue des donnees ne peut pas "
+            "etre resolue plus fin)"
+        )
+    return f"{heures:.1f} h"
+
+
+def journees_du_corpus(ruban: Path, densite: Mapping[int, int], *, pas_ms: int) -> list[str]:
+    """Les journees UTC du corpus, mesurees au pas d UNE JOURNEE quel que soit `pas_ms`.
+
+    Extraite de `main` le 22/11/2026 parce qu une injection l a prouve : le cablage n etait
+    couvert par AUCUN test. Remplacer la seconde lecture par un comptage sur les seaux
+    grossiers laissait la suite VERTE, alors que c est precisement le defaut corrige --
+    16 jours de corpus annonces comme 1. Une correction non gardee se defait.
+
+    Quand le pas demande est plus fin qu une journee, la densite deja lue suffit et on ne
+    relit rien. Sinon on relit le ruban a la journee : 13 s mesurees, le prix d un vrai
+    nombre.
+    """
+    if int(pas_ms) > JOUR_MS:
+        return journees_utc(densite_par_pas(ruban, pas_ms=JOUR_MS), pas_ms=JOUR_MS)
+    return journees_utc(densite, pas_ms=int(pas_ms))
 
 
 def _lanceur_reel(max_trials: int, campaign_root: Path | None, repository_root: Path,
@@ -615,6 +672,18 @@ def _plan_depuis_le_coffre(args: Any, pas: int) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    # MESURE DU 21/11/2026 : cet outil MOURAIT des que sa sortie etait redirigee vers un
+    # fichier. Il avait lu le ruban sans peine (10 631 645 fills sur 168 pas d'une heure,
+    # en 12 s) puis leve UnicodeEncodeError sur la fleche de la ligne « -> N tranches » :
+    # hors console, Windows encode la sortie en cp1252, qui ne porte pas ce caractere. Un
+    # outil qu'on ne peut pas journaliser ne peut pas etre conduit en automatique -- d'ou
+    # le fait que seule une passe interactive ait jamais abouti. Idiome deja utilise par
+    # 8 outils du depot (`tools/auditer_donnees_collectees.py` entre autres).
+    for flux in (sys.stdout, sys.stderr):
+        try:  # noqa: SIM105 -- idiome du depot ; contextlib ici couterait un import par outil
+            flux.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("workspace", help="le workspace matérialisé par le labo")
     p.add_argument("--budget", type=int, default=BUDGET_LIGNES,
@@ -658,7 +727,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"     {index:>2}. {_jour(debut)} → {_jour(fin)}  {lignes:>9,} fills{marque}")
     couverture = AG.couverture(tranches)
     print(f"  couverture : continue={couverture['continue']} "
-          f"étendue={couverture['etendue_ms'] / 3_600_000:.1f} h")
+          f"étendue={etendue_lisible(couverture['etendue_ms'], pas_ms=pas)}")
     if args.plan_seulement:
         return 0
 
@@ -666,7 +735,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         lignes = sum(n for seau, n in densite.items() if tranche[0] <= seau <= tranche[1])
         return int(lignes * OCTETS_PAR_FILL * FACTEUR_CARNETS)
 
-    jours = journees_utc(densite)
+    # Les journees se comptent au pas d UNE JOURNEE, quel que soit `--pas-heures` : avec
+    # un pas de 384 h il n existe qu un seau, et le compte tombait a 1 pour 16 jours de
+    # corpus (mesure du 22/11/2026). Une seconde lecture du ruban coute 13 s mesurees --
+    # le prix d un nombre vrai, et on ne la paye que si le pas est plus large qu un jour.
+    jours = journees_du_corpus(ruban, densite, pas_ms=pas)
     print(f"  journees UTC du corpus : {len(jours)} ({jours[0]} -> {jours[-1]})")
     toutes = list(tranches)
     if args.max_tranches and args.max_tranches < len(toutes):

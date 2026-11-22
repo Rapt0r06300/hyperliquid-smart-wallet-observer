@@ -26,6 +26,7 @@ RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
 
 from hl_observer.collection import collecte_fiable as CF  # noqa: E402
+from hl_observer.ops import budget_rest as _BUDGET  # noqa: E402  (n° 22 : poids REST réel, sans bloquer)
 from hl_observer.collection import vault_fills_backfill as VB  # noqa: E402
 from hl_observer.collection import vault_ledger as VL  # noqa: E402
 from hl_observer.hyperliquid.rest_info_client import (  # noqa: E402
@@ -79,7 +80,9 @@ def _post_userfills(vault: str, start_ms: int, end_ms: int, *, timeout_s: float 
                         "startTime": int(start_ms), "endTime": int(end_ms)}).encode("utf-8")
     req = urllib.request.Request(URL_HL, data=corps, headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout_s) as rep:      # noqa: S310 (URL constante)
-        return json.loads(rep.read().decode("utf-8"))
+        rendu = json.loads(rep.read().decode("utf-8"))
+    _BUDGET.compter("userFillsByTime", len(rendu) if isinstance(rendu, list) else 0)
+    return rendu
 
 
 def _post_ledger(vault: str, start_ms: int, end_ms: int, *, timeout_s: float = 10.0) -> Any:
@@ -87,7 +90,9 @@ def _post_ledger(vault: str, start_ms: int, end_ms: int, *, timeout_s: float = 1
                         "startTime": int(start_ms), "endTime": int(end_ms)}).encode("utf-8")
     req = urllib.request.Request(URL_HL, data=corps, headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout_s) as rep:      # noqa: S310 (URL constante)
-        return json.loads(rep.read().decode("utf-8"))
+        rendu = json.loads(rep.read().decode("utf-8"))
+    _BUDGET.compter("userNonFundingLedgerUpdates", len(rendu) if isinstance(rendu, list) else 0)
+    return rendu
 
 
 def _window_failure(a: int, b: int, exc: BaseException) -> dict[str, Any]:

@@ -107,7 +107,7 @@ def recus_a_reprendre(path: Path, root: Path) -> list[dict[str, Any]]:
     """
     return [
         row for row in load_receipts(path).values()
-        if str(row.get("verdict") or "").upper() == "REVALIDATION_FAILED"
+        if str(row.get("verdict") or "").upper() in {"REVALIDATION_FAILED", VERDICT_PREUVE_ABSENTE}
     ]
 
 
@@ -138,6 +138,48 @@ def recu_rafraichi(row: dict[str, Any], root: Path, *, now_utc: str) -> dict[str
         "exit_code": 0, "revalidated_at_utc": now_utc,
         "revalidation_note": "Revalidated: test files of the receipt command re-run with exit code 0 "
                               "after a code change; file hashes refreshed.",
+    }
+
+
+#: Rejeu REUSSI, mais une empreinte reste incalculable faute du fichier epingle.
+#:
+#: Pourquoi un etat a part (22/11/2026). Les neuf recus ASF-113..120 et ASF-RIG-019 portaient
+#: `REVALIDATION_FAILED` -- « on a rejoue, c'est faux » -- avec `exit_code: 0`. Leurs tests
+#: passent (32 verts) et `_rejouer` rend bien 0 ; il manque UN fichier epingle, le meme pour les
+#: neuf : `POUSSER-GITHUB-FORCE.cmd`, supprime le 18/11 par un commit intitule « lanceur:
+#: POUSSER-GITHUB, sans le FORCE qu'il ne fait pas ». Sa suppression etait une correction de
+#: veracite ; le recreer serait une regression. Ecrire « preuve fausse » pour « preuve absente »
+#: confond une ABSENCE et une NEGATION -- l'erreur que ce depot refuse partout ailleurs.
+#:
+#: Cet etat ne vaut PAS preuve : `alina_roadmap_progress` ne compte que `VERIFIED_DONE`, donc le
+#: decompte de la feuille de route ne bouge pas d'un pouce. Seule l'etiquette devient vraie.
+VERDICT_PREUVE_ABSENTE = "EVIDENCE_FILE_ABSENT"
+
+
+def fichiers_de_preuve_absents(row: dict[str, Any], root: Path) -> list[str]:
+    """Les fichiers epingles par le recu qui ne sont plus sur le disque."""
+    files = row.get("files")
+    if not isinstance(files, list):
+        return []
+    return [str(nom) for nom in files if not (root / str(nom)).is_file()]
+
+
+def recu_preuve_absente(row: dict[str, Any], *, absents: list[str], now_utc: str) -> dict[str, Any]:
+    """Recu dont le rejeu a REUSSI mais dont un fichier epingle a disparu.
+
+    `exit_code` reste 0 : le rejeu a bien eu lieu et il est passe. Mentir sur ce point rendrait
+    l'etat illisible pour celui qui doit decider -- repointer la preuve, ou l'accepter perdue.
+    """
+    noms = ", ".join(absents)
+    return {
+        **row, "verdict": VERDICT_PREUVE_ABSENTE, "run_status": "EVIDENCE_MISSING",
+        "exit_code": 0, "revalidated_at_utc": now_utc,
+        "fichiers_de_preuve_absents": list(absents),
+        "revalidation_note": (
+            "Replay PASSED (exit code 0) but a pinned evidence file is absent, so the fingerprint "
+            f"cannot be recomputed: {noms}. Absence is not falsity: this receipt is NOT counted as "
+            "proof, and it is not declared false either."
+        ),
     }
 
 
@@ -201,6 +243,11 @@ def _ecrire_verdicts(path: Path, rows: list[dict[str, Any]], root: Path, *, code
         if nouveau is not None:
             _ajouter(path, nouveau)
             bilan["rafraichis"] += 1
+        elif code == 0 and (absents := fichiers_de_preuve_absents(row, root)):
+            # Le rejeu a REUSSI : seul le recalcul d'empreinte est impossible. Ecrire ici
+            # REVALIDATION_FAILED declarerait fausse une preuve qui vient de passer.
+            _ajouter(path, recu_preuve_absente(row, absents=absents, now_utc=now_utc))
+            bilan["preuves_absentes"] += 1
         else:
             raison = "tests re-run failed" if code != 0 else "evidence file missing"
             _ajouter(path, recu_echec(row, exit_code=code, now_utc=now_utc, raison=raison))
@@ -221,7 +268,7 @@ def revalider(root: Path, *, timeout_s: int = 1800, rejouer=_rejouer, now_utc: s
     perimes = recus_perimes(path, root)
     repris = recus_a_reprendre(path, root) if reprendre else []
     bilan: dict[str, Any] = {"perimes": len(perimes), "repris": len(repris), "rafraichis": 0,
-                             "echecs": 0, "non_rejouables": 0,
+                             "echecs": 0, "preuves_absentes": 0, "non_rejouables": 0,
                              "non_mesurables": 0, "groupes_de_tests": 0,
                              "rafraichis_au_second_essai": 0, "sauvegarde": None}
     perimes = perimes + repris
@@ -265,7 +312,17 @@ def revalider(root: Path, *, timeout_s: int = 1800, rejouer=_rejouer, now_utc: s
                         bilan["rafraichis_au_second_essai"] += 1
                         bilan["echecs"] -= 1
     bilan["encore_perimes"] = len(recus_perimes(path, root))
-    bilan["encore_en_echec"] = len(recus_a_reprendre(path, root))
+    restants = recus_a_reprendre(path, root)
+    # On ne melange pas les deux : « rejeu rate » et « preuve absente » n'appellent pas la meme
+    # action. Les confondre dans un seul compte annulerait la distinction qu'on vient d'etablir.
+    bilan["encore_en_echec"] = sum(
+        1 for row in restants
+        if str(row.get("verdict") or "").upper() == "REVALIDATION_FAILED"
+    )
+    bilan["encore_preuves_absentes"] = sum(
+        1 for row in restants
+        if str(row.get("verdict") or "").upper() == VERDICT_PREUVE_ABSENTE
+    )
     return bilan
 
 
@@ -287,9 +344,19 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.lister:
         perimes = recus_perimes(root / RECEIPTS, root)
-        en_echec = recus_a_reprendre(root / RECEIPTS, root)
+        a_reprendre = recus_a_reprendre(root / RECEIPTS, root)
+        # 22/11/2026 : cette branche confondait encore les deux etats, alors que `revalider()`
+        # les separe. Afficher « en_echec: 9 » pour neuf recus dont le rejeu PASSE etait
+        # exactement le mensonge que la distinction visait a supprimer.
+        en_echec = [row for row in a_reprendre
+                    if str(row.get("verdict") or "").upper() == "REVALIDATION_FAILED"]
+        absentes = [row for row in a_reprendre
+                    if str(row.get("verdict") or "").upper() == VERDICT_PREUVE_ABSENTE]
         groupes = {fichiers_de_test(str(row.get("command") or ""), root) for row in perimes}
         print(json.dumps({"perimes": len(perimes), "en_echec": len(en_echec),
+                          "preuves_absentes": len(absentes),
+                          "exemples_preuves_absentes":
+                              sorted(str(row.get("task_id")) for row in absentes)[:20],
                           "groupes_de_tests": len(groupes - {()}),
                           "exemples": sorted(str(row.get("task_id")) for row in perimes)[:20],
                           "exemples_en_echec": sorted(str(row.get("task_id")) for row in en_echec)[:20]},
@@ -297,7 +364,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     bilan = revalider(root, timeout_s=args.timeout_s, reprendre=args.reprendre)
     print(json.dumps(bilan, ensure_ascii=False, indent=1))
-    return 0 if not bilan["echecs"] and not bilan.get("encore_perimes") else 3
+    # 22/11/2026 : `preuves_absentes` doit peser ICI. Sans cela, distinguer l'absence de
+    # l'echec aurait transforme neuf rouges VISIBLES en un vert silencieux -- un reçu non
+    # resolu reste un travail a faire, meme quand son rejeu passe.
+    non_resolu = (bilan["echecs"] or bilan.get("encore_perimes")
+                  or bilan.get("preuves_absentes") or bilan.get("encore_preuves_absentes"))
+    return 3 if non_resolu else 0
 
 
 if __name__ == "__main__":

@@ -47,7 +47,7 @@ try {
     throw "Manifest runtime portable invalide: $($_.Exception.Message)"
 }
 $env:HYPERSMART_PYTHON = $PythonExe
-$Url = "http://127.0.0.1:$Port/v2"   # 2026-07-08: nouvelle UI hacker v2 (metagraphe reel) au lieu de l ancienne
+$Url = "http://127.0.0.1:$Port/direct"   # 2026-11-22: tableau EN DIRECT simple et lisible (/v2 reste servi)
 $ApiUrl = "http://127.0.0.1:$Port/api/simulation/overview"
 $HealthUrl = "http://127.0.0.1:$Port/api/simulation/status"
 $logDir = Join-Path $Root "logs"

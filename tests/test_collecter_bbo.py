@@ -346,3 +346,53 @@ def test_bbo_bundle_is_fail_closed_at_source_admission() -> None:
     call = source[source.index("await asyncio.to_thread(\n            build_bundle,"):]
     call = call[:call.index("\n        )")]
     assert "replay_admission_only=True" in call
+
+
+# ---------- trois refus manques sur le detecteur de choc (mesure du 21/11/2026)
+def _trade(**ecarts):
+    d = {"e": "trade", "s": "BTCUSDT", "p": "65000", "q": "0.5", "m": False, "T": 1_700_000_000_000}
+    for clef, valeur in ecarts.items():
+        if valeur is _ABSENT:
+            d.pop(clef, None)
+        else:
+            d[clef] = valeur
+    return {"data": d}
+
+
+_ABSENT = object()
+
+
+def test_un_drapeau_m_absent_n_invente_plus_un_ACHAT():
+    """`"side": "SELL" if d.get("m") else "BUY"` affirmait ACHAT quand `m` manquait.
+
+    Or `m` DECIDE qui est l'agresseur : un sens invente retourne le signe du choc, donc
+    la mesure de lead-lag qui s'en nourrit. Une absence n'est pas une direction.
+    """
+    m = _mod()
+    assert m.parser_aggtrade_binance(_trade(m=_ABSENT)) is None
+    # Les deux sens REELS repondent toujours.
+    assert m.parser_aggtrade_binance(_trade(m=True))["side"] == "SELL"
+    assert m.parser_aggtrade_binance(_trade(m=False))["side"] == "BUY"
+
+
+def test_un_horodatage_absent_ne_devient_plus_1970():
+    """`float(d.get("T") or 0.0)` datait le trade de 1970 : il trierait AVANT toute
+    l'histoire et rendrait n'importe quel calcul de latence absurde."""
+    m = _mod()
+    assert m.parser_aggtrade_binance(_trade(T=_ABSENT)) is None
+    assert m.parser_aggtrade_binance(_trade(T=0)) is None
+    assert m.parser_aggtrade_binance(_trade(T=-5)) is None
+    assert m.parser_aggtrade_binance(_trade())["ts_ex"] == 1_700_000_000_000.0
+
+
+def test_une_taille_illisible_ne_fabrique_plus_un_trade_fantome():
+    """`_f(d.get("q")) or 0.0` produisait un trade de taille NULLE -- un choc sans volume."""
+    m = _mod()
+    assert m.parser_aggtrade_binance(_trade(q="n/a")) is None
+    assert m.parser_aggtrade_binance(_trade(q="0")) is None
+    assert m.parser_aggtrade_binance(_trade(q="0.5"))["sz"] == 0.5
+
+
+def test_un_symbole_vide_est_refuse():
+    m = _mod()
+    assert m.parser_aggtrade_binance(_trade(s="")) is None

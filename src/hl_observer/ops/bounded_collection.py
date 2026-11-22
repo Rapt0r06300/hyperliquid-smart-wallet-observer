@@ -57,88 +57,22 @@ def _registry(*, campaign_only: bool = False) -> dict[str, dict[str, Any]]:
     return {str(row["nom"]): row for row in rows}
 
 
-_BELOW_NORMAL_PRIORITY_CLASS = 0x00004000
+# DEPLACE le 21/11/2026 dans `budget_cpu.py` (ce fichier depassait le plafond de 800
+# lignes du depot). Les noms restent exposes ici : appelants et tests existants les
+# lisent sur ce module, et un deplacement ne doit casser personne.
+from hl_observer.ops import budget_cpu as _budget_cpu
 
-#: Part des coeurs logiques reservee aux collecteurs. L operateur a autorise 60 % le
-#: 19/11/2026. Mettre 0 (ou une valeur hors ]0, 1]) desactive toute affinite et rend
-#: le comportement d avant : priorite IDLE, tous les coeurs, cede des qu une
-#: application normale demande le processeur.
-FRACTION_COEURS_DEFAUT = 0.6
-VAR_FRACTION_COEURS = "HL_COLLECTEURS_FRACTION_COEURS"
-
-
-def fraction_coeurs(environnement: Mapping[str, str] | None = None) -> float:
-    """Fraction des coeurs reservee aux collecteurs, bornee a ]0, 1]."""
-    brut = (environnement or os.environ).get(VAR_FRACTION_COEURS, "")
-    try:
-        valeur = float(str(brut).strip().replace(",", ".")) if str(brut).strip() else FRACTION_COEURS_DEFAUT
-    except ValueError:
-        return FRACTION_COEURS_DEFAUT
-    return valeur if 0.0 < valeur <= 1.0 else 0.0
-
-
-def coeurs_autorises(*, total: int | None = None,
-                     environnement: Mapping[str, str] | None = None) -> tuple[int, ...]:
-    """Les coeurs logiques reserves aux collecteurs, ou () si aucune affinite.
-
-    POURQUOI UNE AFFINITE ET PAS SEULEMENT UNE PRIORITE. La priorite IDLE laisse les
-    collecteurs prendre TOUS les coeurs quand la machine est libre, mais les affame des
-    que l operateur travaille : leur debit s ecroule au pire moment. Reserver une PART
-    des coeurs donne les deux garanties a la fois -- ils travaillent vraiment sur leur
-    part, et ne touchent JAMAIS le reste, donc la machine reste reactive.
-
-    On prend les coeurs du HAUT : les premiers portent par convention les threads
-    systeme et l interface, ceux que l operateur sent en premier.
-    """
-    fraction = fraction_coeurs(environnement)
-    if fraction <= 0.0:
-        return ()
-    n_total = int(total if total is not None else (os.cpu_count() or 1))
-    if n_total <= 1:
-        return ()
-    n = max(1, min(n_total, int(n_total * fraction)))
-    if n >= n_total:
-        return ()   # rien a reserver : tout est deja autorise
-    return tuple(range(n_total - n, n_total))
-
-
-def appliquer_budget_cpu(processus: Any, *, psutil_mod: Any = None,
-                         environnement: Mapping[str, str] | None = None,
-                         total_coeurs: int | None = None) -> dict[str, Any]:
-    """Reserve la part de coeurs au processus, et ne releve sa priorite QUE si ca a marche.
-
-    FAIL-SAFE : sans affinite (psutil absent, plateforme sans affinite, droits refuses),
-    on GARDE la priorite IDLE. Relever la priorite sans avoir borne les coeurs rendrait
-    la machine moins reactive -- exactement ce que l operateur ne demande pas.
-    """
-    audit: dict[str, Any] = {"coeurs": [], "priorite": "IDLE", "raison": ""}
-    coeurs = coeurs_autorises(total=total_coeurs, environnement=environnement)
-    if not coeurs:
-        audit["raison"] = "aucune affinite demandee"
-        return audit
-    if psutil_mod is None:
-        try:
-            import psutil as psutil_mod   # type: ignore[no-redef]
-        except ImportError:
-            audit["raison"] = "psutil absent"
-            return audit
-    pid = getattr(processus, "pid", None)
-    if not pid:
-        audit["raison"] = "processus sans pid"
-        return audit
-    try:
-        poignee = psutil_mod.Process(int(pid))
-        poignee.cpu_affinity(list(coeurs))
-    except Exception as exc:                      # noqa: BLE001 - jamais fatal au lancement
-        audit["raison"] = "affinite refusee: %s" % type(exc).__name__
-        return audit
-    audit["coeurs"] = list(coeurs)
-    try:
-        poignee.nice(getattr(psutil_mod, "BELOW_NORMAL_PRIORITY_CLASS", 0))
-        audit["priorite"] = "BELOW_NORMAL"
-    except Exception as exc:                      # noqa: BLE001
-        audit["raison"] = "priorite inchangee: %s" % type(exc).__name__
-    return audit
+FRACTION_COEURS_DEFAUT = _budget_cpu.FRACTION_COEURS_DEFAUT
+VAR_FRACTION_COEURS = _budget_cpu.VAR_FRACTION_COEURS
+PLAFOND_CHARGE_CPU_DEFAUT = _budget_cpu.PLAFOND_CHARGE_CPU_DEFAUT
+VAR_PLAFOND_CHARGE_CPU = _budget_cpu.VAR_PLAFOND_CHARGE_CPU
+fraction_coeurs = _budget_cpu.fraction_coeurs
+plafond_charge_cpu = _budget_cpu.plafond_charge_cpu
+coeurs_equivalents_autorises = _budget_cpu.coeurs_equivalents_autorises
+charge_cpu_depassee = _budget_cpu.charge_cpu_depassee
+coeurs_autorises = _budget_cpu.coeurs_autorises
+appliquer_budget_cpu = _budget_cpu.appliquer_budget_cpu
+_BELOW_NORMAL_PRIORITY_CLASS = _budget_cpu._BELOW_NORMAL_PRIORITY_CLASS
 
 def _background_creation_flags(platform_name: str = os.name) -> int:
     if platform_name != "nt":
@@ -153,6 +87,27 @@ def _background_creation_flags(platform_name: str = os.name) -> int:
         | _CREATE_BREAKAWAY_FROM_JOB
         | _IDLE_PRIORITY_CLASS
     )
+
+
+def depart_differe(collector: Mapping[str, Any]) -> list[str]:
+    """Arguments de depart differe d'un collecteur (`delai_initial_s` au registre), ou rien."""
+    try:
+        delai = float(collector.get("delai_initial_s") or 0.0)
+    except (TypeError, ValueError):
+        return []
+    return ["--initial-delay-s", str(delai)] if delai > 0 else []
+
+
+ECHELONNEMENT_DEFAUT_S = 0.5
+
+
+def _echelonnement_s() -> float:
+    """Pause entre deux lancements de collecteurs, bornee a [0, 5] s. Valeur illisible -> defaut."""
+    try:
+        valeur = float(os.environ.get("HL_COLLECTEURS_ECHELONNEMENT_S", ECHELONNEMENT_DEFAUT_S))
+    except (TypeError, ValueError):
+        return ECHELONNEMENT_DEFAUT_S
+    return min(5.0, max(0.0, valeur))
 
 
 def _default_spawn(
@@ -249,7 +204,14 @@ def start_bounded_collectors(
             sleeper(min(1.5, max(0.0, float(startup_wait_s) / 2.0)))
         runner = project_root / "tools" / "run_bounded_collector.py"
         launch = spawner or _default_spawn
-        for collector in pending:
+        # DEMARRAGE ECHELONNE (22/11/2026) : 20 collecteurs partant dans la meme seconde sur une seule
+        # IP ont valu 10 refus HTTP 429 en 7 minutes. Une courte pause entre deux lancements etale
+        # la rafale. Reglable par HL_COLLECTEURS_ECHELONNEMENT_S (0 = comportement d'avant) ; sans
+        # effet quand un lanceur de test est injecte.
+        pause_s = _echelonnement_s() if spawner is None else 0.0
+        for rang, collector in enumerate(pending):
+            if rang and pause_s > 0:
+                sleeper(pause_s)
             name = str(collector["nom"])
             command = [
                 str(python_executable),
@@ -264,6 +226,7 @@ def start_bounded_collectors(
                 str(float(collector["intervalle_s"])),
                 "--lease-file",
                 str(lease_file),
+                *depart_differe(collector),
                 "--",
                 *[str(value) for value in collector.get("args", ())],
             ]

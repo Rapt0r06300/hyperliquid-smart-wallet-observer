@@ -42,6 +42,10 @@ def _nb(v):
         return None
 
 
+#: Au-delà, un trade reçu n'a pas été observé en direct (même seuil que la fraîcheur du labo).
+RETARD_CAUSAL_MAX_MS = 30_000
+
+
 def parser_trade(t: Any, *, recv_ms: int) -> dict[str, Any] | None:
     """Normalise un trade public -> schéma aligné `copy_vault_trades`."""
     if not isinstance(t, dict):
@@ -55,12 +59,21 @@ def parser_trade(t: Any, *, recv_ms: int) -> dict[str, Any] | None:
         return None
     side = str(t.get("side") or "")
     aggressor = "BUY" if side in ("B", "BUY", "b") else "SELL" if side in ("A", "S", "SELL", "a") else "?"
+    retard_ms = int(recv_ms) - int(exch)
     return {
         "schema_version": "hypersmart.copy_vault_trades.v1", "coin": str(coin),
         "exchange_ts_ms": int(exch), "received_at_ms": int(recv_ms),
         "price": px, "size": sz, "aggressor_side": aggressor,
         "hash": t.get("hash"), "tid": t.get("tid"),
-        "source": "HYPERLIQUID_TRADES_WS", "data_origin": "REAL_OBSERVED", "causal_observation": True,
+        "source": "HYPERLIQUID_TRADES_WS", "data_origin": "REAL_OBSERVED",
+        # Un trade REJOUÉ À L'ABONNEMENT n'est pas une observation causale. Mesure du 22/11/2026 sur le
+        # ruban réel : la plateforme renvoie ses trades récents à chaque abonnement, reçus 20 à 47
+        # minutes (jusqu'à 3,7 h) après leur heure d'échange — et tous portaient
+        # `causal_observation: true`. On garde la ligne (c'est une donnée vraie) mais on dit ce
+        # qu'elle est : observée en direct seulement si elle arrive dans le délai de fraîcheur.
+        "retard_reception_ms": retard_ms,
+        "causal_observation": retard_ms <= RETARD_CAUSAL_MAX_MS,
+        "observation_mode": "DIRECT" if retard_ms <= RETARD_CAUSAL_MAX_MS else "REJOUE_A_L_ABONNEMENT",
     }
 
 
@@ -93,6 +106,8 @@ class LaneMarche:
         self._vus_trade: set = set()
         self.trades = 0
         self.candles = 0
+        self.cloturees = 0
+        self._derniere_bougie: dict[tuple, dict[str, Any]] = {}
         self.reconnects = 0
 
     async def ecrire_trade(self, row: dict[str, Any]) -> None:
@@ -106,7 +121,39 @@ class LaneMarche:
                 h.write(json.dumps(row, ensure_ascii=False) + "\n")
             self.trades += 1
 
+    def bougie_close(self, row: dict[str, Any]) -> dict[str, Any] | None:
+        """La bougie précédente du même (coin, intervalle), COMPLÈTE, quand la suivante commence.
+
+        22/11/2026 : la plateforme envoie la bougie en cours à chaque trade, mais en général PAS de
+        version finale après la clôture (104 bougies sur 4 209 en ont une). Le coffre garde la
+        première version d'une bougie : il gardait donc une bougie d'une demi-seconde (BTC 1 min :
+        3 trades au lieu de 1 965). La bougie complète est la DERNIÈRE reçue avant que la suivante
+        commence ; on la réémet alors une fois, marquée `bougie_cloturee`, avec l'heure de
+        réception de ce qui a prouvé sa clôture. Rien n'est inventé : ce sont ses valeurs reçues."""
+        cle = (row.get("coin"), row.get("interval"))
+        precedente = self._derniere_bougie.get(cle)
+        self._derniere_bougie[cle] = row
+        if precedente is None or row.get("open_ts_ms") is None:
+            return None
+        if int(row["open_ts_ms"]) <= int(precedente.get("open_ts_ms") or 0):
+            return None                                       # même bougie (ou plus ancienne) : pas de clôture
+        return {**precedente, "bougie_cloturee": True, "cloture_prouvee_a_ms": row.get("received_at_ms"),
+                "received_at_ms_derniere_version": precedente.get("received_at_ms")}
+
+    def oublier(self, coins) -> None:
+        """À chaque (re)connexion : la bougie en cours au moment d'une coupure a pu manquer sa fin.
+        L'oublier garantit qu'elle ne sera jamais réémise comme « close »."""
+        noms = set(coins)
+        for cle in [k for k in self._derniere_bougie if k[0] in noms]:
+            self._derniere_bougie.pop(cle, None)
+
     async def ecrire_candle(self, row: dict[str, Any]) -> None:
+        close = self.bougie_close(row)
+        if close is not None:
+            async with self._lock:
+                with self.candle_out.open("a", encoding="utf-8") as h:
+                    h.write(json.dumps(close, ensure_ascii=False) + "\n")
+            self.cloturees += 1
         async with self._lock:
             with self.candle_out.open("a", encoding="utf-8") as h:
                 h.write(json.dumps(row, ensure_ascii=False) + "\n")
@@ -122,6 +169,7 @@ async def _connexion(lane: LaneMarche, coins: list[str], socket_id: str, deadlin
         try:
             async with websockets.connect(WS_URL, ping_interval=20, max_size=2 ** 22,
                                           compression="deflate") as ws:
+                lane.oublier(coins)              # une coupure a pu tronquer la bougie en cours
                 for c in coins:
                     await ws.send(json.dumps({"method": "subscribe",
                                               "subscription": {"type": "trades", "coin": c}}))

@@ -8,6 +8,9 @@ set "CV_BACKOFF=%CV_BACKOFF_INIT%"
 set "SUPLOG=%CV_ROOT%runtime\logs\supervisor.log"
 :campagne
 if exist "%CV_ROOT%runtime\data\stop_collecteurs.flag" goto :fin
+rem 22/11/2026 : supervisor.log pesait 94 Mo sans rotation, et userfills_live.lock restait au nom d un PID mort.
+rem   Rotation (20 Mo, 5 generations) et verrou perime ECARTES ici, avant que le journal soit rouvert.
+"%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\collecteurs_exploitation.py" --racine "%CV_ROOT%." --tourner supervisor.log --ecarter-verrou-perime >nul 2>nul
 set /a CV_RESTARTS+=1
 if %CV_RESTARTS% GTR %CV_MAX_RESTARTS% goto :fin
 "%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\watch_economic_collectors.py" --root "%CV_ROOT%." --profile %CV_PROFILE% --interval-s %CV_INTERVAL% --duration-s %CV_DURATION% --lease-duration-s %CV_LEASE% >> "%SUPLOG%" 2>&1

@@ -107,6 +107,9 @@ PLAFOND_RSS_MO_DEFAUT = 700.0
 VAR_PLAFOND_RSS = "HL_COLLECTEURS_PLAFOND_RSS_MO"
 
 
+from hl_observer.ops.budget_cpu import coeurs_equivalents_autorises  # noqa: E402
+
+
 def plafond_rss_mo(environnement=None) -> float:
     """Plafond RAM par collecteur (Mo). <= 0 desactive la surveillance."""
     brut = (environnement if environnement is not None else os.environ).get(VAR_PLAFOND_RSS, "")
@@ -114,6 +117,136 @@ def plafond_rss_mo(environnement=None) -> float:
         return float(str(brut).strip().replace(",", ".")) if str(brut).strip() else PLAFOND_RSS_MO_DEFAUT
     except ValueError:
         return PLAFOND_RSS_MO_DEFAUT
+
+
+#: Plafond RAM de la COHORTE entiere, en fraction de la memoire de la machine.
+#: 50 % demandes par l operateur le 21/11/2026 (<< 50 % cpu et 50 % memoire, moitie
+#: moitie >>). Le plafond par collecteur ci-dessus ne borne pas le total : 20 familles
+#: a 700 Mo feraient 14 Go sans qu aucune ne depasse sa part. Les deux sont donc
+#: necessaires -- l un contre une fuite isolee, l autre contre la somme.
+PLAFOND_RAM_COHORTE_FRACTION_DEFAUT = 0.5
+VAR_PLAFOND_RAM_COHORTE = "HL_COLLECTEURS_PLAFOND_RAM_FRACTION"
+
+
+def plafond_ram_cohorte_fraction(environnement=None) -> float:
+    """Fraction de la RAM machine accordee a toute la collecte, bornee a ]0, 1].
+
+    Une valeur illisible ou hors bornes rend le defaut : un plafond qu on ne sait pas
+    lire ne doit jamais devenir << pas de plafond >>.
+    """
+    source = environnement if environnement is not None else os.environ
+    texte = str(source.get(VAR_PLAFOND_RAM_COHORTE, "")).strip().replace(",", ".")
+    if not texte:
+        return PLAFOND_RAM_COHORTE_FRACTION_DEFAUT
+    try:
+        valeur = float(texte)
+    except ValueError:
+        return PLAFOND_RAM_COHORTE_FRACTION_DEFAUT
+    return valeur if 0.0 < valeur <= 1.0 else PLAFOND_RAM_COHORTE_FRACTION_DEFAUT
+
+
+def plafond_ram_cohorte_mo(*, total_mo: float | None = None, environnement=None,
+                           psutil_mod=None) -> float | None:
+    """Plafond de la cohorte en Mo, ou None si la RAM totale est inconnue.
+
+    None signifie << je ne sais pas >>, pas << pas de limite >> : l appelant doit alors
+    s abstenir de conclure plutot que de supposer la voie libre.
+    """
+    total = total_mo
+    if total is None:
+        if psutil_mod is None:
+            try:
+                import psutil as psutil_mod   # type: ignore[no-redef]
+            except ImportError:
+                return None
+        try:
+            total = float(psutil_mod.virtual_memory().total) / 1048576.0
+        except Exception:                         # noqa: BLE001 - mesure indisponible
+            return None
+    if total <= 0:
+        return None
+    return round(total * plafond_ram_cohorte_fraction(environnement), 1)
+
+
+def charge_cpu_cohorte(*, psutil_mod=None, mon_pid: int | None = None,
+                       intervalle_s: float = 0.4) -> float | None:
+    """Charge CPU de TOUTE la collecte, en pourcent (100 % = un coeur plein).
+
+    POURQUOI DEUX ECHANTILLONS. `cpu_percent()` au premier appel rend 0.0 : il n a pas
+    de point de comparaison. Un plafond branche sur cette valeur ne declencherait donc
+    JAMAIS -- un garde qui lit toujours zero est pire qu absent, parce qu il rassure.
+    On mesure donc `cpu_times` deux fois, et on divise le travail consomme par le temps
+    ecoule.
+
+    Rend `None` si la mesure est impossible (psutil absent, aucun processus) : l appelant
+    doit alors s abstenir de conclure, jamais supposer la voie libre.
+    """
+    if psutil_mod is None:
+        try:
+            import psutil as psutil_mod   # type: ignore[no-redef]
+        except ImportError:
+            return None
+    moi = int(mon_pid if mon_pid is not None else os.getpid())
+    exclus = {moi}
+    try:
+        exclus |= {int(a.pid) for a in psutil_mod.Process(moi).parents()}
+    except Exception as exc:                      # noqa: BLE001
+        from hl_observer.ops.echec_silencieux import noter
+        noter("ops/superviseur_collecteurs.py:ancetres_cpu", exc)
+    scripts = tuple(str(c["script"]).replace(chr(92), "/").rsplit("/", 1)[-1]
+                    for c in REGISTRE)
+
+    def _echantillon() -> dict[int, float]:
+        mesure: dict[int, float] = {}
+        for proc in psutil_mod.process_iter(["pid", "cmdline"]):
+            try:
+                pid = int(proc.info.get("pid") or 0)
+                if pid in exclus or pid <= 0:
+                    continue
+                ligne = " ".join(proc.info.get("cmdline") or ()).replace(chr(92), "/")
+                if not any(script and script in ligne for script in scripts):
+                    continue
+                temps = proc.cpu_times()
+                mesure[pid] = float(temps.user) + float(temps.system)
+            except Exception:                     # noqa: BLE001 - un processus peut mourir
+                continue
+        return mesure
+
+    debut = _echantillon()
+    if not debut:
+        return None
+    depart = time.monotonic()
+    time.sleep(max(0.05, float(intervalle_s)))
+    ecoule = max(1e-6, time.monotonic() - depart)
+    fin = _echantillon()
+    consomme = sum(max(0.0, fin[pid] - debut[pid]) for pid in fin if pid in debut)
+    return round(100.0 * consomme / ecoule, 1)
+
+
+def cpu_au_plafond(charge_pourcent: float | None, *, total_coeurs: int | None = None,
+                   environnement=None) -> bool | None:
+    """La collecte depasse-t-elle sa part de processeur ? `None` si non mesuree.
+
+    Delegue au plafond du depot (`budget_cpu.charge_cpu_depassee`) : un seul endroit
+    decide ce que << 50 % >> veut dire.
+    """
+    if charge_pourcent is None:
+        return None
+    from hl_observer.ops.budget_cpu import charge_cpu_depassee
+    return charge_cpu_depassee(float(charge_pourcent), total=total_coeurs,
+                               environnement=environnement)
+
+
+def cohorte_au_plafond(rss_total_mo: float, *, total_mo: float | None = None,
+                       environnement=None, psutil_mod=None) -> bool | None:
+    """La collecte depasse-t-elle sa part de RAM ? None si le plafond est inconnu."""
+    plafond = plafond_ram_cohorte_mo(total_mo=total_mo, environnement=environnement,
+                                     psutil_mod=psutil_mod)
+    if plafond is None:
+        return None
+    if rss_total_mo < 0.0:
+        return True     # mesure absurde : on signale plutot que de rassurer
+    return rss_total_mo > plafond
 
 
 def rss_par_collecteur(*, psutil_mod=None, mon_pid: int | None = None) -> dict[str, float]:
@@ -174,6 +307,16 @@ def etat_collecteurs(
     out: list[dict[str, Any]] = []
     rss = rss_par_collecteur()
     plafond = plafond_rss_mo()
+    # Plafond de COHORTE (50 % de la machine, 21/11/2026) : la somme des familles, que
+    # le plafond par collecteur ne borne pas. `None` = inconnu, jamais << voie libre >>.
+    rss_cohorte = round(sum(rss.values()), 1)
+    plafond_cohorte = plafond_ram_cohorte_mo()
+    cohorte_pleine = cohorte_au_plafond(rss_cohorte, total_mo=None)
+    # Moitie CPU : mesuree sur deux echantillons, et comparee au plafond du depot.
+    # `None` = non mesure (aucun collecteur vivant, psutil absent), jamais << voie libre >>.
+    cpu_cohorte = charge_cpu_cohorte()
+    cpu_plafond_pourcent = round(coeurs_equivalents_autorises() * 100.0, 1)
+    cpu_plein = cpu_au_plafond(cpu_cohorte)
     for c in collecteurs_pour_profil(profil):
         age = age_vie_minutes(root, c, maintenant=maintenant)
         out.append({
@@ -187,6 +330,12 @@ def etat_collecteurs(
             "plafond_rss_mo": plafond if plafond > 0 else None,
             # SIGNALE seulement : on ne tue pas un collecteur occupe, on le montre.
             "trop_gros": bool(plafond > 0 and (rss.get(c["nom"]) or 0.0) > plafond),
+            "rss_cohorte_mo": rss_cohorte,
+            "plafond_cohorte_mo": plafond_cohorte,
+            "cohorte_au_plafond": cohorte_pleine,
+            "cpu_cohorte_pourcent": cpu_cohorte,
+            "plafond_cpu_pourcent": cpu_plafond_pourcent,
+            "cpu_au_plafond": cpu_plein,
         })
     return out
 

@@ -28,6 +28,14 @@ from hl_observer.backtesting.copy_vault_protocol import (  # noqa: E402
 )
 from progress_display import ProgressTracker  # noqa: E402
 
+try:
+    import collecteurs_balayage as _balayage  # noqa: E402
+except ImportError:  # importe comme `tools.watch_economic_collectors`
+    from tools import collecteurs_balayage as _balayage  # noqa: E402
+
+lister_processus_projet = _balayage.lister_processus_projet
+pids_collecteurs_a_tuer = _balayage.pids_collecteurs_a_tuer
+
 DEFAULT_NAMES = (
     "allmids-collector",
     "bbo-collector",
@@ -59,6 +67,11 @@ DEFAULT_NAMES = (
     "coffre-certificateur",
     "controle-qualite",    # signale les derives de la campagne (vivant/mort, fraicheur, disque)
 )
+try:
+    import collecteurs_exploitation as _exploitation  # noqa: E402
+except ImportError:  # importe comme `tools.watch_economic_collectors`
+    from tools import collecteurs_exploitation as _exploitation  # noqa: E402
+
 _WATCHDOG_LOG_MAX_BYTES = 2 * 1024 * 1024
 _WATCHDOG_LOG_BACKUPS = 3
 
@@ -117,6 +130,37 @@ def _checkpoint_evidence_health(
         "status": "GAPS_REPORTED" if gaps else "NO_REPORTED_GAP",
         "reported_gaps": gaps,
     }
+
+
+def detail_des_trous(root: Path) -> dict[str, Any] | None:
+    """La NATURE des trous causaux, lue dans le battement (22/11/2026 : « 850 trous » ne disait ni
+    ce qu'ils etaient ni leur age). Battement absent ou illisible -> None."""
+    try:
+        heartbeat = json.loads(
+            (root / "runtime/research_lab/heartbeats/copy-vault-checkpoints.json").read_text(encoding="utf-8"))
+        metrics = heartbeat["metriques"]
+    except (OSError, TypeError, ValueError, KeyError):
+        return None
+    if not isinstance(metrics, Mapping):
+        return None
+    return {clef: metrics.get(clef) for clef in
+            ("checkpoint_expirations", "checkpoint_queue_rejections", "input_rotations", "stale")}
+
+
+_TROUS_AU_DEPART: dict[str, int] = {}
+
+
+def trous_depuis_le_depart(bail: str, trous: Any) -> int | None:
+    """Trous causaux apparus DEPUIS le debut de cette campagne. Le compteur du battement est
+    CUMULE et survit aux redemarrages : le 22/11/2026 il affichait 875 des la premiere seconde
+    d'une campagne neuve, puis 877 un quart d'heure plus tard -- 2 trous reels, lus comme 877.
+    Compteur illisible -> None ; un compteur qui RECULE (remise a zero) repart de sa nouvelle base."""
+    if type(trous) is not int or trous < 0:
+        return None
+    depart = _TROUS_AU_DEPART.get(bail)
+    if depart is None or trous < depart:
+        _TROUS_AU_DEPART[bail] = depart = trous
+    return trous - depart
 
 
 def _append_log(root: Path, payload: dict[str, Any]) -> None:
@@ -368,6 +412,9 @@ def run_watchdog(
                 "causal_protocol_status": protocol_status,
                 "causal_evidence_status": evidence_health["status"],
                 "causal_evidence_reported_gaps": evidence_health["reported_gaps"],
+                "causal_evidence_gaps_since_start": trous_depuis_le_depart(
+                    str(lease_id or ""), evidence_health["reported_gaps"]),
+                "causal_evidence_detail": detail_des_trous(root),
                 "observed_protocols": {
                     "userfills-live": fills_protocol or None,
                     "copy-vault-checkpoints": checkpoint_protocol or None,
@@ -375,6 +422,10 @@ def run_watchdog(
                 "paper_read_only": result.get("paper_read_only") is True,
                 "real_execution": False,
             }
+            # RAM et CPU par collecteur (22/11/2026) : sans eux, impossible de dire ce que la collecte
+            # coute a la machine. Mesure, jamais fatale ; `None` = non mesure, pas zero.
+            record["ressources"] = _exploitation.ressources_par_collecteur(active_map)
+            record["ressources_total"] = _exploitation.total_ressources(record["ressources"])
             from progress_display import _format_duration
             elapsed_s = now - _start_mono
             print(
@@ -509,6 +560,7 @@ def arreter_campagne_immediatement(
     *,
     runner: Callable[..., Any] = subprocess.run,
     verbose: bool = True,
+    lister: Callable[[], Any] | None = None,
 ) -> dict[str, Any]:
     """Arrêt IMMÉDIAT et sûr de la campagne de collecte (sans attendre le bail).
 
@@ -544,13 +596,51 @@ def arreter_campagne_immediatement(
             tues.append(pid)
         except OSError:
             ignores.append(pid)
+    _exploitation.ecarter_verrou_perime(root)   # un verrou au nom d'un PID mort ne doit pas survivre
     if verbose:
         print(
             f"[ARRÊT] Campagne stoppée immédiatement : {len(tues)} collecteur(s) arrêté(s), "
             f"bail {'invalidé' if bail_supprime else 'déjà absent'}.",
             flush=True,
         )
-    return {"tues": tues, "ignores": ignores, "bail_supprime": bail_supprime}
+    # BALAYAGE DE SECOURS (21/11/2026). La liste de PID ci-dessus vient de l'etat de
+    # campagne, ECRIT AU DEMARRAGE : un ouvrier relance plus tard n'y figure pas, et
+    # n'etait alors arrete par personne. Mesure du jour : 20 PID listes pour ~30
+    # ouvriers `run_bounded_collector.py` vivants. On balaye donc les lignes de
+    # commande, comme le fait l'ecran temps reel, avec le MEME selecteur partage.
+    # Ici on tue sans repasser par `_est_process_python` : la selection repose deja
+    # sur la ligne de commande (preuve plus forte qu'un nom d'image) et doit pouvoir
+    # arreter les shells `cmd.exe` `_run_*.cmd`, qui ne sont pas des python.
+    tues_balayage: list[int] = []
+    try:
+        processus = (lister or lister_processus_projet)()
+    except (OSError, subprocess.SubprocessError):
+        processus = []
+    deja = set(tues) | set(ignores)
+    for pid in pids_collecteurs_a_tuer(processus, self_pid=os.getpid(), racine=root):
+        if pid in deja:
+            continue
+        try:
+            if _IS_WINDOWS:
+                runner(["taskkill", "/PID", str(pid), "/T", "/F"],
+                       capture_output=True, text=True, check=False)
+            else:
+                os.kill(pid, signal.SIGTERM)
+            tues_balayage.append(pid)
+        except OSError:
+            ignores.append(pid)
+    if verbose and tues_balayage:
+        print(
+            f"[ARRET] Balayage de secours : {len(tues_balayage)} collecteur(s) absent(s) "
+            f"de l'etat de campagne ont ete arretes ({tues_balayage}).",
+            flush=True,
+        )
+    return {
+        "tues": tues,
+        "ignores": ignores,
+        "bail_supprime": bail_supprime,
+        "tues_balayage": tues_balayage,
+    }
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -558,7 +648,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--root", default=str(ROOT))
     parser.add_argument(
         "--profile",
-        choices=("resume", "copy-vault"),
+        choices=("resume", "copy-vault", "copy-vault-seul"),
         default="resume",
         help="resume the saved request or force the complete Copy-Vault collector set",
     )
@@ -579,7 +669,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         arreter_campagne_immediatement(Path(args.root).resolve())
         return 0
     _idle_priority()
-    requested_names = list(DEFAULT_NAMES) if args.profile == "copy-vault" else None
+    requested_names = (list(DEFAULT_NAMES) if args.profile == "copy-vault"
+                       else list(_exploitation.noms_copy_vault_seul()) if args.profile == "copy-vault-seul"
+                       else None)
     try:
         return run_watchdog(
             Path(args.root).resolve(),

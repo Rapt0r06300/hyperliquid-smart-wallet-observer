@@ -67,6 +67,7 @@ from hl_observer.datasets.coffre_registre_fichiers import (  # noqa: F401
     VERSIONS_CERTIFICATEUR,
     motif_non_certifie,
     nouvellement_accepte,
+    rattrapage_par_identite,
     version_certificateur,
 )
 from hl_observer.datasets.coffre_familles_collecte import (  # noqa: F401
@@ -570,13 +571,25 @@ def identite(record: dict[str, Any], famille: str) -> tuple[Any, ...]:
             record.get("px"), record.get("sz"), record.get("signe"),
         )
     if famille == FAMILLE_BOOK_L2:
+        # 22/11/2026 — UN CARNET LIÉ À UN SIGNAL N'EST PAS LE DOUBLON DE SON OBSERVATION. Le moteur
+        # écrit certains carnets deux fois : comme simple observation, puis comme point de contrôle
+        # d'un signal (`REFERENCE`, `ENTRY`, `EXIT_*`) avec `checkpoint_id`. L'identité ne regardait
+        # que (coin, instant, meilleurs prix) : le point de contrôle était jeté dès que
+        # l'observation — ou sa copie par la lane — était passée. Mesuré : 28 références sur 28
+        # perdues en une session, 28 990 points de contrôle sur 127 346 dans les archives ; or le
+        # labo ne lit QUE les lignes portant un `checkpoint_id`.
+        # Un carnet sans liaison garde EXACTEMENT son ancienne clé : rien de déjà déposé ne bouge.
+        point, etape = record.get("checkpoint_id"), record.get("checkpoint_stage")
         return ("book", record.get("coin"), record.get("exchange_ts_ms"),
-                record.get("bid"), record.get("ask"))
+                record.get("bid"), record.get("ask"), *((point, etape) if (point or etape) else ()))
     if famille == FAMILLE_TRADES:
         return ("trade", record.get("coin"), record.get("exchange_ts_ms"),
                 record.get("tid"), record.get("hash"), record.get("price"), record.get("size"))
     if famille == FAMILLE_CANDLE:
-        return ("candle", record.get("coin"), record.get("interval"), record.get("open_ts_ms"))
+        # 22/11/2026 : la version CLOSE d'une bougie du direct (`bougie_cloturee`) n'est pas le doublon
+        # de sa première version partielle, déjà au coffre. Une bougie sans le drapeau garde sa clé.
+        return ("candle", record.get("coin"), record.get("interval"), record.get("open_ts_ms"),
+                *(("CLOTUREE",) if record.get("bougie_cloturee") is True else ()))
     if famille == FAMILLE_POSITION:
         return ("position", record.get("vault"), record.get("coin"),
                 record.get("received_at_ms"), record.get("szi"))
@@ -717,7 +730,7 @@ __all__ = [
     "FAMILLE_VAULT_PORTFOLIO", "certifier_portfolio_history",
     "FAMILLE_LEADER_ORDERS", "certifier_leader_orders",
     "FAMILLE_FUNDING_HISTORY", "certifier_funding_history",
-    "FICHIERS_NON_CERTIFIES", "motif_non_certifie", "nouvellement_accepte",
+    "FICHIERS_NON_CERTIFIES", "motif_non_certifie", "nouvellement_accepte", "rattrapage_par_identite",
     "FAMILLE_MICRO_BBO", "FAMILLE_MICRO_L2", "FAMILLE_MICRO_TRADES",
     "certifier_micro_bbo", "certifier_micro_l2", "certifier_micro_trade",
     "certifier_record", "certifier_lignes", "identite", "MAX_TARGET_LAG_MS",

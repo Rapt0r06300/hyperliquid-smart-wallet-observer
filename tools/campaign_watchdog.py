@@ -662,6 +662,167 @@ def _reconcile_drain_stuck(row: dict, phase: dict, now: datetime) -> bool:
     }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
     return True
 
+def _reconcile_epoch_superseded(row: dict, phase: dict, now: datetime) -> bool:
+    """Close a campaign stranded by an epoch the controller has already left.
+
+    WHY THIS EXISTS (measured 2026-11-21). `_reconcile_finished_owner` revokes the lease
+    of a dead GitHub owner run and marks the campaign STUCK, expecting the canonical
+    controller to reconcile it. When the controller moves on to a later epoch instead,
+    nothing can ever close it: `_reconcile_drain_stuck` only accepts
+    LEASE_EXPIRED_REQUIRES_RECONCILIATION during ANALYZE/DRAIN with a cutoff and a
+    matching epoch, and `_terminalize_superseded_stuck` only acts on the CURRENT epoch
+    with a market replacement. Thirteen campaigns had been frozen since 2026-10-07 and
+    309 more were pending from superseded epochs, holding the watchdog at ATTENTION.
+
+    A past collection window cannot be reopened, so these campaigns are unrepairable.
+    They are therefore ISOLATED with a named reason rather than left pending:
+
+    * only when no lease is live -- a claimed campaign is somebody's work in progress ;
+    * only when `phase_epoch` is STRICTLY older than the controller epoch, so the
+      current epoch is never touched ;
+    * PARTIAL when `completed_units` holds durable progress, UNAVAILABLE otherwise: work
+      already done is never downgraded to nothing ;
+    * history, completed units and the manifest are preserved -- nothing is destroyed.
+    """
+    if row.get("schema_version") != "alina.resumable_campaign.v2":
+        return False
+    if row.get("lease") is not None:
+        return False
+    if str(row.get("status") or "") not in {
+        "PENDING",
+        "RUNNING",
+        "CONTINUATION_REQUIRED",
+        "STUCK",
+    }:
+        return False
+    try:
+        epoch_row = int(row.get("phase_epoch"))
+        epoch_phase = int(phase.get("epoch"))
+    except (TypeError, ValueError):
+        return False
+    if epoch_row >= epoch_phase:
+        return False
+
+    completed = row.get("completed_units") if isinstance(row.get("completed_units"), dict) else {}
+    terminal_status = "PARTIAL" if completed else "UNAVAILABLE"
+    reason = (
+        "EPOCH_SUPERSEDED_WITH_DURABLE_PROGRESS" if completed
+        else "EPOCH_SUPERSEDED_COLLECTION_WINDOW_CLOSED"
+    )
+    campaign_id = str(row.get("campaign_id") or "")
+    previous_status = str(row.get("status") or "")
+    previous_reason = row.get("stuck_reason")
+    row["status"] = terminal_status
+    row["status_reason"] = reason
+    row["stuck_reason"] = None
+    row["updated_at"] = now.isoformat().replace("+00:00", "Z")
+    row.setdefault("history", []).append({
+        "at_utc": row["updated_at"],
+        "event": "WATCHDOG_EPOCH_SUPERSEDED_TERMINALIZED",
+        "previous_status": previous_status,
+        "previous_stuck_reason": previous_reason,
+        "terminal_status": terminal_status,
+        "reason": reason,
+        "campaign_phase_epoch": epoch_row,
+        "controller_epoch": epoch_phase,
+    })
+    row["terminal_evidence_digest"] = hashlib.sha256(json.dumps({
+        "campaign_id": campaign_id,
+        "terminal_status": terminal_status,
+        "reason": reason,
+        "completed_units": completed,
+        "campaign_phase_epoch": epoch_row,
+        "controller_epoch": epoch_phase,
+    }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    return True
+
+
+#: Combien de fois une campagne de l'epoque courante peut etre reprise apres la mort de
+#: son run proprietaire. BORNE VOLONTAIREMENT BASSE : si trois runs successifs meurent
+#: dessus, le probleme n'est pas la malchance, et une quatrieme tentative ne ferait que
+#: masquer la cause en consommant du quota GitHub.
+MAX_REPRISES_APRES_RUN_MORT = 3
+
+
+def _reconcile_retry_current_epoch(row: dict, phase: dict, now: datetime) -> bool:
+    """Return a current-epoch campaign to PENDING after its owner run died.
+
+    WHY (measured 2026-11-21). `_reconcile_finished_owner` revokes the lease of a dead
+    GitHub run and marks the campaign STUCK, expecting the controller to << reconcile or
+    RETRY from durable state >>. Nothing retried: eight campaigns of the CURRENT epoch
+    had been frozen since 2026-11-01. Unlike a superseded epoch, the collection window
+    is still open here, so isolating them would throw away collectable data.
+
+    The retry is BOUNDED and recorded in the manifest. On exhaustion the campaign becomes
+    terminal with a NAMED reason -- never an endless loop, never a silent drop. Durable
+    progress (`completed_units`) is always preserved, so a retry resumes instead of
+    restarting.
+    """
+    if row.get("schema_version") != "alina.resumable_campaign.v2":
+        return False
+    if row.get("lease") is not None:
+        return False
+    if str(row.get("status") or "") != "STUCK":
+        return False
+    if str(row.get("stuck_reason") or "") != "OWNER_RUN_COMPLETED_WITH_ACTIVE_LEASE":
+        return False
+    try:
+        if int(row.get("phase_epoch")) != int(phase.get("epoch")):
+            return False
+    except (TypeError, ValueError):
+        return False
+
+    try:
+        deja = int(row.get("watchdog_retries") or 0)
+    except (TypeError, ValueError):
+        deja = 0
+    completed = row.get("completed_units") if isinstance(row.get("completed_units"), dict) else {}
+    campaign_id = str(row.get("campaign_id") or "")
+    timestamp = now.isoformat().replace("+00:00", "Z")
+
+    if deja >= MAX_REPRISES_APRES_RUN_MORT:
+        terminal_status = "PARTIAL" if completed else "FAILED"
+        reason = "RETRIES_EXHAUSTED_AFTER_OWNER_RUN_FAILURES"
+        row["status"] = terminal_status
+        row["status_reason"] = reason
+        row["stuck_reason"] = None
+        row["updated_at"] = timestamp
+        row.setdefault("history", []).append({
+            "at_utc": timestamp,
+            "event": "WATCHDOG_RETRIES_EXHAUSTED",
+            "previous_status": "STUCK",
+            "terminal_status": terminal_status,
+            "reason": reason,
+            "retries": deja,
+            "max_retries": MAX_REPRISES_APRES_RUN_MORT,
+        })
+        row["terminal_evidence_digest"] = hashlib.sha256(json.dumps({
+            "campaign_id": campaign_id,
+            "terminal_status": terminal_status,
+            "reason": reason,
+            "retries": deja,
+            "completed_units": completed,
+        }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+        return True
+
+    row["status"] = "PENDING"
+    row["status_reason"] = "RETRY_AFTER_OWNER_RUN_DEATH"
+    row["stuck_reason"] = None
+    row["watchdog_retries"] = deja + 1
+    row["updated_at"] = timestamp
+    row.setdefault("history", []).append({
+        "at_utc": timestamp,
+        "event": "WATCHDOG_RETRY_CURRENT_EPOCH",
+        "previous_status": "STUCK",
+        "previous_stuck_reason": "OWNER_RUN_COMPLETED_WITH_ACTIVE_LEASE",
+        "retry": deja + 1,
+        "max_retries": MAX_REPRISES_APRES_RUN_MORT,
+        "controller_epoch": phase.get("epoch"),
+        "preserved_completed_units": sorted(completed) if completed else [],
+    })
+    return True
+
+
 def _market_replacement_key(row: dict) -> tuple | None:
     if row.get("kind") != "market_collection":
         return None
@@ -814,6 +975,8 @@ def main():
     hot_handoff_failures = []
     lease_repairs = []
     drain_reconciled = []
+    epoch_superseded = []
+    reprises = []
     phase = {}
     phase_error = None
     try:
@@ -890,6 +1053,16 @@ def main():
             status = str(row.get("status") or "")
             campaign_id = str(row.get("campaign_id") or path.stem)
             lease_repairs.append(campaign_id)
+            _write_atomic(path, row)
+        if _reconcile_epoch_superseded(row, phase, now):
+            status = str(row.get("status") or "")
+            campaign_id = str(row.get("campaign_id") or path.stem)
+            epoch_superseded.append(campaign_id)
+            _write_atomic(path, row)
+        if _reconcile_retry_current_epoch(row, phase, now):
+            status = str(row.get("status") or "")
+            campaign_id = str(row.get("campaign_id") or path.stem)
+            reprises.append(campaign_id)
             _write_atomic(path, row)
         replacement = market_replacements.get(_market_replacement_key(row))
         if (
@@ -1101,6 +1274,8 @@ def main():
         "expired_leases": sorted(expired_leases),
         "lease_repairs": sorted(set(lease_repairs)),
         "drain_reconciled_campaigns": sorted(set(drain_reconciled)),
+        "epoch_superseded_campaigns": sorted(set(epoch_superseded)),
+        "retried_campaigns": sorted(set(reprises)),
         "unsafe_campaigns": sorted(unsafe),
         "successors_dispatched": sorted(set(dispatched)),
         "successor_dispatch_failures": sorted(

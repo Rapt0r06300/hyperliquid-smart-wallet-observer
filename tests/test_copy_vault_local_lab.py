@@ -2334,3 +2334,68 @@ def test_historical_replay_does_not_round_a_below_target_net_up(tmp_path: Path) 
     assert result["baseline"]["bootstrap_p05_usd_per_day"] < 5.0
     assert Decimal(result["baseline"]["bootstrap_p05_usd_per_day_exact_decimal"]) < 5
     assert result["improvement_found"] is False
+
+
+# ---- pourquoi le split est impossible (mesure du 21/11/2026 : 23 tranches, 0 candidat)
+def test_le_refus_du_split_DISTINGUE_ma_decoupe_d_un_defaut_de_donnees():
+    """`TEMPORAL_SPLIT_INVALID_AFTER_PURGE` sans chiffres laissait `MORE_DATA` accuser le
+    corpus. Deux causes tres differentes etaient indistinguables :
+
+    * une FENETRE plus etroite que l'unite de decoupe du split (`_bounds` compte des jours
+      UTC : une tranche de 4 h ne peut jamais en porter six) -- faute de conception ;
+    * un split reellement VIDE apres la purge anti-fuite -- defaut de donnees.
+
+    Mesure : une conduite de 23 tranches de 4 a 26 h a rendu 23 fois MORE_DATA et
+    **0 candidat essaye** en 2 h 17, avec 34 863 metaordres et 680 896 lignes de carnet
+    dans la seule premiere tranche. La donnee n'y etait pour rien.
+    """
+    from hl_observer.backtesting.copy_vault_local_lab import _diagnostic_du_split
+    jour = 86_400_000
+    # La tranche reelle qui a echoue : 4 h, 1 jour UTC, 6 requis.
+    etroite = _diagnostic_du_split([1_794_528_000_000 + i * 600_000 for i in range(24)],
+                                   seuil_jours=6)
+    assert etroite["motif"] == "FENETRE_PLUS_ETROITE_QUE_L_UNITE_DE_DECOUPE"
+    assert etroite["jours_distincts"] == 1
+    assert etroite["jours_requis"] == 6
+    assert etroite["jours_possibles_dans_la_fenetre"] == 1, "la fenetre ne PEUT pas en porter 6"
+    # Huit jours pleins : la fenetre suffit, donc la cause est ailleurs.
+    large = _diagnostic_du_split([1_794_528_000_000 + i * (jour // 3) for i in range(24)],
+                                 seuil_jours=6)
+    assert large["motif"] == "SPLIT_VIDE_APRES_PURGE"
+    assert large["jours_distincts"] >= 6
+    # Rien de lisible n'est pas << pas assez de jours >>.
+    assert _diagnostic_du_split([], seuil_jours=6)["motif"] == "AUCUN_HORODATAGE_LISIBLE"
+
+
+def test_le_diagnostic_du_split_refuse_les_horodatages_non_entiers():
+    """Un `"1794528000000"` compte pour un jour s'il passe : la mesure deviendrait fausse."""
+    from hl_observer.backtesting.copy_vault_local_lab import _diagnostic_du_split
+    d = _diagnostic_du_split(["1794528000000", None, True, -5, 0], seuil_jours=6)
+    assert d["jours_distincts"] == 0
+    assert d["motif"] == "AUCUN_HORODATAGE_LISIBLE"
+
+
+def test_une_fenetre_LARGE_mais_trouee_n_est_pas_une_fenetre_etroite():
+    """Cas qui separe les deux faits -- et que mes premiers tests confondaient.
+
+    Une injection l'a prouve : remplacer `jours_possibles_dans_la_fenetre` par le simple
+    nombre de jours OBSERVES passait mes tests, parce qu'aucun cas ne les distinguait.
+    Or la distinction est tout l'objet du diagnostic :
+
+    * fenetre de 4 h           -> elle ne PEUT pas porter 6 jours : erreur de conception ;
+    * fenetre de 8 j, 2 jours observes -> elle peut, mais le signal manque : TROU de donnees.
+
+    Les confondre renverrait a l'ambiguite que ce diagnostic existe pour lever.
+    """
+    from hl_observer.backtesting.copy_vault_local_lab import _diagnostic_du_split
+    jour = 86_400_000
+    debut = 1_794_528_000_000
+    # Du signal le premier jour et le huitieme SEULEMENT : la fenetre est large, pas pleine.
+    trouee = [debut + i * 600_000 for i in range(5)] + [debut + 7 * jour + i * 600_000
+                                                        for i in range(5)]
+    d = _diagnostic_du_split(trouee, seuil_jours=6)
+    assert d["jours_distincts"] == 2
+    assert d["jours_possibles_dans_la_fenetre"] == 8, "la fenetre POUVAIT porter 8 jours"
+    assert d["jours_possibles_dans_la_fenetre"] != d["jours_distincts"]
+    assert d["motif"] == "JOURS_UTC_INSUFFISANTS_DANS_LA_FENETRE"
+    assert d["etendue_h"] > 24 * 6

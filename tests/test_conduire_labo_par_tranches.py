@@ -362,18 +362,18 @@ def test_l_estimation_depasse_le_poids_des_seuls_fills():
 def test_les_journees_UTC_sont_comptees_depuis_la_densite_mesuree(tmp_path):
     _ruban(tmp_path, [10, 10, 10])
     densite = CD.densite_par_pas(tmp_path / "runtime" / "data" / "vault_fills_live.jsonl")
-    jours = CD.journees_utc(densite)
+    jours = CD.journees_utc(densite, pas_ms=3_600_000)
     assert len(jours) == 1 and jours[0].count("-") == 2, "trois heures de la même journée"
 
 
 def test_un_pas_VIDE_ne_cree_pas_une_journee():
     """Un seau à zéro ne doit pas gonfler le compte des journées : il n'y a rien à évaluer."""
-    assert CD.journees_utc({0: 0, 86_400_000: 5}) == ["1970-01-02"]
+    assert CD.journees_utc({0: 0, 86_400_000: 5}, pas_ms=86_400_000) == ["1970-01-02"]
 
 
 def test_des_journees_DISTINCTES_sont_toutes_comptees():
     densite = {jour * 86_400_000 + 3_600_000: 7 for jour in range(6)}
-    assert len(CD.journees_utc(densite)) == 6
+    assert len(CD.journees_utc(densite, pas_ms=3_600_000)) == 6
 
 
 def test_le_lanceur_transmet_les_journees_du_corpus_au_labo(tmp_path, monkeypatch):
@@ -417,3 +417,94 @@ def test_le_rapport_AFFICHE_que_la_preuve_est_impossible(tmp_path, capsys, monke
     assert "candidats essayés, toutes tranches : 9" in sortie
     assert "/ 6 requis" in sortie
 
+
+
+# ---- le compte des journees ne doit PAS dependre du pas de mesure (22/11/2026)
+def test_les_journees_du_corpus_ne_dependent_PAS_du_pas_de_mesure():
+    """DEFAUT MESURE : `journees_utc` comptait les journees sur les CLEFS des seaux de
+    densite, dont la largeur est `--pas-heures`. Avec `--pas-heures 384` il n'existe qu'UN
+    seau, donc le conducteur annoncait `journees UTC du corpus : 1 (2026-11-11 ->
+    2026-11-11)` pour un corpus de 16 jours continus.
+
+    Ce nombre est passe au labo (`jours_du_corpus`) pour sa porte des SIX journees : un pas
+    grossier faisait donc echouer la porte et rendre `MORE_DATA`, en accusant les donnees.
+    Trois sources disaient trois choses le meme soir : conducteur 1, labo 8, index du
+    coffre 214 journees de fills.
+
+    Une grandeur qui change avec le parametre d'echantillonnage n'est pas une mesure.
+    """
+    jour_ms = 86_400_000
+    debut = 1_794_528_000_000 - (1_794_528_000_000 % jour_ms)
+    # Seize journees consecutives, un fill par journee.
+    densite_par_jour = {debut + i * jour_ms: 10 for i in range(16)}
+    jours = CD.journees_utc(densite_par_jour, pas_ms=jour_ms)
+    assert len(jours) == 16, jours
+
+    # Les MEMES donnees, mesurees avec un pas de 384 h : un seul seau. Le compte serait 1.
+    # La fonction doit REFUSER plutot que de rendre un nombre plus petit que la verite.
+    with pytest.raises(ValueError, match="PAS_PLUS_LARGE_QU_UNE_JOURNEE"):
+        CD.journees_utc({debut: 160}, pas_ms=384 * 3_600_000)
+
+
+def test_un_pas_plus_fin_qu_une_journee_reste_accepte():
+    """Un pas horaire doit continuer a fonctionner : plusieurs seaux par journee."""
+    jour_ms = 86_400_000
+    debut = 1_794_528_000_000 - (1_794_528_000_000 % jour_ms)
+    densite_horaire = {debut + h * 3_600_000: 5 for h in range(48)}
+    jours = CD.journees_utc(densite_horaire, pas_ms=3_600_000)
+    assert len(jours) == 2, jours
+
+
+def test_un_seau_vide_ne_compte_pas_pour_une_journee():
+    jour_ms = 86_400_000
+    debut = 1_794_528_000_000 - (1_794_528_000_000 % jour_ms)
+    jours = CD.journees_utc({debut: 3, debut + jour_ms: 0}, pas_ms=jour_ms)
+    assert jours == [CD.datetime.fromtimestamp(debut / 1000, CD.UTC).strftime("%Y-%m-%d")]
+
+
+def test_le_CABLAGE_mesure_les_journees_au_pas_d_une_journee(tmp_path):
+    """Garde du cablage, pas seulement de la fonction.
+
+    Une injection a prouve le trou : remplacer la seconde lecture par un comptage sur les
+    seaux grossiers laissait la suite VERTE. Or c'est exactement le defaut corrige --
+    16 jours de corpus annonces comme 1 parce qu'un pas de 384 h ne fait qu'un seul seau.
+    """
+    jour_ms = 86_400_000
+    ruban = tmp_path / "vault_fills_live.jsonl"
+    # Les seaux sont ABSOLUS depuis l'epoch : on aligne le debut sur une borne de 384 h,
+    # sinon seize journees chevauchent deux seaux et le piege ne se reproduit pas.
+    debut = 1_794_528_000_000 // (384 * 3_600_000) * (384 * 3_600_000)
+    lignes = []
+    for i in range(16):                      # seize journees, deux fills par journee
+        for k in (0, 3_600_000):
+            lignes.append(json.dumps({"ts_ms": debut + i * jour_ms + k, "coin": "BTC"}))
+    ruban.write_text("\n".join(lignes) + "\n", encoding="utf-8")
+
+    pas_grossier = 384 * 3_600_000
+    densite_grossiere = CD.densite_par_pas(ruban, pas_ms=pas_grossier)
+    assert len(densite_grossiere) == 1, "un pas de 384 h ne fait qu'un seau : c'est le piege"
+
+    jours = CD.journees_du_corpus(ruban, densite_grossiere, pas_ms=pas_grossier)
+    assert len(jours) == 16, f"le cablage sous-compte : {jours}"
+
+    # Un pas fin ne doit pas declencher de seconde lecture et reste exact.
+    densite_fine = CD.densite_par_pas(ruban, pas_ms=3_600_000)
+    assert len(CD.journees_du_corpus(ruban, densite_fine, pas_ms=3_600_000)) == 16
+
+
+def test_l_etendue_DIT_quand_elle_est_seulement_NOMINALE():
+    """Second cas du meme defaut, mesure le 22/11/2026.
+
+    Une tranche issue d'un seau de 384 h fait 384 h PAR CONSTRUCTION, meme si les fills
+    qu'elle contient n'en couvrent que 216. La ligne `couverture : etendue=384,0 h` a fait
+    croire a un corpus de 16 jours alors qu'il en fait 9 -- et j'ai dimensionne une passe
+    sur ce chiffre avant de toucher le mur memoire. Un seau ne resout pas plus fin que
+    lui-meme ; le dire evite de prendre une borne nominale pour une mesure.
+    """
+    grossier = CD.etendue_lisible(384 * 3_600_000, pas_ms=384 * 3_600_000)
+    assert "NOMINALES" in grossier
+    assert "384" in grossier
+    # Un pas d'une journee ou moins resout l'etendue : aucune mise en garde a ajouter.
+    fin = CD.etendue_lisible(216 * 3_600_000, pas_ms=24 * 3_600_000)
+    assert fin == "216.0 h"
+    assert "NOMINALES" not in fin

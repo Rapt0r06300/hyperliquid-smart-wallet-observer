@@ -280,6 +280,11 @@ REM MODELE IA V13 (gratuit, local): chemins partages serveur <-> entraineur. Le 
 REM le modele si present et affiche le panneau "Modele IA". Le modele reste en SHADOW
 REM (observation, ne decide pas) tant que HYPERSMART_V13_MODEL_AUTHORITATIVE=0. Quand le
 REM panneau montre qu'il bat la baseline (Brier), passe-le a 1 pour qu'il FILTRE les trades.
+REM PERIME 21/11/2026 : ENTRAINER_IA_AUTO.cmd n'existe NI sur le disque NI dans
+REM l'arbre HEAD (verifie par git ls-tree). La note ci-dessous enverrait donc
+REM chercher un lanceur inexistant. Conservee telle quelle -- le contrat du depot
+REM interdit de supprimer -- mais a ne pas suivre. Garde posee le meme jour :
+REM tests/test_lanceurs_cibles_existantes.py refuse tout CALL/START sans cible.
 REM Entrainement: lance ENTRAINER_IA_AUTO.cmd a cote (apprend des trades clotures).
 set "HYPERSMART_V13_MODEL_PATH=%~dp0runtime\models\trade_model_v13.json"
 set "HYPERSMART_V13_MODEL_REPORT=%~dp0runtime\models\trade_model_v13.json.report.json"

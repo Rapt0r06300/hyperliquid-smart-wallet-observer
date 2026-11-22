@@ -112,3 +112,10 @@ def test_decision_scale_si_robuste():
 
 def test_decision_shadow_si_trop_peu_de_trades():
     assert OP.decision([_t(i, 5.0) for i in range(8)])["decision"] == "SHADOW"
+
+
+def test_le_contexte_garde_le_nom_natif_du_coin():
+    """Défaut réel du 22/11 : `kPEPE` était enregistré `KPEPE`."""
+    charge = [{"universe": [{"name": "kPEPE"}, {"name": "BTC"}]},
+              [{"oraclePx": "0.01", "markPx": "0.01"}, {"oraclePx": "100.0", "markPx": "100.0"}]]
+    assert set(CAC.parser_ctx_complet(charge)) == {"kPEPE", "BTC"}

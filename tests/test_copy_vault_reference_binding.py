@@ -426,3 +426,58 @@ def test_un_lien_pointant_HORS_du_coffre_est_INVERIFIABLE(tmp_path):
     tape.write_text("\n".join(lignes) + "\n", encoding="utf-8")
     _, audit = load_observed_books(tmp_path, coins={"BTC"})
     assert audit["clean_epoch_receipt"]["reference_binding_counts"].get(B.INVERIFIABLE) == 1
+
+
+def _liaison_vers(racine, relpath: str, ligne: bytes, offset: int = 0) -> dict:
+    from hl_observer.collection import copy_vault_reference_binding as B
+    return {"schema_version": B.SCHEMA_LIAISON, "line_sha256": B.empreinte(ligne),
+            "source_relpath": relpath, "source_offset": offset}
+
+
+def test_une_reference_dont_le_ruban_a_ete_archive_reste_verifiable(tmp_path) -> None:
+    """Défaut réel du 22/11 : 5 241 références sur 5 241 au coffre étaient invérifiables, leur ruban
+    ayant été déplacé en archive ; une nouvelle session les aurait déclarées FAUSSES."""
+    from hl_observer.collection import copy_vault_reference_binding as B
+    ligne = b'{"coin":"BTC","bid":1.0,"ask":1.1}\n'
+    archive = tmp_path / "runtime" / "archive" / "session_1"
+    archive.mkdir(parents=True)
+    (archive / "copy_vault_l2_lane.jsonl").write_bytes(b"x" * 10 + ligne)
+    liaison = _liaison_vers(tmp_path, "runtime/data/copy_vault_l2_lane.jsonl", ligne, offset=10)
+    lire = B.LecteurBorne(tmp_path.resolve())
+    try:
+        assert B.verifier_liaison(liaison, lire=lire) == (B.VERIFIEE, "OK_ARCHIVE")        # ruban archivé
+        donnees = tmp_path / "runtime" / "data"
+        donnees.mkdir(parents=True)
+        (donnees / "copy_vault_l2_lane.jsonl").write_bytes(b"y" * 10 + b'{"autre":"session"}\n')
+        lire2 = B.LecteurBorne(tmp_path.resolve())
+        assert B.verifier_liaison(liaison, lire=lire2) == (B.VERIFIEE, "OK_ARCHIVE")       # chemin réécrit : pas « faux »
+        lire2.fermer()
+    finally:
+        lire.fermer()
+
+
+def test_apres_rotation_une_ligne_introuvable_est_inverifiable_pas_fausse(tmp_path) -> None:
+    from hl_observer.collection import copy_vault_reference_binding as B
+    ligne = b'{"coin":"BTC"}\n'
+    (tmp_path / "runtime" / "archive" / "s1").mkdir(parents=True)
+    (tmp_path / "runtime" / "archive" / "s1" / "copy_vault_l2_lane.jsonl").write_bytes(b'{"coin":"ETH"}\n')
+    (tmp_path / "runtime" / "data").mkdir(parents=True)
+    (tmp_path / "runtime" / "data" / "copy_vault_l2_lane.jsonl").write_bytes(b'{"coin":"SOL"}\n')
+    lire = B.LecteurBorne(tmp_path.resolve())
+    try:
+        assert B.verifier_liaison(_liaison_vers(tmp_path, "runtime/data/copy_vault_l2_lane.jsonl", ligne), lire=lire) \
+            == (B.INVERIFIABLE, "LINE_NOT_FOUND_AFTER_ROTATION")
+    finally:
+        lire.fermer()
+
+
+def test_sans_archive_une_ligne_differente_reste_une_preuve_fausse(tmp_path) -> None:
+    from hl_observer.collection import copy_vault_reference_binding as B
+    (tmp_path / "runtime" / "data").mkdir(parents=True)
+    (tmp_path / "runtime" / "data" / "copy_vault_l2_lane.jsonl").write_bytes(b'{"coin":"SOL"}\n')
+    lire = B.LecteurBorne(tmp_path.resolve())
+    try:
+        assert B.verifier_liaison(_liaison_vers(tmp_path, "runtime/data/copy_vault_l2_lane.jsonl", b'{"coin":"BTC"}\n'),
+                                  lire=lire) == (B.DIVERGENTE, "LINE_SHA256_MISMATCH")
+    finally:
+        lire.fermer()

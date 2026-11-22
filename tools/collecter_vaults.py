@@ -37,8 +37,10 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from hl_observer.collection import collecte_fiable as CF  # noqa: E402
+from hl_observer.ops import budget_rest as _BUDGET  # noqa: E402  (n° 22 : poids REST réel, sans bloquer)
 from hl_observer.collection import vault_portfolio_history as VPH  # noqa: E402
 from hl_observer.collection.portefeuille_compte import construire_portefeuille  # noqa: E402
+from hl_observer.instrument_identity import preserve_native_instrument_symbol  # noqa: E402
 
 URL_INFO = "https://api.hyperliquid.xyz/info"
 URL_VAULTS = "https://stats-data.hyperliquid.xyz/Mainnet/vaults"
@@ -67,6 +69,8 @@ CONFIG = Path("runtime") / "data" / "vaults_suivis.json"
 ETAT = Path("runtime") / "data" / "vaults_etat.json"           # NAV pic + dernière expo (drawdown/delta)
 #: vaults de MARKET-MAKING à ne JAMAIS suivre (copier un MM taker = perte structurelle).
 VAULTS_EXCLUS = frozenset({"0xdfc24b077bc1425ad1dea75bcb6f8158e10df303"})   # HLP (protocol vault)
+#: Relus pour leur HISTORIQUE de portefeuille seulement (jamais suivis ni copiés).
+VAULTS_HISTORIQUE_SEULEMENT = VAULTS_EXCLUS
 POLL_S_DEFAUT = 300.0    # les vaults tiennent des jours : 5 min suffit largement
 MIN_TVL_PUBLIC_USD = 100_000.0
 MIN_AGE_PUBLIC_DAYS = 45.0
@@ -81,7 +85,9 @@ def _post_info(charge: dict[str, Any], *, timeout_s: float = 12.0) -> Any:
         CF.reserver_poids(CF.POIDS_REQUETE_INFO)     # budget de débit PARTAGÉ entre collecteurs (fail-open)
         req = urllib.request.Request(URL_INFO, data=corps, headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=timeout_s) as rep:      # noqa: S310 (URL constante)
-            return json.loads(rep.read().decode("utf-8"))
+            rendu = json.loads(rep.read().decode("utf-8"))
+        _BUDGET.compter(str(charge.get("type") or "?"), len(rendu) if isinstance(rendu, list) else 0)
+        return rendu
 
     return CF.reprendre_apres_refus_de_debit(lire)   # un « 429 » ne fait plus perdre le relevé
 
@@ -106,6 +112,34 @@ def _f(x: Any) -> float | None:
         return None
 
 
+#: Combien de rejets on conserve au plus. Borne VOLONTAIRE : l'univers officiel compte
+#: des milliers d'entrees, et la trace sert a repondre << qui a-t-on ecarte, et pourquoi >>,
+#: pas a dupliquer la reponse de l'API.
+MAX_REJETS_TRACES = 2000
+
+
+def _noter_rejet(rejets, row, summary, motif, **details):
+    """Enregistre un vault ECARTE avec son motif. Sans trace, biais du survivant.
+
+    Ne leve jamais : une trace qui ferait tomber la collecte serait pire que son absence.
+    """
+    if rejets is None or len(rejets) >= MAX_REJETS_TRACES:
+        return
+    resume = summary if isinstance(summary, dict) else {}
+    adresse = str(resume.get("vaultAddress") or (row or {}).get("vaultAddress") or "").strip().lower()
+    entree = {
+        "address": adresse,
+        "name": str(resume.get("name") or ""),
+        "motif": str(motif),
+        "is_closed": resume.get("isClosed"),
+        "observation_only": True,
+    }
+    for clef, valeur in details.items():
+        if valeur is not None:
+            entree[clef] = valeur
+    rejets.append(entree)
+
+
 def parser_univers_public(
     payload: Any,
     *,
@@ -113,6 +147,7 @@ def parser_univers_public(
     min_tvl_usd: float = MIN_TVL_PUBLIC_USD,
     min_age_days: float = MIN_AGE_PUBLIC_DAYS,
     max_vaults: int = MAX_VAULTS_PUBLICS,
+    rejets: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Normalise l'univers officiel en adresses complètes, ouvertes et assez matures.
 
@@ -128,20 +163,33 @@ def parser_univers_public(
         if not isinstance(row, dict):
             continue
         summary = row.get("summary")
-        if not isinstance(summary, dict) or summary.get("isClosed") is not False:
+        if not isinstance(summary, dict):
+            _noter_rejet(rejets, row, None, "resume_absent_ou_invalide")
+            continue
+        if summary.get("isClosed") is not False:
+            # ECARTE, mais plus EFFACE : un vault ferme qui disparait de la trace
+            # fabrique un biais du survivant dans tout ce qu'on mesurera ensuite.
+            _noter_rejet(rejets, row, summary, "vault_ferme")
             continue
         relationship = summary.get("relationship") or row.get("relationship") or {}
         if not isinstance(relationship, dict) or str(relationship.get("type") or "").lower() != "normal":
+            _noter_rejet(rejets, row, summary, "relation_non_normale",
+                         relation=str((relationship or {}).get("type") or ""))
             continue
         address = str(summary.get("vaultAddress") or "").strip().lower()
         if not _ADRESSE_COMPLETE.fullmatch(address) or address in VAULTS_EXCLUS:
+            _noter_rejet(rejets, row, summary, "adresse_invalide_ou_exclue")
             continue
         tvl = _f(summary.get("tvl"))
         created_ms = _f(summary.get("createTimeMillis"))
         if tvl is None or created_ms is None or tvl < float(min_tvl_usd) or created_ms <= 0:
+            _noter_rejet(rejets, row, summary, "tvl_insuffisant_ou_creation_invalide",
+                         tvl_usd=tvl, created_at_ms=created_ms)
             continue
         age_days = max(0.0, (current_ms - created_ms) / 86_400_000.0)
         if age_days < float(min_age_days):
+            _noter_rejet(rejets, row, summary, "trop_jeune",
+                         tvl_usd=tvl, created_at_ms=created_ms, age_j=round(age_days, 2))
             continue
         apr = _f(row.get("apr"))
         candidate = {
@@ -150,6 +198,9 @@ def parser_univers_public(
             "tvl_usd": round(tvl, 2),
             "apr_pct": round(apr * 100.0, 4) if apr is not None else None,
             "age_j": round(age_days, 2),
+            # `age_j` depend de l heure du collecteur, donc NON reproductible en rejeu.
+            # Le fait brut l est : on garde les deux.
+            "created_at_ms": int(created_ms),
             "observation_only": True,
         }
         previous = uniques.get(address)
@@ -241,22 +292,52 @@ def parser_clearinghouse(payload: Any) -> dict[str, Any] | None:
         return None
     positions: list[dict] = []
     brute = nette = upnl = 0.0
+    # 21/11/2026 -- QUATRE REFUS MANQUES, mesures, tous favorables. La version honnete
+    # existait deja dans le depot : `portefeuille_compte.construire_portefeuille` rend
+    # `None` quand le NAV n est pas exploitable, la ou celle-ci rendait `0.0`.
+    valeurs_illisibles = 0
+    upnl_illisibles = 0
     for ap in payload.get("assetPositions") or []:
         pos = (ap or {}).get("position") or {}
         szi = _f(pos.get("szi"))
         pv = _f(pos.get("positionValue"))
-        u = _f(pos.get("unrealizedPnl")) or 0.0
+        u = _f(pos.get("unrealizedPnl"))
         if szi is None:
             continue
         lev = (pos.get("leverage") or {}).get("value") if isinstance(pos.get("leverage"), dict) else None
+        if pv is None:
+            # Une valeur illisible comptee 0 SOUS-ESTIME l exposition, donc le levier.
+            valeurs_illisibles += 1
+        if u is None:
+            # Un uPnl illisible somme a 0 fait passer un inconnu pour un resultat neutre.
+            upnl_illisibles += 1
         val = pv if pv is not None else 0.0
         signe = 1.0 if szi >= 0 else -1.0
-        brute += abs(val); nette += signe * val; upnl += u
-        positions.append({"coin": str(pos.get("coin") or "").upper(), "szi": szi,
+        brute += abs(val); nette += signe * val; upnl += u if u is not None else 0.0
+        # IDENTITÉ NATIVE DU COIN (22/11/2026). Cette ligne passait le nom en MAJUSCULES : `kPEPE`
+        # devenait `KPEPE`, `xyz:XYZ100` devenait `XYZ:XYZ100` — des marchés qui n'existent pas. Mesuré
+        # sur le ruban du jour : 11 positions `KPEPE`, 0 `kPEPE`. Toute jointure en aval (prix,
+        # carnets, labo) manquait donc ces positions en silence, et la liste des coins à carnets ne
+        # pouvait pas les reconnaître. L'API est sensible à la casse : on garde le nom tel quel.
+        positions.append({"coin": preserve_native_instrument_symbol(pos.get("coin")) or "", "szi": szi,
                           "entryPx": _f(pos.get("entryPx")), "levier": _f(lev), "uPnl": u})
+    # Un compte a NAV nul ou negatif AVEC de l exposition a un levier infini : l etat le
+    # plus dangereux qui existe. Le rapporter `0.0` -- << aucun levier >> -- etait le pire
+    # mensonge possible. Et un levier calcule sur une exposition incomplete est faux :
+    # dans les deux cas on REFUSE de repondre plutot que de rassurer.
+    levier = None
+    if nav > 0 and valeurs_illisibles == 0:
+        levier = round(brute / nav, 3)
     return {"nav_usd": round(nav, 2), "expo_brute_usd": round(brute, 2),
-            "expo_nette_usd": round(nette, 2), "levier": round(brute / nav, 3) if nav > 0 else 0.0,
-            "pnl_latent_usd": round(upnl, 2), "n_positions": len(positions), "positions": positions}
+            "expo_nette_usd": round(nette, 2), "levier": levier,
+            "levier_refus": None if levier is not None else (
+                "nav_non_exploitable" if nav <= 0 else "exposition_incomplete"),
+            "pnl_latent_usd": round(upnl, 2) if upnl_illisibles == 0 else None,
+            "pnl_latent_partiel_usd": round(upnl, 2),
+            "positions_valeur_illisible": valeurs_illisibles,
+            "positions_upnl_illisible": upnl_illisibles,
+            "expo_complete": valeurs_illisibles == 0,
+            "n_positions": len(positions), "positions": positions}
 
 
 def parser_vault_details(payload: Any) -> dict[str, Any]:
@@ -443,7 +524,10 @@ def univers_historique(payload: Any, *, min_tvl_usd: float = BALAYAGE_MIN_TVL_US
             tvl = _f(summary.get("tvl"))
             if tvl is not None and tvl >= float(min_tvl_usd):
                 retenus.setdefault(adresse, None)
-            continue
+                continue
+            # 22/11/2026 — vault OUVERT mais VIDÉ (< seuil) : il était écarté d'office. Or un vault qui
+            # a perdu 80 000 USD et qu'on a laissé ouvert avec 5 USD est exactement le cas qu'un biais
+            # de survie fait disparaître. Il est donc jugé comme un fermé : sur son PnL cumulé.
         cumul: list[float] = []
         for fenetre in row.get("pnls") or ():
             if isinstance(fenetre, (list, tuple)) and len(fenetre) > 1 and fenetre[0] == "allTime":
@@ -475,7 +559,10 @@ def balayer_historique(root: Path, *, max_vaults: int = BALAYAGE_PAR_PASSE, now:
         except (urllib.error.URLError, OSError, ValueError, TimeoutError):
             nouvelles = []
         if nouvelles:                       # une liste vide ou illisible ne remplace jamais l'ancienne
-            adresses, liste_ms = nouvelles, int(t * 1000)
+            # Les vaults du PROTOCOLE (HLP) restent exclus de la COPIE, mais leur courbe valeur / PnL
+            # est relue ici : c'est le seul dépôt mesuré positif (journal GOAL2 § 10), et sa preuve
+            # ne peut venir que d'une courbe collectée puis certifiée, pas d'une lecture à la main.
+            adresses, liste_ms = sorted(set(nouvelles) | set(VAULTS_HISTORIQUE_SEULEMENT)), int(t * 1000)
     if not isinstance(adresses, list) or not adresses:
         return {"univers": 0, "lus": 0, "lignes": 0, "echecs": 0, "tour": 0}
     curseur = int(etat.get("curseur") or 0) % len(adresses) if isinstance(etat, dict) else 0

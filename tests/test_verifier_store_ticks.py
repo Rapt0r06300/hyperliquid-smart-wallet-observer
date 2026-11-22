@@ -149,3 +149,39 @@ def test_deux_verifications_croisees_la_seconde_renonce_proprement(tmp_path, mon
         autre.close()
     apres = V.verifier_store(tmp_path, budget_s=1e9)                 # verrou relâché : le passage reprend
     assert apres["present"] and apres["complet"] and apres["anomalies"] == premier["anomalies"] == 0
+
+
+def test_le_budget_borne_aussi_les_dossiers_sans_rien_de_nouveau(tmp_path):
+    """Défaut réel du 22/11/2026 : à l'arrêt des collecteurs, l'étape 3 du certificateur a duré
+    3 min 29 s pour un budget de 45 s. Le budget n'était regardé qu'en tombant sur un shard NON
+    vérifié ; un dossier actif (manifeste réécrit à chaque rotation, rien de neuf à vérifier)
+    était relisté sans jamais consulter l'horloge."""
+    for i in range(6):
+        _shard(tmp_path, "hyperliquid_mainnet_readonly", "bbo", f"C{i}", f"ticks.1-2.{i}.jsonl.gz")
+    assert V.verifier_store(tmp_path, budget_s=1e9)["complet"]
+    for i in range(6):                                              # six dossiers « touchés », aucun nouveau shard
+        dossier = tmp_path / V.STORE / "hyperliquid_mainnet_readonly" / "bbo" / f"C{i}"
+        (dossier / "ticks.manifest.json").write_text(json.dumps({"immutable_shards": [], "rotation": i}), encoding="utf-8")
+    tic = iter(range(0, 10_000, 10))
+    borne = V.verifier_store(tmp_path, budget_s=25.0, horloge=lambda: next(tic))
+    assert borne["dossiers_restants"] > 0 and not borne["complet"]  # le passage s'arrête, il ne déborde pas
+    assert borne["shards_verifies"] == 6 and borne["anomalies"] == 0   # rien de déjà acquis n'est perdu
+    assert V.verifier_store(tmp_path, budget_s=1e9)["complet"]      # et le passage suivant termine
+
+
+def test_les_shards_d_un_dossier_se_lisent_par_l_index_pas_par_un_balayage(tmp_path):
+    """La requête `LIKE 'dossier/shards/%'` relisait TOUTE la table à chaque dossier : 166 ms sur
+    581 578 lignes, contre 0,03 ms par plage — mesuré sur la vraie base."""
+    _shard(tmp_path, "s", "bbo", "C1", "ticks.1-2.a.jsonl.gz")
+    _shard(tmp_path, "s", "bbo", "C1", "ticks.3-4.b.jsonl.gz")
+    _shard(tmp_path, "s", "bbo", "C10", "ticks.1-2.c.jsonl.gz")     # même début de nom : ne doit pas déborder
+    assert V.verifier_store(tmp_path, budget_s=1e9)["shards_verifies"] == 3
+    cnx = V._connexion(tmp_path / V.ETAT)
+    try:
+        relatif = (tmp_path / V.STORE / "s" / "bbo" / "C1").relative_to(tmp_path).as_posix()
+        connus = V.shards_connus(cnx, relatif)
+        assert sorted(Path(c).name for c in connus) == ["ticks.1-2.a.jsonl.gz", "ticks.3-4.b.jsonl.gz"]
+        plan = " ".join(str(l[-1]) for l in cnx.execute("EXPLAIN QUERY PLAN " + V.REQUETE_SHARDS_DU_DOSSIER, ("a", "b")))
+        assert "SEARCH" in plan and "SCAN" not in plan
+    finally:
+        cnx.close()

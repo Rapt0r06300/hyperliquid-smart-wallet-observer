@@ -60,6 +60,10 @@ def nouvellement_accepte(nom_fichier: str, norm: dict[str, Any]) -> bool:
         return norm.get("type_ligne") == "QUOTE"
     if base == "vault_fills_live.jsonl":
         return norm.get("observation_field") == "received_at_ms"
+    if base == "copy_vault_l2_tape.jsonl":
+        # seuls les carnets LIÉS à un signal étaient confondus avec leur observation ; une
+        # observation nue est déjà au coffre (elle, ou le même carnet vu par la lane)
+        return bool(norm.get("checkpoint_id") or norm.get("checkpoint_stage"))
     return True
 
 
@@ -79,7 +83,17 @@ VERSIONS_CERTIFICATEUR: dict[str, int] = {
     "copy_vault_bbo_lane.jsonl": 2,
     "vault_ledger.jsonl": 2,        # retraits à montant inconnu (rejetés « montant_invalide » en v1)
     "explorer_tx_tape.jsonl": 2,    # flux ignoré jusqu'ici (aucune règle en v1)
+    "copy_vault_l2_tape.jsonl": 2,  # carnets liés à un signal (jetés « doublon » de leur observation en v1)
 }
+
+#: Fichiers dont la v2 corrige l'IDENTITÉ (ce qui compte comme doublon), pas l'acceptation d'une
+#: ligne. Leur rattrapage ne peut pas se fier au lot d'origine : il précharge TOUTES les identités
+#: déjà déposées pour ce ruban, puis ne dépose que les lignes que l'ancienne identité confondait.
+RATTRAPAGE_PAR_IDENTITE: frozenset[str] = frozenset({"copy_vault_l2_tape.jsonl"})
+
+
+def rattrapage_par_identite(nom_fichier: str) -> bool:
+    return _nom_de_base(nom_fichier) in RATTRAPAGE_PAR_IDENTITE
 
 
 def version_certificateur(nom_fichier: str) -> int:

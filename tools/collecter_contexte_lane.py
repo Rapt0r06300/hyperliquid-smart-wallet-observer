@@ -53,6 +53,15 @@ def _nb(v):
         return None
 
 
+def _horodatage(valeur: Any) -> int | None:
+    """Un horodatage en millisecondes, ENTIER, ou `None`. Jamais un flottant :
+    une date qui se compare a 0,5 ms pres invite aux faux ecarts de causalite."""
+    nombre = _nb(valeur)
+    if nombre is None or nombre <= 0:
+        return None
+    return int(nombre)
+
+
 def parser_positions(data: Any, *, user: str, recv_ms: int) -> list[dict[str, Any]]:
     """Positions ouvertes depuis un message clearinghouseState."""
     etat = etat_du_compte(data)
@@ -71,7 +80,15 @@ def parser_positions(data: Any, *, user: str, recv_ms: int) -> list[dict[str, An
             "schema_version": "hypersmart.copy_vault_positions.v1", "vault": user,
             "coin": str(pos.get("coin")), "szi": szi, "entry_px": _nb(pos.get("entryPx")),
             "position_value": _nb(pos.get("positionValue")), "unrealized_pnl": _nb(pos.get("unrealizedPnl")),
-            "received_at_ms": int(recv_ms), "source": "CLEARINGHOUSE_WS", "data_origin": "REAL_OBSERVED",
+            "received_at_ms": int(recv_ms),
+            # 21/11/2026 : seul l instant de RECEPTION etait conserve. L etat porte son
+            # propre horodatage (`time`), et `portefeuille_compte.construire_portefeuille`
+            # le garde deja sous ce nom : sans lui, impossible de dire QUAND la bourse a
+            # calcule cette position -- seulement quand nous l avons vue. `None` si la
+            # source ne le fournit pas : jamais l instant de reception a sa place, qui
+            # ferait passer notre latence pour un fait de marche.
+            "exchange_ts_ms": _horodatage(etat.get("time")),
+            "source": "CLEARINGHOUSE_WS", "data_origin": "REAL_OBSERVED",
         })
     return out
 
@@ -83,9 +100,18 @@ def parser_twap_fills(data: Any, *, user: str, recv_ms: int) -> list[dict[str, A
     user = str(user or "").strip().lower()
     fills = data.get("fills") or data.get("twapSliceFills") or []
     out: list[dict[str, Any]] = []
-    for f in fills if isinstance(fills, list) else []:
-        if isinstance(f, dict) and isinstance(f.get("fill"), dict):
-            f = f["fill"]
+    for enveloppe in fills if isinstance(fills, list) else []:
+        f = enveloppe
+        twap_id = None
+        if isinstance(enveloppe, dict) and isinstance(enveloppe.get("fill"), dict):
+            # 21/11/2026 : le `twapId` de l enveloppe etait JETE en deballant le fill.
+            # On savait donc qu un fill etait une tranche TWAP, mais plus DE QUEL TWAP --
+            # or c est ce qui permet de ne pas compter vingt tranches comme vingt
+            # signaux independants. Le certificateur conserve le champ (verifie).
+            twap_id = enveloppe.get("twapId")
+            if twap_id is None:
+                twap_id = enveloppe.get("twap_id")
+            f = enveloppe["fill"]
         if not isinstance(f, dict):
             continue
         coin = f.get("coin")
@@ -102,6 +128,9 @@ def parser_twap_fills(data: Any, *, user: str, recv_ms: int) -> list[dict[str, A
             "ts_ms": int(ts), "observed_at_ms": int(recv_ms), "isSnapshot": False, "is_snapshot": False,
             "hash": f.get("hash"), "tid": f.get("tid"), "oid": f.get("oid"),
             "source": "LIVE_TWAP", "source_id": "hyperliquid_twap_slice_fills",
+            # `None` = l enveloppe ne portait pas l identifiant ; jamais un 0 ni un
+            # faux groupe, qui fusionnerait des tranches de TWAP differents.
+            "twap_id": twap_id,
         })
     return out
 

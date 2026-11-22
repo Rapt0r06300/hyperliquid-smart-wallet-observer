@@ -93,8 +93,12 @@ def test_un_fichier_de_preuve_disparu_ne_donne_jamais_un_recu_valide(tmp_path):
     (tmp_path / "src" / "code.py").unlink()
     R.revalider(tmp_path, rejouer=lambda *a: 0, now_utc=NOW)
     derniers = load_receipts(registre)
-    assert derniers["T-1"]["verdict"] == "REVALIDATION_FAILED"
-    assert derniers["T-1"]["revalidation_note"] == "evidence file missing"
+    # 22/11/2026 : l'intention de ce test est « JAMAIS une preuve », et elle est intacte. Son
+    # etiquette, elle, a change : un rejeu qui PASSE avec un fichier absent n'est plus declare
+    # « rejeu rate ». L'assertion qui compte vraiment est la premiere.
+    assert derniers["T-1"]["verdict"] != "VERIFIED_DONE"
+    assert derniers["T-1"]["verdict"] == R.VERDICT_PREUVE_ABSENTE
+    assert "src/code.py" in derniers["T-1"]["revalidation_note"]
 
 
 # ───────── 18/11/2026 : UN REJEU IMPOSSIBLE N'EST PAS UN REJEU RATÉ ─────────
@@ -324,5 +328,150 @@ def test_la_reprise_ne_fabrique_jamais_une_preuve_sans_fichier(tmp_path):
     (tmp_path / "src" / "code.py").unlink()
     R.revalider(tmp_path, rejouer=lambda *a: 0, now_utc=NOW, reprendre=True)
     derniers = load_receipts(registre)
-    assert derniers["T-1"]["verdict"] == "REVALIDATION_FAILED"
-    assert derniers["T-1"]["revalidation_note"] == "evidence file missing"
+    # Ce qui ne doit JAMAIS arriver : une preuve fabriquee sans son fichier.
+    assert derniers["T-1"]["verdict"] != "VERIFIED_DONE"
+    assert derniers["T-1"]["verdict"] == R.VERDICT_PREUVE_ABSENTE
+
+
+# ───────── 22/11/2026 : « PREUVE ABSENTE » N'EST PAS « PREUVE FAUSSE » ─────────
+#
+# Les neuf reçus ASF-113..120 et ASF-RIG-019 étaient rouges depuis le 18/11 avec `exit_code: 0`.
+# Mesure du 22/11 : leurs tests passent (32 verts en 3,6 s) et `_rejouer` rend bien 0. Un SEUL
+# fichier épinglé manque, le même pour les neuf : `POUSSER-GITHUB-FORCE.cmd`, supprimé par le
+# commit b44aac91 du 18/11 intitulé « lanceur: POUSSER-GITHUB, sans le FORCE qu'il ne fait pas ».
+# Sa suppression était donc une correction de véracité : le recréer serait une régression.
+#
+# L'outil écrivait pourtant `REVALIDATION_FAILED` — « on a rejoué, c'est faux » — pour un rejeu
+# RÉUSSI dont seule une empreinte est incalculable. C'est la confusion que ce dépôt combat
+# partout ailleurs : une ABSENCE n'est pas une NÉGATION. On distingue donc les deux états, sans
+# qu'aucun des deux ne compte comme une preuve.
+
+
+def test_un_rejeu_REUSSI_avec_un_fichier_absent_n_est_PAS_un_echec_de_rejeu(tmp_path):
+    registre = _depot(tmp_path)
+    (tmp_path / "src" / "code.py").unlink()
+    R.revalider(tmp_path, rejouer=lambda *a: 0, now_utc=NOW)
+    derniers = load_receipts(registre)
+    assert derniers["T-1"]["verdict"] == R.VERDICT_PREUVE_ABSENTE
+    assert derniers["T-1"]["verdict"] != "REVALIDATION_FAILED"
+    # Le rejeu a eu lieu et il a réussi : mentir sur ce point rendrait l'état illisible.
+    assert derniers["T-1"]["exit_code"] == 0
+
+
+def test_la_preuve_absente_NOMME_le_fichier_pour_qu_on_puisse_agir(tmp_path):
+    registre = _depot(tmp_path)
+    (tmp_path / "src" / "code.py").unlink()
+    R.revalider(tmp_path, rejouer=lambda *a: 0, now_utc=NOW)
+    recu = load_receipts(registre)["T-1"]
+    assert recu["fichiers_de_preuve_absents"] == ["src/code.py"]
+    assert "src/code.py" in recu["revalidation_note"]
+
+
+def test_une_preuve_absente_ne_compte_JAMAIS_comme_une_preuve(tmp_path):
+    registre = _depot(tmp_path)
+    (tmp_path / "src" / "code.py").unlink()
+    R.revalider(tmp_path, rejouer=lambda *a: 0, now_utc=NOW)
+    recu = load_receipts(registre)["T-1"]
+    # La garde qui compte : le décompte de la feuille de route ne doit pas bouger d'un pouce.
+    assert recu["verdict"] != "VERIFIED_DONE"
+    assert not receipt_is_verified(recu, recu.get("sha"), tmp_path)
+
+
+def test_un_VRAI_echec_de_tests_reste_distinct_d_une_preuve_absente(tmp_path):
+    registre = _depot(tmp_path)
+    (tmp_path / "src" / "code.py").unlink()
+    R.revalider(tmp_path, rejouer=lambda *a: 1, now_utc=NOW)
+    recu = load_receipts(registre)["T-1"]
+    # Tests rouges : le verdict négatif garde tout son sens, l'absence ne l'efface pas.
+    assert recu["verdict"] == "REVALIDATION_FAILED"
+    assert recu["revalidation_note"] == "tests re-run failed"
+
+
+def test_le_bilan_compte_les_preuves_absentes_a_part(tmp_path):
+    _depot(tmp_path)
+    (tmp_path / "src" / "code.py").unlink()
+    bilan = R.revalider(tmp_path, rejouer=lambda *a: 0, now_utc=NOW)
+    assert bilan["preuves_absentes"] >= 1
+    assert bilan["echecs"] == 0          # aucun rejeu n'a échoué : il ne faut pas l'écrire
+
+
+def test_une_preuve_absente_est_REPRISE_si_le_fichier_revient(tmp_path):
+    registre = _depot(tmp_path)
+    cible = tmp_path / "src" / "code.py"
+    garde = cible.read_bytes()
+    cible.unlink()
+    R.revalider(tmp_path, rejouer=lambda *a: 0, now_utc=NOW)
+    assert load_receipts(registre)["T-1"]["verdict"] == R.VERDICT_PREUVE_ABSENTE
+    # Le fichier revient : une reprise doit pouvoir rendre sa preuve au reçu.
+    cible.write_bytes(garde)
+    R.revalider(tmp_path, rejouer=lambda *a: 0, now_utc=NOW, reprendre=True)
+    assert load_receipts(registre)["T-1"]["verdict"] == "VERIFIED_DONE"
+
+
+def _depot_minimal(tmp_path: Path) -> Path:
+    """Un dépôt où SEUL le compteur `preuves_absentes` peut être non nul.
+
+    Le `_depot` partagé contient un reçu sans test rejouable (T-4) : il reste périmé, donc
+    `encore_perimes` vaut 1 et `non_resolu` est vrai QUOI QU'IL ARRIVE. Impossible d'y isoler
+    la contribution de `preuves_absentes` — c'est ce qui a rendu la garde aveugle trois fois.
+    """
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "src").mkdir()
+    for nom in ("tests/test_a.py", "src/code.py"):
+        (tmp_path / nom).write_text(f"# {nom}" + chr(10), encoding="utf-8")
+    registre = tmp_path / R.RECEIPTS
+    registre.parent.mkdir(parents=True)
+    registre.write_text(
+        json.dumps(_recu(tmp_path, "T-1", ["src/code.py", "tests/test_a.py"],
+                         "py -3 -m pytest -q tests/test_a.py")) + chr(10),
+        encoding="utf-8")
+    (tmp_path / "src" / "code.py").write_text("# code modifié" + chr(10), encoding="utf-8")
+    return registre
+
+
+def test_une_preuve_absente_ne_fait_JAMAIS_sortir_vert(tmp_path, monkeypatch):
+    """La garde qui empêche la correction du 22/11 de masquer les reçus qu'elle renomme.
+
+    ⚠️ TROIS versions aveugles avant celle-ci (22/11/2026), trois raisons différentes, et le
+    même symptôme : l'injection qui retire `preuves_absentes` du code de sortie restait VERTE.
+
+    1. `_rejouer` tournait pour de vrai : dans un dépôt bidon pytest ne collecte rien et rend 5,
+       donc `echecs` était non nul et la sortie valait 3 de toute façon.
+    2. `monkeypatch.setattr(R, "_rejouer", ...)` n'y change rien : `revalider` reçoit
+       `rejouer=_rejouer` comme valeur par défaut d'un paramètre, liée à la définition. Il faut
+       remplacer la valeur dans `__kwdefaults__`, seul endroit que `main()` lira.
+    3. Le `_depot` partagé laissait `encore_perimes` à 1 (un reçu sans test rejouable), ce qui
+       suffisait à faire sortir 3. D'où `_depot_minimal`.
+
+    La leçon, chère : une garde ne vaut que si l'on a vu ROUGIR le défaut qu'elle vise.
+    """
+    _depot_minimal(tmp_path)
+    (tmp_path / "src" / "code.py").unlink()
+    monkeypatch.setitem(R.revalider.__kwdefaults__, "rejouer", lambda *a, **k: 0)
+    code = R.main(["--root", str(tmp_path), "--reprendre"])
+    assert code == 3
+
+
+def test_le_bilan_ne_melange_pas_echec_et_preuve_absente(tmp_path):
+    _depot(tmp_path)
+    (tmp_path / "src" / "code.py").unlink()
+    bilan = R.revalider(tmp_path, rejouer=lambda *a: 0, now_utc=NOW)
+    assert bilan["encore_en_echec"] == 0
+    assert bilan["encore_preuves_absentes"] >= 1
+
+
+def test_le_listage_ne_dit_PAS_en_echec_pour_une_preuve_absente(tmp_path, capsys):
+    """`--lister` séparait encore les deux états, contrairement au bilan de `revalider()`.
+
+    Afficher « en_echec: 9 » pour neuf reçus dont le rejeu PASSE était exactement le mensonge
+    que la distinction du 22/11 visait à supprimer — et il a survécu une heure de plus que la
+    correction, parce que j'avais changé `revalider()` sans relire la branche de listage.
+    """
+    _depot_minimal(tmp_path)
+    (tmp_path / "src" / "code.py").unlink()
+    R.revalider(tmp_path, rejouer=lambda *a: 0, now_utc=NOW)
+    capsys.readouterr()
+    R.main(["--root", str(tmp_path), "--lister"])
+    rendu = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert rendu["preuves_absentes"] >= 1
+    assert rendu["en_echec"] == 0, "une preuve absente n'est pas un rejeu rate"

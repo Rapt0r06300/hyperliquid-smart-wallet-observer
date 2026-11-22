@@ -177,11 +177,30 @@ def verifier_liaison(liaison: Mapping[str, Any] | None,
         octets = lire(source, offset)
     except Exception:                      # noqa: BLE001 — une lecture en panne n'est pas une preuve
         return INVERIFIABLE, "SOURCE_UNREADABLE"
+    if octets and empreinte(octets) == attendu:
+        return VERIFIEE, "OK"
+    # 22/11/2026 — LE RUBAN A ÉTÉ ARCHIVÉ, PAS FALSIFIÉ. À chaque arrêt, `runtime/data` est DÉPLACÉ
+    # tel quel dans `runtime/archive/<session>/` ; la session suivante réécrit un ruban neuf au même
+    # chemin. Mesuré : 5 241 références sur 5 241 au coffre étaient `SOURCE_LINE_ABSENT`, et une
+    # nouvelle session les aurait déclarées DIVERGENTES (« preuve fausse », ligne rejetée) en
+    # relisant d'autres octets à la même position. La ligne exacte existe toujours dans l'archive,
+    # à la même position : on la cherche là, avec la MÊME exigence d'empreinte SHA-256.
+    alternatives = getattr(lire, "alternatives", None)
+    archives_vues = False
+    if callable(alternatives):
+        try:
+            for candidat in alternatives(source, offset):
+                archives_vues = True
+                if candidat and empreinte(candidat) == attendu:
+                    return VERIFIEE, "OK_ARCHIVE"
+        except Exception:                  # noqa: BLE001
+            return INVERIFIABLE, "SOURCE_UNREADABLE"
     if not octets:
         return INVERIFIABLE, "SOURCE_LINE_ABSENT"
-    if empreinte(octets) != attendu:
-        return DIVERGENTE, "LINE_SHA256_MISMATCH"
-    return VERIFIEE, "OK"
+    if archives_vues:
+        # le chemin a déjà été réécrit par une autre session : un octet différent n'y prouve rien
+        return INVERIFIABLE, "LINE_NOT_FOUND_AFTER_ROTATION"
+    return DIVERGENTE, "LINE_SHA256_MISMATCH"
 
 
 class LecteurBorne:
@@ -219,6 +238,22 @@ class LecteurBorne:
             return handle.readline()
         except (OSError, ValueError, OverflowError):
             return None
+
+    def alternatives(self, relpath: str, offset: int):
+        """La même ligne dans les sessions ARCHIVÉES (`runtime/data/X` -> `runtime/archive/*/X`)."""
+        relatif = str(relpath).replace(chr(92), "/")
+        if not relatif.startswith("runtime/data/"):
+            return
+        nom = relatif[len("runtime/data/"):]
+        base = self._racine / "runtime" / "archive"
+        try:
+            sessions = sorted(d.name for d in base.iterdir() if d.is_dir())
+        except OSError:
+            return
+        for session in sessions:
+            octets = self(f"runtime/archive/{session}/{nom}", offset)
+            if octets:
+                yield octets
 
     def fermer(self) -> None:
         for handle in self._descripteurs.values():

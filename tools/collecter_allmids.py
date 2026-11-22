@@ -39,6 +39,7 @@ sys.path.insert(0, str(RACINE / "tools"))
 import heartbeat_collecteur as HB  # noqa: E402
 
 from hl_observer.collection import collecte_fiable as CF  # noqa: E402
+from hl_observer.ops import budget_rest as _BUDGET  # noqa: E402  (n° 22 : poids REST réel, sans bloquer)
 from hl_observer.instrument_identity import preserve_native_instrument_symbol  # noqa: E402
 
 URL_HL = "https://api.hyperliquid.xyz/info"
@@ -157,7 +158,9 @@ def _post_allmids(*, dex: str = "", timeout_s: float = 8.0, tentatives: int = 3)
         req = urllib.request.Request(URL_HL, data=corps, headers=_HEADERS)
         try:
             with urllib.request.urlopen(req, timeout=timeout_s) as rep:  # noqa: S310 (URL constante)
-                return json.loads(rep.read().decode("utf-8"))
+                rendu = json.loads(rep.read().decode("utf-8"))
+            _BUDGET.compter("allMids")
+            return rendu
         except urllib.error.HTTPError as exc:
             derniere = exc
             if exc.code == 429 and essai < tentatives:

@@ -58,3 +58,70 @@ def test_enrichir_bout_en_bout(tmp_path):
     lignes = [json.loads(x) for x in out.read_text(encoding="utf-8").splitlines() if x.strip()]
     assert lignes[0]["contexte"]["apparie_carnet"] is True
     assert lignes[1]["contexte"]["apparie_carnet"] is False
+
+
+# ------------------------------- marqueur TWAP (mesure du 21/11/2026)
+def test_un_fill_de_tranche_twap_est_marque_avec_son_groupe(tmp_path):
+    """Sur 20 000 lignes du ruban reel, 14 champs decisifs sur 15 etaient presents.
+
+    Le quinzieme manquait : rien ne disait qu'un fill est une tranche TWAP. Le labo
+    lisait donc vingt tranches d'une meme decision comme vingt signaux independants.
+    """
+    fills = [
+        {"vault": "0xaa", "coin": "BTC", "px": 100.0, "sz": 1.0, "ts_ms": 1_700_000_000_000,
+         "tid": 11, "signe": 1},
+        {"vault": "0xaa", "coin": "ETH", "px": 50.0, "sz": 2.0, "ts_ms": 1_700_000_000_100,
+         "tid": 99, "signe": 1},
+    ]
+    # Ruban NORMALISE de la lane contexte : `twap_id` a plat.
+    twap = [{"vault": "0xaa", "coin": "BTC", "tid": 11, "twap_id": 4242,
+             "ts_ms": 1_700_000_000_000}]
+    f = tmp_path / "fills.jsonl"
+    t = tmp_path / "twap.jsonl"
+    f.write_text("\n".join(json.dumps(x) for x in fills) + "\n", encoding="utf-8")
+    t.write_text("\n".join(json.dumps(x) for x in twap) + "\n", encoding="utf-8")
+    sortie = tmp_path / "enrichi.jsonl"
+
+    rapport = E.enrichir(f, sortie, twap_path=t)
+    assert rapport["tranches_twap"] == 1
+    assert rapport["twap_connu"] is True
+    lignes = [json.loads(ligne)
+              for ligne in sortie.read_text(encoding="utf-8").splitlines()
+              if ligne.strip()]
+    assert lignes[0]["contexte"]["twap"] is True
+    assert lignes[0]["contexte"]["twap_id"] == 4242
+    # Le fill qui n'est pas une tranche est marque FAUX, pas inconnu : le ruban etait la.
+    assert lignes[1]["contexte"]["twap"] is False
+    assert lignes[1]["contexte"]["twap_id"] is None
+
+
+def test_sans_ruban_twap_le_marqueur_dit_INCONNU_et_non_NON(tmp_path):
+    """Confondre `None` et `False` ferait passer une ignorance pour une observation."""
+    f = tmp_path / "fills.jsonl"
+    f.write_text(json.dumps({"vault": "0xaa", "coin": "BTC", "px": 1.0, "sz": 1.0,
+                             "ts_ms": 1_700_000_000_000, "tid": 11}) + "\n", encoding="utf-8")
+    sortie = tmp_path / "enrichi.jsonl"
+    rapport = E.enrichir(f, sortie)
+    assert rapport["twap_connu"] is False
+    ligne = json.loads(sortie.read_text(encoding="utf-8").splitlines()[0])
+    assert ligne["contexte"]["twap"] is None
+    assert ligne["contexte"]["twap_source"] == "ruban_twap_absent"
+
+
+def test_la_forme_brute_d_hyperliquid_est_aussi_indexee():
+    """`{"twapId": .., "fill": {..}}` : la reponse officielle, sans normalisation."""
+    index = E.index_twap_du_ruban([
+        {"twapId": 7, "fill": {"tid": 1, "hash": "0xa", "oid": 5}},
+        {"twap_id": 8, "fill": {"tid": 2}},
+        {"fill": {"tid": 3}},                 # sans identifiant : n'entre pas dans l'index
+    ])
+    assert index[1] == 7 and index["0xa"] == 7 and index[5] == 7
+    assert index[2] == 8
+    assert 3 not in index, "un TWAP sans identifiant ne doit pas creer de groupe"
+
+
+def test_un_identifiant_absent_ne_fabrique_jamais_de_groupe():
+    """Un `0` ou un groupe par defaut fusionnerait des TWAP differents."""
+    assert E.marquer_twap({"tid": 1}, {}) == (None, None)
+    assert E.marquer_twap({"tid": 1}, {2: 9}) == (False, None)
+    assert E.marquer_twap({"tid": 1}, {1: 9}) == (True, 9)

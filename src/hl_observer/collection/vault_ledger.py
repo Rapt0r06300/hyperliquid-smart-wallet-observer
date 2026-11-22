@@ -39,19 +39,45 @@ def parser_ledger(rep: Any, *, vault: str = "") -> list[dict]:
         delta = u.get("delta") if isinstance(u, dict) else None
         delta = delta if isinstance(delta, dict) else {}
         typ = str(delta.get("type") or "").strip()
+        # 21/11/2026 -- DEFAUT MESURE : le `break` se declenchait sur la premiere clef
+        # PRESENTE, meme quand sa conversion echouait. Un delta `{"usdc": "n/a",
+        # "amount": "-250"}` rendait donc `delta_usd=None` et `est_retrait=False` : du
+        # capital SORTANT devenait invisible, et une absence prenait la valeur d un
+        # zero favorable. On essaie desormais toutes les clefs, et on dit laquelle a
+        # servi -- ou que le montant est illisible.
         montant = None
+        clef_montant = None
+        clefs_vues = []
         for k in ("usdc", "amount", "usdcValue", "value"):
-            if k in delta:
-                try:
-                    montant = float(delta[k])
-                except (TypeError, ValueError):
-                    montant = None
-                break
+            if k not in delta:
+                continue
+            clefs_vues.append(k)
+            try:
+                candidat = float(delta[k])
+            except (TypeError, ValueError):
+                continue
+            if candidat != candidat or candidat in (float("inf"), float("-inf")):
+                continue
+            montant, clef_montant = candidat, k
+            break
         bas = typ.lower()
         # Capital sortant du vault : type explicite withdraw ou montant négatif.
         est_retrait = ("withdraw" in bas) or (montant is not None and montant < 0)
+        # La CONTREPARTIE d un mouvement de capital est une donnee verifiable : sans
+        # elle, un transfert interne et un retrait vers l exterieur se ressemblent.
+        contrepartie = None
+        for champ in ("destination", "user", "to", "from"):
+            valeur = delta.get(champ)
+            if isinstance(valeur, str) and valeur.strip():
+                contrepartie = valeur.strip()
+                break
         out.append({"ts_ms": ts, "vault": vault_id, "type": typ,
-                    "delta_usd": montant, "est_retrait": bool(est_retrait), "hash": u.get("hash")})
+                    "delta_usd": montant, "est_retrait": bool(est_retrait), "hash": u.get("hash"),
+                    "delta_clef": clef_montant,
+                    # `True` = des clefs de montant existaient mais AUCUNE n etait lisible.
+                    # Un consommateur ne doit pas pouvoir confondre ca avec zero.
+                    "delta_illisible": bool(clefs_vues) and montant is None,
+                    "contrepartie": contrepartie})
     return out
 
 

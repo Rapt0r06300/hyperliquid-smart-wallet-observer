@@ -6,6 +6,7 @@ changed here.
 """
 from __future__ import annotations
 
+import array
 import json
 import math
 import re
@@ -46,6 +47,17 @@ _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 CHECKPOINT_INTEGRITY_SCHEMA = "hypersmart.copy_vault_checkpoint_integrity.v1"
 CHECKPOINT_STATE_RELPATH = "runtime/data/copy_vault_checkpoint_tail_state.json"
 
+# Outils purs de `fenetres_de_signal.py`, RE-EXPORTES ici (F401 attendu, pas un oubli).
+from hl_observer.backtesting.fenetres_de_signal import (  # noqa: E402
+    MARGE_FENETRE_SIGNAL_MS,  # noqa: F401
+    bornes_ou_rien,
+    dans_les_fenetres,
+    fenetres_normalisees,  # noqa: F401
+    lignes_ou_horloges,
+    predicats_de_rejouabilite,
+    ranger,
+)
+
 
 def load_observed_books(
     root: str | Path,
@@ -56,6 +68,8 @@ def load_observed_books(
     relative_path: str = "runtime/data/carnet_venues.jsonl",
     causal_relative_path: str = "runtime/data/copy_vault_l2_tape.jsonl",
     bbo_relative_path: str = "runtime/data/copy_vault_bbo_tape.jsonl",
+    fenetres_signal_ms: Iterable[tuple[int, int]] | None = None,
+    horloges_seulement: bool = False,
 ) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any]]:
     """Load books visible no later than ``as_of_ms``, and no earlier than ``depuis_ms``.
 
@@ -79,6 +93,8 @@ def load_observed_books(
         depuis_ms = _required_epoch_ms(depuis_ms, "depuis_ms")
     if as_of_ms is not None and depuis_ms is not None and depuis_ms > as_of_ms:
         raise ValueError("fenetre de carnets vide : depuis_ms est posterieur a as_of_ms")
+    # Filtre a la frontiere de la source, comme la borne causale : on ne peut pas l oublier.
+    bornes_signal = bornes_ou_rien(fenetres_signal_ms)
     oublier_les_index()   # nouveau chargement : aucun index (ni carnet) du corpus précédent ne reste en mémoire
 
     resolved_root = Path(root).resolve()
@@ -144,9 +160,13 @@ def load_observed_books(
     _lire_ligne_source = LIAISON.LecteurBorne(resolved_root)
     wanted = {canonical_copy_vault_coin(coin) for coin in coins} if coins is not None else None
     by_coin: dict[str, list[dict[str, Any]]] = {}
+    horloges: dict[str, array.array] = {}
     invalid = 0
     future_rows_rejected = 0
     past_rows_rejected = 0
+    hors_fenetres_rejected = 0
+    non_causaux_vus = 0
+    safe_causaux_vus = 0
     rows_read = 0
     duplicate_rows = 0
     checkpoint_protocol_mismatches = 0
@@ -193,6 +213,8 @@ def load_observed_books(
         source_replay_compatible: bool | None = None,
     ) -> None:
         nonlocal invalid, duplicate_rows, future_rows_rejected, past_rows_rejected
+        nonlocal hors_fenetres_rejected
+        nonlocal non_causaux_vus, safe_causaux_vus
         if (
             not coin
             or ts_ms <= 0
@@ -208,6 +230,9 @@ def load_observed_books(
             return
         if depuis_ms is not None and ts_ms < depuis_ms:
             past_rows_rejected += 1
+            return
+        if bornes_signal is not None and not dans_les_fenetres(ts_ms, bornes_signal):
+            hors_fenetres_rejected += 1
             return
         identity = (
             ("checkpoint", checkpoint_id)
@@ -292,7 +317,12 @@ def load_observed_books(
                 "writer_run_id": checkpoint_writer_run_id,
                 "clean_epoch_ms": checkpoint_clean_epoch_ms,
             })
-        by_coin.setdefault(coin, []).append(row)
+        # Predicats du bilan : UNE seule version, partagee par les deux modes.
+        _non_causal, _safe_causal = predicats_de_rejouabilite(row)
+        non_causaux_vus += _non_causal
+        safe_causaux_vus += _safe_causal
+        ranger(coin, row, ts_ms, by_coin, horloges,
+               horloges_seulement=horloges_seulement)
         if not causal_observation:
             source_counts["historical_observed"] += 1
         elif source == "HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT":
@@ -683,22 +713,15 @@ def load_observed_books(
                 except (KeyError, TypeError, ValueError, OverflowError, json.JSONDecodeError):
                     invalid += 1
 
-    for rows in by_coin.values():
-        rows.sort(key=lambda row: row["ts_ms"])
-    valid = sum(len(rows) for rows in by_coin.values())
-    all_rows = [row for rows in by_coin.values() for row in rows]
-    non_causal_rows = sum(row.get("causal_observation") is not True for row in all_rows)
-    safe_causal_rows = sum(
-        row.get("causal_observation") is True
-        and row.get("source_quality_status") == "SAFE"
-        and row.get("source_manifest_verified") is True
-        and row.get("source_replay_compatible") is True
-        and "bids5" in row
-        and "asks5" in row
-        for row in all_rows
+    valid, all_rows, non_causal_rows, aucune_ligne = lignes_ou_horloges(
+        by_coin, horloges, horloges_seulement=horloges_seulement,
+        non_causaux_vus=non_causaux_vus)
+    safe_causal_rows = (
+        safe_causaux_vus if horloges_seulement
+        else sum(predicats_de_rejouabilite(row)[1] for row in all_rows)
     )
     replay_grade_blockers: list[str] = []
-    if not all_rows:
+    if aucune_ligne:
         replay_grade_blockers.append("NO_OBSERVED_BOOK_ROWS")
     if invalid or sum(l2_rejection_reasons.values()):
         replay_grade_blockers.append("INVALID_OR_REJECTED_ROWS")
@@ -709,7 +732,8 @@ def load_observed_books(
     if incomplete_causal_l2_rows:
         replay_grade_blockers.append("CAUSAL_L2_LEVELS_INCOMPLETE")
     replay_grade_ready = not replay_grade_blockers
-    return by_coin, {
+    return (horloges if horloges_seulement else by_coin), {
+        "horloges_seulement": bool(horloges_seulement),
         "sources": [relative_path, causal_relative_path, bbo_relative_path],
         "exists": path.is_file() or causal_path.is_file() or bbo_path.is_file(),
         "rows_read": rows_read,
@@ -717,6 +741,8 @@ def load_observed_books(
         "as_of_ms": as_of_ms,
         "depuis_ms": depuis_ms,
         "past_rows_rejected": past_rows_rejected,
+        "hors_fenetres_signal_rejected": hors_fenetres_rejected,
+        "fenetres_signal": len(bornes_signal) if bornes_signal is not None else None,
         "future_rows_rejected": future_rows_rejected,
         "valid_rows": valid,
         "invalid_rows": invalid,

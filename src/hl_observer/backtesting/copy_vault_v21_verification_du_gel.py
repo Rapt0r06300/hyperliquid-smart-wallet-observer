@@ -90,9 +90,20 @@ def verifier_le_gel(raw: Mapping[str, Any]) -> dict[str, Any]:
         "max_open_positions",
         "bonferroni_trial_count",
     )
+    # 21/11/2026 : une CHAINE numerique passait (`float("250")` reussit). Un gel dont
+    # les parametres sont des chaines n'est pas le gel attendu, et son empreinte le
+    # certifierait quand meme : c'est une contradiction de schema, donc un refus. Le
+    # module jumeau (`copy_vault_epoch_parsing`) est strict de la meme facon, et un
+    # booleen n'est pas un nombre bien que Python le pretende.
+    def _nombre(nom: str) -> float:
+        valeur = parameters[nom]
+        if isinstance(valeur, bool) or not isinstance(valeur, (int, float)):
+            raise ValueError("COPY_V21_FREEZE_PARAMETERS_INVALID")
+        return float(valeur)
+
     try:
-        positive_values = [float(parameters[name]) for name in positive_parameters]
-        signed_imbalance_minimum = float(parameters["signed_depth_imbalance_minimum"])
+        positive_values = [_nombre(name) for name in positive_parameters]
+        signed_imbalance_minimum = _nombre("signed_depth_imbalance_minimum")
     except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError("COPY_V21_FREEZE_PARAMETERS_INVALID") from exc
     if (
@@ -104,7 +115,10 @@ def verifier_le_gel(raw: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError("COPY_V21_FREEZE_PARAMETERS_INVALID")
     for name in ("core_notional_usd", "probe_notional_usd"):
         try:
-            notional = float(parameters[name])
+            brut = parameters[name]
+            if isinstance(brut, bool) or not isinstance(brut, (int, float)):
+                raise ValueError("COPY_V21_PAPER_NOTIONAL_INVALID")
+            notional = float(brut)
         except (KeyError, TypeError, ValueError, OverflowError) as exc:
             raise ValueError("COPY_V21_PAPER_NOTIONAL_INVALID") from exc
         if (
