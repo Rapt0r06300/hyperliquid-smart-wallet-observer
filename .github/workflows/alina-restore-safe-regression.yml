@@ -618,6 +618,16 @@ jobs:
           foreach ($name in @("restore_alina.py", "partitioned_data_index.py")) {
             Copy-Item -LiteralPath (Join-Path "tools" $name) -Destination (Join-Path $root "tools")
           }
+          # The partition facade now delegates to the canonical src/ package.
+          # Include that pure module in the sandbox, with no network access.
+          New-Item -ItemType Directory -Force (Join-Path $root "src/hl_observer/dataset") | Out-Null
+          foreach ($name in @(
+            "src/hl_observer/__init__.py",
+            "src/hl_observer/dataset/__init__.py",
+            "src/hl_observer/dataset/partitioned_data_index.py"
+          )) {
+            Copy-Item -LiteralPath $name -Destination (Join-Path $root $name)
+          }
           Push-Location $root
           try {
             # GitHub's PowerShell wrapper may turn a deliberate nonzero native
