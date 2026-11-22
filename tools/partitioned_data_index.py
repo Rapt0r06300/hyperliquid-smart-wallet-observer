@@ -22,9 +22,9 @@ verifies en bac a sable AVANT la pose :
     -> `m is` le module reel, donc le patch porte sur la fonction
        REELLEMENT appelee ; un re-export aurait patche la facade seule
   * `python tools/partitioned_data_index.py` (point d'entree CLI)              -> OK
-`tools/python/python314._pth` met `..\\..\\src` sur sys.path relativement a
-l'interpreteur : aucun bootstrap n'est necessaire, depuis n'importe quel
-repertoire, pas seulement depuis la racine du depot.
+`tools/python/python314._pth` met `..\\..\\src` sur sys.path dans
+le Python portable. Pour Python systeme et GitHub Actions, la facade ajoute
+le chemin `src` resolu depuis ce fichier, meme hors racine du depot.
 """
 import sys
 from pathlib import Path
