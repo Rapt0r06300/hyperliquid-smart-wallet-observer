@@ -168,6 +168,7 @@ DEFAULT_GIT_TIMEOUT_SECONDS = 900
 COMMIT_TIMEOUT_SECONDS = 900
 REMOTE_READ_TIMEOUT_SECONDS = 20
 LOCAL_READ_TIMEOUT_SECONDS = 900
+PREFETCH_LS_TREE_BATCH = 200   # chemins par ls-tree (limite de ligne de commande Windows)
 # 21/11/2026 -- BUDGET MESURE, PAS ESTIME.
 # `merge --ff-only` etait classe parmi les lectures locales (900 s) alors que
 # c'est une MUTATION de l'arbre de travail : git y reconstruit l'index ENTIER.
@@ -1350,12 +1351,42 @@ class Synchronizer:
         """
         if not paths:
             return
+        # 22/11/2026 : dans un clone partiel, `cat-file` va chercher chaque blob absent UN PAR UN (un
+        # aller-retour reseau par objet) : 185 blobs ont depasse 900 s et fait echouer le push. On les
+        # demande d'abord TOUS en une seule requete `fetch --stdin` (mesure : 13 s pour les 185). Sans
+        # effet sur l'index ni sur les fichiers : ajoute des objets. En cas d'echec, le chemin lent
+        # ci-dessous reste la garantie.
+        self._prefetch_blobs_par_lot(treeish, paths)
         payload = "".join(f"{treeish}:{path}\n" for path in paths)
         self.command(
             "cat-file", "--batch-check=%(objectname)", "--buffer",
             input_bytes=payload.encode("utf-8"),
             check=False,
             timeout=REPLAY_WORKTREE_TIMEOUT_SECONDS,
+        )
+
+    def _prefetch_blobs_par_lot(self, treeish: str, paths: list[str]) -> None:
+        """Recupere en UNE requete les blobs de `paths` (dans `treeish`) absents du clone partiel."""
+        promisor = self.command("config", "--get", "remote.origin.promisor", check=False)
+        if promisor.returncode != 0 or promisor.stdout.strip().lower() != b"true":
+            return                                   # clone complet : tous les blobs sont deja la
+        oids: list[str] = []
+        for debut in range(0, len(paths), PREFETCH_LS_TREE_BATCH):
+            sortie = self.command("ls-tree", "-z", treeish, "--", *paths[debut:debut + PREFETCH_LS_TREE_BATCH],
+                                  check=False)
+            if sortie.returncode != 0:
+                return
+            for entree in sortie.stdout.split(b"\0"):
+                meta = entree.split(b"\t", 1)[0].split()
+                if len(meta) == 3 and meta[1] == b"blob":
+                    oids.append(meta[2].decode("ascii"))
+        if not oids:
+            return
+        self.command(
+            "-c", "fetch.negotiationAlgorithm=noop", "fetch", "origin", "--no-tags",
+            "--no-write-fetch-head", "--recurse-submodules=no", "--filter=blob:none", "--stdin",
+            input_bytes="".join(f"{oid}\n" for oid in dict.fromkeys(oids)).encode("ascii"),
+            check=False, timeout=DEFAULT_GIT_TIMEOUT_SECONDS,
         )
 
     def command(self, *args: str, input_bytes: bytes | None = None,
