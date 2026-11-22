@@ -27,6 +27,13 @@ l'interpreteur : aucun bootstrap n'est necessaire, depuis n'importe quel
 repertoire, pas seulement depuis la racine du depot.
 """
 import sys
+from pathlib import Path
+
+# Direct tool execution only adds tools/ to sys.path. Include the checked-out
+# src/ package on hosted runners and fresh clones without requiring pip install.
+_SRC = Path(__file__).resolve().parents[1] / "src"
+if str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
 
 from hl_observer.dataset import partitioned_data_index as _reel
 
