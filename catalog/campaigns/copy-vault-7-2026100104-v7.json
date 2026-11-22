@@ -60,6 +60,16 @@
       "from": "RUNNING",
       "reason": "durable_publication_failed",
       "to": "STUCK"
+    },
+    {
+      "at_utc": "2026-11-22T22:44:20.545066Z",
+      "campaign_phase_epoch": 4,
+      "controller_epoch": 8,
+      "event": "WATCHDOG_EPOCH_SUPERSEDED_TERMINALIZED",
+      "previous_status": "STUCK",
+      "previous_stuck_reason": null,
+      "reason": "EPOCH_SUPERSEDED_WITH_DURABLE_PROGRESS",
+      "terminal_status": "PARTIAL"
     }
   ],
   "kind": "copy_vault_collection",
@@ -81,9 +91,10 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "STUCK",
-  "status_reason": "durable_publication_failed",
-  "terminal_evidence_digest": null,
-  "updated_at": "2026-10-07T09:16:47.429790Z",
+  "status": "PARTIAL",
+  "status_reason": "EPOCH_SUPERSEDED_WITH_DURABLE_PROGRESS",
+  "stuck_reason": null,
+  "terminal_evidence_digest": "30061e1fccd09b24d05141e2b75e63270ed190e82d71374c13bd0f0fdc99c42f",
+  "updated_at": "2026-11-22T22:44:20.545066Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
