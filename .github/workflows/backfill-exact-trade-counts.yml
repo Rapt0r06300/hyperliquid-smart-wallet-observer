@@ -1,4 +1,6 @@
 name: backfill-exact-trade-counts
+env:
+  PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/src"
 on:
   push:
     branches: [main]

@@ -1,4 +1,6 @@
 name: alina-operator-intent
+env:
+  PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/src"
 on:
   workflow_dispatch:
     inputs:

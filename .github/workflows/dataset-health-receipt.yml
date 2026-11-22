@@ -1,4 +1,6 @@
 name: dataset-health-receipt
+env:
+  PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/src"
 # DATA_METRICS is the canonical exact-coverage trigger; receipt publication
 # must follow any exact-count recovery before ANALYZE quality gates advance.
 on:

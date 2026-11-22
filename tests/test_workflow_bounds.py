@@ -643,6 +643,53 @@ def test_full_normal_clone_is_pinned_to_event_sha_even_when_main_moves():
 
 
 
+def test_direct_tool_workflows_export_canonical_import_paths() -> None:
+    """Fresh hosted checkouts must import both tools and src packages."""
+    names = (
+        "advance-analysis-stage.yml",
+        "alina-capsule-cleanup.yml",
+        "alina-operator-dispatch.yml",
+        "alina-operator-intent.yml",
+        "analysis-stage-controller.yml",
+        "backfill-exact-trade-counts.yml",
+        "backfill-global-unique-trade-counts.yml",
+        "backfill-replay-compatibility.yml",
+        "campaign-resilience-receipt.yml",
+        "campaign-watchdog.yml",
+        "cleanup-incomplete-v2-releases.yml",
+        "control-phase.yml",
+        "copy-vault-collector-soak.yml",
+        "dataset-health-receipt.yml",
+        "dataset-metrics-v2.yml",
+        "dataset-quality-ci.yml",
+        "durable-restore-drill.yml",
+        "economic-scoreboard-receipt.yml",
+        "event-intelligence-coverage-registry.yml",
+        "event-intelligence-status.yml",
+        "github-hosted-runner-firewall.yml",
+        "global-implementation-closure.yml",
+        "hyperlab-ci.yml",
+        "migrate-campaign-manifests-v2.yml",
+        "normative-contract-gate.yml",
+        "phase-request-controller.yml",
+        "promote-manifest.yml",
+        "publish-restore-inventory.yml",
+        "quarantine-audit.yml",
+        "reconcile-v2-catalog.yml",
+        "safe-corpus-distributed-verification.yml",
+        "uncompressed-size-v2.yml",
+        "validate-acceptance-registry.yml",
+        "validate-dispatch-receipts.yml",
+        "validate-phase-receipts.yml",
+        "validate-publication-receipts.yml",
+    )
+    expected = 'PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/src"'
+    for name in names:
+        text = _workflow(name)
+        assert "python tools/" in text, name
+        assert expected in text, name
+
+
 def test_global_unique_publication_only_replays_disjoint_campaign_commits():
     # Historical long-running scan must never rebase stale exact metrics across
     # concurrent DATA_INDEX or code writes, even when the git rebase succeeds.

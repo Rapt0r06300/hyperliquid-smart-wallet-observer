@@ -1,4 +1,6 @@
 name: validate-dispatch-receipts
+env:
+  PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/src"
 on:
   workflow_dispatch:
   push:

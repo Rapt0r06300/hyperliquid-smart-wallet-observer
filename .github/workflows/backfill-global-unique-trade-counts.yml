@@ -1,4 +1,6 @@
 name: backfill-global-unique-trade-counts
+env:
+  PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/src"
 on:
   # Do not fan-in from high-frequency workflow_run completions here. GitHub
   # concurrency keeps at most one pending run and replaces older pending runs,

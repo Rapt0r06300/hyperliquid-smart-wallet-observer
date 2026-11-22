@@ -1,4 +1,6 @@
 name: analysis-stage-controller
+env:
+  PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/src"
 on:
   workflow_dispatch:
   workflow_run:

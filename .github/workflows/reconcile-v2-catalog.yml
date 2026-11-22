@@ -1,4 +1,6 @@
 name: reconcile-v2-catalog
+env:
+  PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/src"
 run-name: 'Dataset principal | reconciliation des Releases'
 
 on:

@@ -1,4 +1,6 @@
 name: phase-request-controller
+env:
+  PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/src"
 on:
   push:
     branches: [main]

@@ -1,4 +1,6 @@
 name: github-hosted-runner-firewall
+env:
+  PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/src"
 on:
   workflow_dispatch:
   push:

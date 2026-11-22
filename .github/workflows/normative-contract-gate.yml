@@ -1,4 +1,6 @@
 name: normative-contract-gate
+env:
+  PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/src"
 
 # Current-main hosted proof gate: fail closed on unknown authority.
 # Retrigger exact-SHA evidence after watchdog commits.

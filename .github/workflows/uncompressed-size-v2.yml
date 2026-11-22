@@ -1,4 +1,6 @@
 name: uncompressed-size-v2
+env:
+  PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/src"
 on:
   push:
     branches: [main]

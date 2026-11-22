@@ -1,4 +1,6 @@
 name: SAFE corpus distributed byte verification
+env:
+  PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/src"
 
 on:
   # One-shot bootstrap when this workflow changes; ordinary collector pushes do not trigger it.

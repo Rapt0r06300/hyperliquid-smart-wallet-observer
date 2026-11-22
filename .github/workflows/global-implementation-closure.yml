@@ -1,4 +1,6 @@
 name: global-implementation-closure
+env:
+  PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/src"
 on:
   workflow_dispatch:
   push:

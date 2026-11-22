@@ -1,4 +1,6 @@
 name: dataset-metrics-v2
+env:
+  PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/src"
 run-name: 'Dataset principal | metriques et preuves'
 on:
   push:

@@ -1,4 +1,6 @@
 name: alina-operator-dispatch
+env:
+  PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/src"
 on:
   repository_dispatch:
     types: [alina_operator_intent]

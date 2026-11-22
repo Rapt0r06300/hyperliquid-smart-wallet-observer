@@ -1,4 +1,6 @@
 name: Alina verified capsule cleanup
+env:
+  PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/src"
 
 on:
   workflow_dispatch:

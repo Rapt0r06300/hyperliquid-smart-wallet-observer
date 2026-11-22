@@ -1,4 +1,6 @@
 name: publish-restore-inventory
+env:
+  PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/src"
 
 on:
   push:
@@ -34,6 +36,7 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
           sparse-checkout: |
+            src
             tools
 
       - name: Set up Python

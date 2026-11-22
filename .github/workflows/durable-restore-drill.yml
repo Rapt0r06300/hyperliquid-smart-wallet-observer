@@ -1,4 +1,6 @@
 name: durable-restore-drill
+env:
+  PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/src"
 on:
   schedule:
     - cron: '7 20 * * *'

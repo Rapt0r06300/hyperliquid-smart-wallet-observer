@@ -1,4 +1,6 @@
 name: principal-dataset-terminal-cleanup
+env:
+  PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/src"
 run-name: principal dataset terminal deletion
 
 on:

@@ -1,4 +1,6 @@
 name: dataset-quality-ci
+env:
+  PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/src"
 run-name: 'Dataset principal | qualification'
 
 on:

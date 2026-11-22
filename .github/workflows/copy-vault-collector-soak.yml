@@ -1,4 +1,6 @@
 name: copy-vault-collector-soak
+env:
+  PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/src"
 # Hosted evidence retrigger: keep the bounded assertions exercised on main.
 
 on:
