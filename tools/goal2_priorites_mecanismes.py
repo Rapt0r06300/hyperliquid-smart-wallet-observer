@@ -34,6 +34,30 @@ class Mecanisme:
     p_impose: float | None = None   # seulement quand AUCUN effet n'est mesurable (statut explicite)
 
 
+#: Champs complets par mécanisme : capacité à 100 USD, fill utile, test de réfutation (déjà pré-enregistré).
+#: Capacité commune de la copie : 5 lignes de 20 USD, ordre minimal 10 USD -> jamais contraignante ; c'est le coût.
+COPIE = "5 x 20 USD >= ordre min. 10 USD : non contraignant"
+TAKER = "taker au meilleur prix + écart, après 120 s"
+FICHE: dict[str, tuple[str, str, str]] = {
+    "M1": (COPIE, TAKER, "excès top-tiers <= 0 sur segment vierge (H15b : -28,7)"),
+    "M2": (COPIE, "taker à 120 s ; maker < 60 s exigerait un modèle de remplissage", "markout à 120 s <= coût (H20 : +0,07 vs 12)"),
+    "M3": (COPIE, TAKER, "rebond 1 h - coût <= 0 (L2 : -5,8)"),
+    "M4": (COPIE, TAKER, "excès sur jumeau <= 0 (H17 : -59,4)"),
+    "M5": (COPIE, TAKER, "leader <= vague seule (H19 : -1,0 vs +72,9)"),
+    "M6": (COPIE, "aucun (refus)", "gain du refus <= 0 sur novembre (H18)"),
+    "M7": (COPIE, "aucun (refus)", "gain du refus <= 0 après le gel (H16)"),
+    "M8": (COPIE, TAKER + " ; funding réglé horaire", "receveur - payeur <= 0 (H21 : -52,3)"),
+    "M9": (COPIE, TAKER + " ; tenue 24 h", "net <= 0 (L11 : -53,1)"),
+    "M10": (COPIE, "entrée taker, sortie miroir taker", "net <= 0 en prospectif (apprenant, 27/11)"),
+    "M11": (COPIE, TAKER, "excès sur témoin <= 0 (H14 : -14,2)"),
+    "M12": (COPIE, TAKER, "excès <= 0 (L9 : -12,6) ; kappa ~ 0 (pas de course commune)"),
+    "M13": ("dépôt <= capital ; verrou 4 j de HLP", "aucun fill : dépôt en vault", "rendement 28 j <= 0 en prospectif (17/12)"),
+    "M14": (COPIE, "—", "trop rare pour un test (0,19 % des fills)"),
+    "M15": ("dépôt <= capital ; frais de performance du gérant", "aucun fill : dépôt en vault", "rendement < HLP après correction de survie (V : -436 bps/28 j)"),
+    "M16": (COPIE, TAKER, "excès des gros fills <= 0 (L8 : +4,65 brut à 4 h, sous le coût)"),
+}
+
+
 MECANISMES = (
     Mecanisme("M1 wallets informés", "non-informés -> informés", "H15b validation, excès 24 h", -28.7, (-77.4, 16.4), 0.3, "REJECTED"),
     Mecanisme("M2 décroissance / latence", "copieur lent -> preneur rapide", "H20 Tardis, copie à 120 s", -9.43, (-28.59, 20.64), 0.3, "REJECTED"),
@@ -49,6 +73,8 @@ MECANISMES = (
     Mecanisme("M12 consensus indépendant", "foule -> consensus", "L9, excès 24 h", -12.62, (-76.71, 50.78), 0.6, "REJECTED"),
     Mecanisme("M13 fourniture de liquidité (HLP)", "preneurs -> teneurs de marché", "V5 validé, +230 bps/28 j", 230.0, None, 0.6, "PROMISING", 0.8),
     Mecanisme("M14 flux résiduel des métaordres", "métaordre visible -> anticipateur", "0,19 % des fills", None, None, 0.0, "UNMEASURABLE", 0.5),
+    Mecanisme("M15 sélection de vaults gagnants", "déposant tardif -> gérant (frais, survie)", "V-allocation bornés, 28 j (journal l. 443)", -436.0, (-823.0, -61.0), 0.6, "REJECTED"),
+    Mecanisme("M16 taille du fill du leader", "contrepartie d'un gros ordre -> son auteur", "L8, excès 4 h brut 4,65 - coût 15", -10.35, (-19.78, -0.72), 0.6, "REJECTED"),
 )
 
 
@@ -61,7 +87,8 @@ def score(m: Mecanisme) -> dict:
     else:
         raise ValueError(f"{m.code} : ni effet mesuré ni statut explicite")
     v = 4 * p * (1 - p)
-    return {"code": m.code, "transfert": m.transfert, "preuve": m.preuve, "statut": m.statut,
+    capacite, fill, refutation = FICHE.get(m.code.split()[0], ("NON_RENSEIGNE",) * 3)
+    return {"capacite_100_usd": capacite, "fill_utile": fill, "test_de_refutation": refutation, "code": m.code, "transfert": m.transfert, "preuve": m.preuve, "statut": m.statut,
             "p_net_positif": round(p, 3), "valeur_info": round(v, 3), "faisabilite": m.faisabilite,
             "priorite": round(m.faisabilite * (p + v) / 2, 3)}
 
@@ -81,6 +108,9 @@ def main() -> int:
     for rang, s in enumerate(classement(), 1):
         print(f"  {rang:<4} {s['code']:<36} {s['transfert']:<34} {s['p_net_positif']:>8.3f} {s['valeur_info']:>6.3f}"
               f" {s['faisabilite']:>4.1f} {s['priorite']:>8.3f}  {s['statut']}")
+    print()
+    for s in classement():
+        print(f"  {s['code'].split()[0]:<4} capacité : {s['capacite_100_usd']} | fill : {s['fill_utile']} | réfutation : {s['test_de_refutation']}")
     return 0
 
 

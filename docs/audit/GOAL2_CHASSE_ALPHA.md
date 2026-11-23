@@ -1147,3 +1147,76 @@ fourniture de liquidité (mécanisme 12), seul PROMISING.
 7. Exécution maker à moins de 60 s : seule voie théorique pour le mécanisme 2 ; exige un carnet en direct et un modèle
    de remplissage réaliste (« touché » n'est pas « exécuté »).
 
+### 23b. Priorisation chiffrée (`tools/goal2_priorites_mecanismes.py`, déterministe, testée)
+
+p = P(net > 0) tiré de l'IC95 mesuré ; V = 4 p (1 − p) ; F = faisabilité ; priorité = F x (p + V) / 2. Correction
+avant usage : la 1re version donnait F = 1 à des données DÉJÀ consultées (aucun segment historique vierge ne reste) ;
+F vaut désormais 0,6 au mieux (flux prospectif ou publication datée).
+
+```
+  rang mécanisme                            qui paie -> qui gagne              p(net>0)      V    F priorité  statut
+  1    M10 sortie / gestion                 sortie tardive -> sortie miroir       0.672  0.882  0.6    0.466  REJECTED
+  2    M6 éviter la vague (NO-TRADE)        copieur naïf -> copieur filtré        0.500  1.000  0.6    0.450  MORE_DATA
+  3    M7 refus absorbé/tard/petit          copieur naïf -> copieur filtré        0.500  1.000  0.6    0.450  MORE_DATA
+  4    M13 fourniture de liquidité (HLP)    preneurs -> teneurs de marché         0.800  0.640  0.6    0.432  PROMISING
+  5    M11 réallocation                     gérant -> suiveur                     0.363  0.925  0.6    0.387  REJECTED
+  6    M12 consensus indépendant            foule -> consensus                    0.349  0.909  0.6    0.377  REJECTED
+  7    M5 suivre la cascade                 retardataires -> suiveurs             0.346  0.906  0.6    0.376  REJECTED
+  8    M2 décroissance / latence            copieur lent -> preneur rapide        0.226  0.700  0.3    0.139  REJECTED
+  9    M3 pression temporaire               impatients -> patients                0.096  0.346  0.6    0.133  REJECTED
+  10   M1 wallets informés                  non-informés -> informés              0.115  0.408  0.3    0.078  REJECTED
+  11   M4 absorber les ventes forcées       liquidés -> absorbeurs                0.051  0.195  0.6    0.074  REJECTED
+  12   M9 portage du leader                 payeur de funding -> porteur          0.041  0.158  0.6    0.060  REJECTED
+  13   M8 prime de funding (receveur)       côté surpeuplé -> receveur            0.028  0.107  0.6    0.040  REJECTED
+  14   M14 flux résiduel des métaordres     métaordre visible -> anticipateur     0.500  1.000  0.0    0.000  UNMEASURABLE
+```
+
+**Conséquence.** La priorité n°1 (M10, sortie et gestion : excès réel +14,5, net indécis) est exactement ce que
+l'apprenant prospectif mesure en ce moment (sorties miroir, 45 variantes) : verdict possible le 27/11. Les n°2 et 3 sont
+les filtres NO-TRADE déjà figés (H18, H16) ; n°4 HLP. Aucun mécanisme n'a de donnée vierge disponible aujourd'hui.
+
+### 23c. Carte complète : 16 mécanismes, avec capacité à 100 USD, fill utile et test de réfutation
+
+Ajoutés (déjà mesurés, transferts distincts) : M15 sélection de vaults gagnants (déposant tardif -> gérant ; V : −436
+[−823 ; −61] bps/28 j) et M16 taille du fill du leader (contrepartie d'un gros ordre -> son auteur ; L8). Familles
+distinctes par QUI PAIE : non-informés (M1), copieur lent (M2), impatients (M3), liquidés (M4), retardataires (M5),
+copieur naïf (M6, M7), côté surpeuplé (M8), payeur de funding (M9), sortie tardive (M10), gérant qui réalloue (M11),
+foule (M12), preneurs (M13), métaordre visible (M14), déposant tardif (M15), contrepartie d'un gros ordre (M16).
+
+```
+  rang mécanisme                            qui paie -> qui gagne              p(net>0)      V    F priorité  statut
+  1    M10 sortie / gestion                 sortie tardive -> sortie miroir       0.672  0.882  0.6    0.466  REJECTED
+  2    M6 éviter la vague (NO-TRADE)        copieur naïf -> copieur filtré        0.500  1.000  0.6    0.450  MORE_DATA
+  3    M7 refus absorbé/tard/petit          copieur naïf -> copieur filtré        0.500  1.000  0.6    0.450  MORE_DATA
+  4    M13 fourniture de liquidité (HLP)    preneurs -> teneurs de marché         0.800  0.640  0.6    0.432  PROMISING
+  5    M11 réallocation                     gérant -> suiveur                     0.363  0.925  0.6    0.387  REJECTED
+  6    M12 consensus indépendant            foule -> consensus                    0.349  0.909  0.6    0.377  REJECTED
+  7    M5 suivre la cascade                 retardataires -> suiveurs             0.346  0.906  0.6    0.376  REJECTED
+  8    M2 décroissance / latence            copieur lent -> preneur rapide        0.226  0.700  0.3    0.139  REJECTED
+  9    M3 pression temporaire               impatients -> patients                0.096  0.346  0.6    0.133  REJECTED
+  10   M1 wallets informés                  non-informés -> informés              0.115  0.408  0.3    0.078  REJECTED
+  11   M4 absorber les ventes forcées       liquidés -> absorbeurs                0.051  0.195  0.6    0.074  REJECTED
+  12   M9 portage du leader                 payeur de funding -> porteur          0.041  0.158  0.6    0.060  REJECTED
+  13   M8 prime de funding (receveur)       côté surpeuplé -> receveur            0.028  0.107  0.6    0.040  REJECTED
+  14   M16 taille du fill du leader         contrepartie d'un gros ordre -> son auteur    0.017  0.065  0.6    0.025  REJECTED
+  15   M15 sélection de vaults gagnants     déposant tardif -> gérant (frais, survie)    0.012  0.049  0.6    0.018  REJECTED
+  16   M14 flux résiduel des métaordres     métaordre visible -> anticipateur     0.500  1.000  0.0    0.000  UNMEASURABLE
+
+  M10  capacité : 5 x 20 USD >= ordre min. 10 USD : non contraignant | fill : entrée taker, sortie miroir taker | réfutation : net <= 0 en prospectif (apprenant, 27/11)
+  M6   capacité : 5 x 20 USD >= ordre min. 10 USD : non contraignant | fill : aucun (refus) | réfutation : gain du refus <= 0 sur novembre (H18)
+  M7   capacité : 5 x 20 USD >= ordre min. 10 USD : non contraignant | fill : aucun (refus) | réfutation : gain du refus <= 0 après le gel (H16)
+  M13  capacité : dépôt <= capital ; verrou 4 j de HLP | fill : aucun fill : dépôt en vault | réfutation : rendement 28 j <= 0 en prospectif (17/12)
+  M11  capacité : 5 x 20 USD >= ordre min. 10 USD : non contraignant | fill : taker au meilleur prix + écart, après 120 s | réfutation : excès sur témoin <= 0 (H14 : -14,2)
+  M12  capacité : 5 x 20 USD >= ordre min. 10 USD : non contraignant | fill : taker au meilleur prix + écart, après 120 s | réfutation : excès <= 0 (L9 : -12,6) ; kappa ~ 0 (pas de course commune)
+  M5   capacité : 5 x 20 USD >= ordre min. 10 USD : non contraignant | fill : taker au meilleur prix + écart, après 120 s | réfutation : leader <= vague seule (H19 : -1,0 vs +72,9)
+  M2   capacité : 5 x 20 USD >= ordre min. 10 USD : non contraignant | fill : taker à 120 s ; maker < 60 s exigerait un modèle de remplissage | réfutation : markout à 120 s <= coût (H20 : +0,07 vs 12)
+  M3   capacité : 5 x 20 USD >= ordre min. 10 USD : non contraignant | fill : taker au meilleur prix + écart, après 120 s | réfutation : rebond 1 h - coût <= 0 (L2 : -5,8)
+  M1   capacité : 5 x 20 USD >= ordre min. 10 USD : non contraignant | fill : taker au meilleur prix + écart, après 120 s | réfutation : excès top-tiers <= 0 sur segment vierge (H15b : -28,7)
+  M4   capacité : 5 x 20 USD >= ordre min. 10 USD : non contraignant | fill : taker au meilleur prix + écart, après 120 s | réfutation : excès sur jumeau <= 0 (H17 : -59,4)
+  M9   capacité : 5 x 20 USD >= ordre min. 10 USD : non contraignant | fill : taker au meilleur prix + écart, après 120 s ; tenue 24 h | réfutation : net <= 0 (L11 : -53,1)
+  M8   capacité : 5 x 20 USD >= ordre min. 10 USD : non contraignant | fill : taker au meilleur prix + écart, après 120 s ; funding réglé horaire | réfutation : receveur - payeur <= 0 (H21 : -52,3)
+  M16  capacité : 5 x 20 USD >= ordre min. 10 USD : non contraignant | fill : taker au meilleur prix + écart, après 120 s | réfutation : excès des gros fills <= 0 (L8 : +4,65 brut à 4 h, sous le coût)
+  M15  capacité : dépôt <= capital ; frais de performance du gérant | fill : aucun fill : dépôt en vault | réfutation : rendement < HLP après correction de survie (V : -436 bps/28 j)
+  M14  capacité : 5 x 20 USD >= ordre min. 10 USD : non contraignant | fill : — | réfutation : trop rare pour un test (0,19 % des fills)
+```
+

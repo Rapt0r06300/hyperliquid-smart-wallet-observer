@@ -25,3 +25,10 @@ def test_sans_effet_mesure_il_faut_un_statut_explicite() -> None:
 def test_faisabilite_nulle_donne_une_priorite_nulle_et_classement_stable() -> None:
     assert P.score(P.Mecanisme("x", "a -> b", "t", None, None, 0.0, "UNMEASURABLE", 0.5))["priorite"] == 0.0
     assert P.classement() == P.classement() and len({s["code"] for s in P.classement()}) == len(P.MECANISMES) >= 12
+
+
+def test_chaque_mecanisme_reel_a_une_fiche_complete_et_un_payeur() -> None:
+    for s in P.classement():
+        assert "NON_RENSEIGNE" not in (s["capacite_100_usd"], s["fill_utile"], s["test_de_refutation"]), s["code"]
+        assert "->" in s["transfert"], s["code"]
+
