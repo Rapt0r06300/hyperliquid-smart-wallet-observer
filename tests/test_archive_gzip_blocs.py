@@ -312,6 +312,26 @@ def test_un_ruban_reecrit_en_entier_ne_redepose_que_ses_lignes_nouvelles(tmp_pat
     assert _deposes(tmp_path) == 45                                       # 5 nouvelles, aucun doublon
 
 
+def test_une_nouvelle_version_d_un_fill_deja_au_coffre_entre_mais_pas_sa_copie_exacte(tmp_path):
+    """24/11/2026 : le prechargement comparait les IDENTITES ; une version enrichie (pos_avant, fee...) d'un fill deja
+    au coffre etait ecartee. 21 % des lignes de meme identite n'avaient pas le meme contenu. Seule la copie identique
+    a l'octet est un doublon."""
+    import sceller_coffre_local as S
+
+    vivant = tmp_path / "runtime" / "data" / "vault_fills.jsonl"
+    vivant.parent.mkdir(parents=True)
+    anciennes = _fills_bruts(0, 40)
+    vivant.write_text("".join(json.dumps(x) + "\n" for x in anciennes), encoding="utf-8")
+    assert S.main(["--root", str(tmp_path), "--now-ms", str(NOW), "--nom", vivant.name]) == 0
+    assert _deposes(tmp_path) == 40
+    enrichies = [{**x, "pos_avant": 1.5, "taille_usd": 2000.0} for x in anciennes[:5]]      # meme identite
+    vivant.write_text("".join(json.dumps(x) + "\n" for x in list(reversed(anciennes)) + enrichies), encoding="utf-8")
+    assert S.main(["--root", str(tmp_path), "--now-ms", str(NOW), "--nom", vivant.name]) == 0
+    assert _deposes(tmp_path) == 45                     # les 5 versions enrichies entrent, les 40 copies exactes non
+    assert S.main(["--root", str(tmp_path), "--now-ms", str(NOW), "--nom", vivant.name]) == 0
+    assert _deposes(tmp_path) == 45                     # inchange : rien ne rentre deux fois
+
+
 def test_un_ruban_modifie_recemment_ou_trop_petit_reste_en_clair(tmp_path):
     import sceller_coffre_local as S
 

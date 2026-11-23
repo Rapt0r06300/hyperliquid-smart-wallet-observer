@@ -106,6 +106,52 @@ def test_une_mesure_perimee_ne_touche_a_rien(tmp_path):
     assert [x["shard"] for x in bilan["ignores_mesure_perimee"]] == [recent["shard"]]
 
 
+def test_meme_identite_mais_autre_contenu_n_est_jamais_retire(tmp_path):
+    """23/11/2026 : 21 % des fills retirés par identité seule portaient des champs que la copie gardée n'avait pas
+    (closedPnl, fee, pos_avant...). Seul un contenu identique à l'octet est un doublon."""
+    ancien = _shard(tmp_path, "20261120T100000Z_aaaa", "asset_ctx_tape", [_ligne(i) for i in range(20)])
+    enrichies = [(json.dumps({"coin": "ETH", "ts_ms": NOW - 100_000 + i, "mark": 2000.0 + i, "oi": 5.0}) + "\n").encode()
+                 for i in range(20)]                                       # même identité (coin, ts), plus riche
+    recent = _shard(tmp_path, "20261123T100000Z_bbbb", "asset_ctx_tape", enrichies + [_ligne(i) for i in range(5)])
+    _coffre(tmp_path, [ancien, recent])
+    r = _mesurer(tmp_path)
+    assert r["total_doublons"] == 5                                         # les 5 copies exactes, rien d'autre
+    assert r["bilan"]["asset_ctx"]["meme_identite_contenu_different"] == 20
+    assert [s["lignes_en_double"] for s in r["shards"]] == [[[20, 25]]]
+
+
+def test_annuler_un_lot_remet_les_originaux_et_garde_la_trace(tmp_path):
+    ancien = _shard(tmp_path, "20261120T100000Z_aaaa", "asset_ctx_tape", [_ligne(i) for i in range(40)])
+    recent = _shard(tmp_path, "20261123T100000Z_bbbb", "asset_ctx_tape",
+                    [_ligne(i) for i in range(30)] + [_ligne(i, mark=9.0) for i in range(100, 110)])
+    copie = _shard(tmp_path, "20261123T110000Z_cccc", "asset_ctx_tape_1795", [_ligne(i) for i in range(10)])
+    _coffre(tmp_path, [ancien, recent, copie])
+    avant = json.loads((tmp_path / D.INDEX).read_text(encoding="utf-8"))["shards"]
+    _mesurer(tmp_path)
+    assert D.main(["--racine", str(tmp_path)]) == 0
+    lot = json.loads((tmp_path / D.RAPPORT).read_text(encoding="utf-8"))[-1]["lot"]
+    assert D.main(["--racine", str(tmp_path), "--annuler", lot, "--motif", "test"]) == 0
+    index = json.loads((tmp_path / D.INDEX).read_text(encoding="utf-8"))
+    assert sorted(s["shard"] for s in index["shards"]) == sorted(s["shard"] for s in avant)
+    assert {s["shard"]: s for s in index["shards"]}[recent["shard"]] == recent          # entrée d'origine intacte
+    sortis = [s for s in index["shards_remplaces"] if s.get("annule_ms")]
+    assert len(sortis) == 1 and sortis[0]["derive_de"] == recent["shard"]              # le remplaçant est gardé
+    assert index["historique_dedoublonnage"][-1]["originaux_remis"] == 2
+
+
+def test_une_entree_qui_a_change_entre_construction_et_echange_n_est_pas_remplacee(tmp_path):
+    ancien = _shard(tmp_path, "20261120T100000Z_aaaa", "asset_ctx_tape", [_ligne(i) for i in range(20)])
+    recent = _shard(tmp_path, "20261123T100000Z_bbbb", "asset_ctx_tape", [_ligne(i) for i in range(25)])
+    index = {"shards": [ancien, dict(recent, sha256="autre")], "lots": []}
+    bilan = {"ignores_entree_changee": [], "par_famille": {}, "lignes_retirees": 0, "lignes_gardees": 0,
+             "remplaces": 0, "sans_remplacant": 0}
+    construits = {recent["shard"]: {"entree": recent, "resultat": {"remplace_par": None, "retirees": 20,
+                                                                    "gardees": 0}}}
+    assert D.echanger(index, construits, "LOT", 1, bilan) == []
+    assert [s["shard"] for s in index["shards"]] == [ancien["shard"], recent["shard"]]
+    assert bilan["ignores_entree_changee"] == [recent["shard"]]
+
+
 def test_un_scellage_ulterieur_garde_les_shards_remplaces(tmp_path):
     import sceller_coffre_local as S
 

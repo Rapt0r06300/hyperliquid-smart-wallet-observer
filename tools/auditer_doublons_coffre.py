@@ -73,6 +73,33 @@ def _empreintes_d_un_shard(root: str, rel: str, famille: str, sortie: str) -> di
     return {"shard": rel, "lignes": lues, "illisibles": illisibles}
 
 
+def _contenu_d_un_shard(root: str, rel: str, sortie: str) -> dict[str, Any]:
+    """Empreinte du CONTENU (8 octets, octets bruts de la ligne sans sa fin) de chaque ligne, dans l'ordre.
+
+    23/11/2026 : deux lignes de même identité n'ont pas toujours le même contenu -- 21 % des fills retirés à la
+    première passe portaient des champs (``closedPnl``, ``fee``, ``pos_avant``...) que la copie gardée n'avait pas ;
+    une bougie est vue à plusieurs états ; un même fill est reçu par deux transports. Seul un contenu identique À
+    L'OCTET est un doublon sans perte. Deux sérialisations différentes du même enregistrement sont donc gardées
+    (prudence : on préfère garder un doublon que perdre une information)."""
+    import numpy as np
+
+    valeurs = []
+    try:
+        with gzip.open(Path(root) / rel, "rb") as g:
+            for brut in g:
+                valeurs.append(int.from_bytes(hashlib.blake2b(brut.rstrip(b"\r\n"), digest_size=8).digest(), "little"))
+    except (OSError, EOFError) as exc:
+        return {"shard": rel, "erreur": f"{type(exc).__name__}: {exc}"}
+    tmp = sortie + ".tmp.npy"
+    np.save(tmp, np.array(valeurs, dtype=np.uint64))
+    os.replace(tmp, sortie)
+    return {"shard": rel, "lignes": len(valeurs)}
+
+
+def _fichier_contenu(sortie: str) -> str:
+    return sortie[: -len(".npy")] + ".contenu.npy"
+
+
 def _plages(rangs) -> list[list[int]]:
     """Rangs triés -> plages [début, fin) contiguës."""
     plages: list[list[int]] = []
@@ -85,8 +112,12 @@ def _plages(rangs) -> list[list[int]]:
     return plages
 
 
-def doublons_d_une_famille(fichiers: list[tuple[int, str]], total: int) -> dict[int, list[int]]:
-    """``fichiers`` = [(rang du shard, fichier d'empreintes)] dans l'ordre de priorité. -> {rang: [lignes en double]}"""
+def doublons_d_une_famille(fichiers: list[tuple[int, str]], total: int,
+                           versions: dict[str, int] | None = None) -> dict[int, list[int]]:
+    """``fichiers`` = [(rang du shard, fichier d'empreintes d'identité)] dans l'ordre de priorité.
+
+    -> {rang: [lignes en double]}. Une ligne est en double quand une ligne de rang plus petit a la même IDENTITÉ et
+    le même CONTENU (octets). Même identité mais contenu différent : gardée, comptée dans ``versions["lignes"]``."""
     import numpy as np
 
     tranches = max(1, -(-total // LIGNES_PAR_TRANCHE))
@@ -94,7 +125,7 @@ def doublons_d_une_famille(fichiers: list[tuple[int, str]], total: int) -> dict[
     resultat: dict[int, list[int]] = {}
     for k in range(tranches):
         bas, haut = bornes[k], bornes[k + 1]
-        hi, lo, rangs, lignes = [], [], [], []
+        hi, lo, ct, rangs, lignes = [], [], [], [], []
         for rang, chemin in fichiers:
             e = np.load(chemin, mmap_mode="r")
             if not len(e):
@@ -102,22 +133,30 @@ def doublons_d_une_famille(fichiers: list[tuple[int, str]], total: int) -> dict[
             idx = np.nonzero((e[:, 0] >= bas) & (e[:, 0] < haut))[0]
             if not len(idx):
                 continue
+            c = np.load(_fichier_contenu(chemin), mmap_mode="r")
+            if len(c) != len(e):
+                raise ValueError(f"empreintes incoherentes pour {chemin} : {len(e)} identites, {len(c)} contenus")
             d = np.ascontiguousarray(e[idx]).view(np.uint64).reshape(-1, 2)
             hi.append(d[:, 0].copy())
             lo.append(d[:, 1].copy())
+            ct.append(np.asarray(c[idx], dtype=np.uint64))
             rangs.append(np.full(len(idx), rang, dtype=np.uint32))
             lignes.append(idx.astype(np.uint32))
         if not hi:
             continue
-        hi_, lo_, rg_, li_ = (np.concatenate(x) for x in (hi, lo, rangs, lignes))
-        del hi, lo, rangs, lignes
-        ordre = np.lexsort((li_, rg_, lo_, hi_))
-        hs, ls = hi_[ordre], lo_[ordre]
-        double = np.zeros(len(ordre), dtype=bool)
-        double[1:] = (hs[1:] == hs[:-1]) & (ls[1:] == ls[:-1])
+        hi_, lo_, ct_, rg_, li_ = (np.concatenate(x) for x in (hi, lo, ct, rangs, lignes))
+        del hi, lo, ct, rangs, lignes
+        ordre = np.lexsort((li_, rg_, ct_, lo_, hi_))
+        hs, ls, cs = hi_[ordre], lo_[ordre], ct_[ordre]
+        meme_identite = np.zeros(len(ordre), dtype=bool)
+        meme_identite[1:] = (hs[1:] == hs[:-1]) & (ls[1:] == ls[:-1])
+        double = meme_identite.copy()
+        double[1:] &= cs[1:] == cs[:-1]
+        if versions is not None:
+            versions["lignes"] = versions.get("lignes", 0) + int((meme_identite & ~double).sum())
         for rang, ligne in zip(rg_[ordre][double].tolist(), li_[ordre][double].tolist()):
             resultat.setdefault(rang, []).append(ligne)
-        del hi_, lo_, rg_, li_, ordre, hs, ls, double
+        del hi_, lo_, ct_, rg_, li_, ordre, hs, ls, cs, double, meme_identite
     for v in resultat.values():
         v.sort()
     return resultat
@@ -136,30 +175,41 @@ def mesurer(root: Path, travail: Path, familles: set[str] | None = None, ouvrier
         sortie = travail / s["famille"] / f"{nom}.npy"
         sortie.parent.mkdir(parents=True, exist_ok=True)
         taches.append((rang, s, str(sortie)))
-    a_faire = [t for t in taches if not Path(t[2]).exists()]
-    log(f"  {len(shards):,} shards ; {len(a_faire):,} a lire ({len(taches) - len(a_faire):,} deja mesures)")
     erreurs: list[dict[str, Any]] = []
-    t0 = time.time()
-    if ouvriers <= 1:                                   # en ligne (tests, petits coffres)
-        for _, s, sortie in a_faire:
-            r = _empreintes_d_un_shard(str(root), s["shard"], s["famille"], sortie)
-            if r.get("erreur"):
-                erreurs.append(r)
-    else:
-        with ProcessPoolExecutor(max_workers=ouvriers) as pool:
-            futurs = {pool.submit(_empreintes_d_un_shard, str(root), s["shard"], s["famille"], sortie): s
-                      for _, s, sortie in a_faire}
-            for n, f in enumerate(as_completed(futurs), 1):
-                r = f.result()
+    for genre, fonction, fichier in (("identites", _empreintes_d_un_shard, lambda x: x),
+                                     ("contenus", _contenu_d_un_shard, _fichier_contenu)):
+        a_faire = [t for t in taches if not Path(fichier(t[2])).exists()]
+        log(f"  {len(shards):,} shards ; {genre} : {len(a_faire):,} a lire ({len(taches) - len(a_faire):,} deja mesures)")
+        t0 = time.time()
+
+        def lancer(s, sortie, _f=fonction, _x=fichier):
+            if _f is _empreintes_d_un_shard:
+                return (_f, (str(root), s["shard"], s["famille"], sortie))
+            return (_f, (str(root), s["shard"], _x(sortie)))
+
+        if ouvriers <= 1:                                   # en ligne (tests, petits coffres)
+            for _, s, sortie in a_faire:
+                f, args = lancer(s, sortie)
+                r = f(*args)
                 if r.get("erreur"):
                     erreurs.append(r)
-                if n % 200 == 0 or n == len(futurs):
-                    log(f"    lus {n:,}/{len(futurs):,} ({time.time() - t0:.0f} s)")
+        else:
+            with ProcessPoolExecutor(max_workers=ouvriers) as pool:
+                futurs = {}
+                for _, s, sortie in a_faire:
+                    f, args = lancer(s, sortie)
+                    futurs[pool.submit(f, *args)] = s
+                for n, fut in enumerate(as_completed(futurs), 1):
+                    r = fut.result()
+                    if r.get("erreur"):
+                        erreurs.append(r)
+                    if n % 500 == 0 or n == len(futurs):
+                        log(f"    lus {n:,}/{len(futurs):,} ({time.time() - t0:.0f} s)")
     import numpy as np
 
     par_famille: dict[str, list[tuple[int, str, dict]]] = {}
     for rang, s, sortie in taches:
-        if Path(sortie).exists():
+        if Path(sortie).exists() and Path(_fichier_contenu(sortie)).exists():
             par_famille.setdefault(s["famille"], []).append((rang, sortie, s))
     rapport_shards: list[dict[str, Any]] = []
     bilan: dict[str, Any] = {}
@@ -168,12 +218,15 @@ def mesurer(root: Path, travail: Path, familles: set[str] | None = None, ouvrier
         tailles = {rang: int(np.load(chemin, mmap_mode="r").shape[0]) for rang, chemin, _ in liste}
         total = sum(tailles.values())
         t1 = time.time()
-        doubles = doublons_d_une_famille([(r, c) for r, c, _ in liste], total)
+        versions: dict[str, int] = {}
+        doubles = doublons_d_une_famille([(r, c) for r, c, _ in liste], total, versions)
         n_doubles = sum(len(v) for v in doubles.values())
         bilan[fam] = {"lignes": total, "doublons": n_doubles, "shards": len(liste), "shards_touches": len(doubles),
-                      "part": round(n_doubles / total, 6) if total else 0.0}
+                      "part": round(n_doubles / total, 6) if total else 0.0,
+                      "meme_identite_contenu_different": versions.get("lignes", 0)}
         log(f"  {fam:<18} {total:>12,} lignes  {n_doubles:>11,} en double ({100 * n_doubles / max(1, total):.2f} %) "
-            f"dans {len(doubles):,} shard(s)  [{time.time() - t1:.0f} s]")
+            f"dans {len(doubles):,} shard(s) ; {versions.get('lignes', 0):>10,} meme identite / autre contenu (gardees)"
+            f"  [{time.time() - t1:.0f} s]")
         for rang, chemin, s in liste:
             if s.get("deposes") is not None and int(s["deposes"]) != tailles[rang]:
                 ecarts.append({"shard": s["shard"], "deposes_index": s["deposes"], "lignes_lues": tailles[rang]})
@@ -183,8 +236,9 @@ def mesurer(root: Path, travail: Path, familles: set[str] | None = None, ouvrier
                                        "lignes_en_double": _plages(doubles[rang])})
     rapport = {
         "schema": "hypersmart.coffre_certifie.doublons_mesures.v1", "genere_ms": int(time.time() * 1000),
-        "regle": "identite du certificateur (coffre_certifie.identite) ; la copie gardee est celle du lot le plus "
-                 "ancien (batch_id, puis chemin du shard, puis rang de ligne) ; les rangs sont comptes depuis 0",
+        "regle": "doublon = meme identite du certificateur (coffre_certifie.identite) ET meme contenu a l'octet ; la "
+                 "copie gardee est celle du lot le plus ancien (batch_id, puis chemin du shard, puis rang de ligne) ; "
+                 "meme identite mais autre contenu = gardee (versions, receptions multiples) ; rangs comptes depuis 0",
         "outil": "tools/auditer_doublons_coffre.py", "familles_mesurees": sorted(bilan),
         "bilan": bilan, "total_lignes": sum(b["lignes"] for b in bilan.values()),
         "total_doublons": sum(b["doublons"] for b in bilan.values()),

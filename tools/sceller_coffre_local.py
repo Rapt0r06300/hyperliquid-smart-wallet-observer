@@ -480,16 +480,23 @@ def _precharger_identites_fenetre(coffre: Path, source: Path, famille: str, deja
             continue
         faits.add(s.get("shard"))
         try:
-            with gzip.open(coffre.parents[1] / s["shard"], "rt", encoding="utf-8") as g:
+            with gzip.open(coffre.parents[1] / s["shard"], "rb") as g:
                 for ligne in g:
-                    try:
-                        deja_vus.add(identite(json.loads(ligne), famille))
-                        n += 1
-                    except (ValueError, TypeError):
-                        continue
+                    deja_vus.add(empreinte_contenu(ligne.rstrip(b"\r\n")))
+                    n += 1
         except OSError:
             continue
     return n
+
+
+def empreinte_contenu(octets: bytes) -> int:
+    """Empreinte (8 octets) du CONTENU exact d'une ligne scellee.
+
+    24/11/2026 -- AUCUNE VERSION PERDUE. Le prechargement de periode (rotation, ruban reecrit) comparait les IDENTITES :
+    une nouvelle version d'un fill deja au coffre (enrichie de pos_avant, fee, closedPnl...) etait ecartee comme un
+    doublon. Mesure du 23/11 : 21 % des lignes de meme identite n'avaient PAS le meme contenu. Seule une ligne
+    identique a l'octet a celle deja scellee est un doublon ; une autre version entre au coffre."""
+    return int.from_bytes(hashlib.blake2b(octets, digest_size=8).digest(), "little")
 
 
 def _longueur_claire(source: Path) -> tuple[int | None, bool]:
@@ -532,6 +539,7 @@ def sceller_fichier(
     now_ms: int, deja_vus: set, log, prefixe: str = "",
     debut_octets: int = 0, fin_octets: int | None = None, rattrapage: bool = False,
     expected_source_sha256: str | None = None, source_snapshot_octets: int | None = None,
+    contenus_coffre: set | None = None,
 ) -> dict[str, Any] | None:
     """Certifie un fichier source, écrit le shard scellé + la quarantaine.
 
@@ -602,13 +610,18 @@ def sceller_fichier(
                     stats.doublons += 1
                     stats._ajouter_raison("doublon")
                     continue
+                ligne_scellee = _ecrire_json({**norm, "tier": "LOCAL", "reconciliation_status": "LOCAL_UNRECONCILED"})
+                if contenus_coffre and empreinte_contenu(ligne_scellee.encode("utf-8")) in contenus_coffre:
+                    # deja au coffre A L'OCTET (rotation, ruban reecrit) ; une AUTRE version de meme identite entre
+                    stats.doublons += 1
+                    stats._ajouter_raison("deja_au_coffre_a_l_octet")
+                    continue
                 deja_vus.add(cle)
                 if decision == REPARE:
                     stats.repares += 1
                 else:
                     stats.passes += 1
-                sortie.write(_ecrire_json({**norm, "tier": "LOCAL",
-                                           "reconciliation_status": "LOCAL_UNRECONCILED"}) + "\n")
+                sortie.write(ligne_scellee + "\n")
                 ecrits += 1
                 coin = str(norm.get("coin") or "?")
                 coins[coin] = coins.get(coin, 0) + 1
@@ -1140,6 +1153,7 @@ def main(argv: list[str] | None = None) -> int:
     deja_vus = EnsembleDIdentites()
     rubans_precharges: set = set()
     shards_fenetre: set = set()
+    contenus_coffre: set = set()
     entrees_manifeste: list[dict[str, Any]] = []
     total = StatsCertif()
     scelles_pour_reset: list[Path] = []
@@ -1332,7 +1346,7 @@ def main(argv: list[str] | None = None) -> int:
                     # 23/11/2026 -- ROTATION D'UN RUBAN SCELLE AU FIL DE L'EAU, PREFIXE NON RECONNU. Sans cela,
                     # elle se rescellait EN ENTIER (vu le 23/11 : 148 526 micro-BBO et 784 648 BBO redeposes). Les
                     # identites du coffre sur SA periode sont prechargees : seules les lignes absentes entrent.
-                    connues = _precharger_identites_fenetre(coffre, source, famille, deja_vus, shards_fenetre)
+                    connues = _precharger_identites_fenetre(coffre, source, famille, contenus_coffre, shards_fenetre)
                     if connues is None:
                         _log(log, "        [!] archive a prouver sans aucun horodatage lisible : je ne depose RIEN "
                                   "(sinon elle entrerait en entier) ; elle reste a prouver.")
@@ -1348,6 +1362,7 @@ def main(argv: list[str] | None = None) -> int:
                 now_ms=source_cutoff_ms, deja_vus=deja_vus, log=log, prefixe=tete,
                 debut_octets=debut, fin_octets=fin, rattrapage=rattrapage,
                 expected_source_sha256=sha_src, source_snapshot_octets=taille,
+                contenus_coffre=contenus_coffre,
             )
             faits_octets += taille
             if entree is not None:
