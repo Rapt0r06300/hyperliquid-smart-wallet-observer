@@ -23,7 +23,7 @@ Carte blanche de l'opérateur : « je te laisse tout choisir, ne me demande rien
 | quarantaine (6,5 M lignes) : quasi tout vient des lots du 8 au 16/11, règles corrigées depuis | sonde : fills et instantanés de vaults déjà récupérés (100 %) ; **trades CopyVault « futurs » : 84 % absents du coffre** |
 | `tools/reparer_quarantaine.py` : recertifie, vérifie l'identité au coffre, verse une fois, quarantaine intacte | fait, 2 tests (3 gardes rouges sous injection) |
 | plan réel (6 512 367 lignes lues) | 436 380 doublons internes ; 598 encore refusées (vraies erreurs) ; **~4,65 M lignes valides paraissent absentes du coffre** (BBO 3,86 M, micro-BBO 514 k, trades 127 k, explorer 61 k, micro-trades 36 k, L2 20 k…) — contre-épreuve à clé lâche (tid ; coin+heure+bid+ask) : **mêmes chiffres** que l'identité stricte (trades 279/1 560, BBO 510/2 451 présents) → l'absence est RÉELLE ; **réparation réelle lancée** (la preuve des sessions attendra qu'elle soit scellée : sinon les deux outils verseraient la même ligne) |
-| `tools/prouver_scellement.py` (preuve par identité des « à prouver ») | fait, 3 tests (2 gardes rouges) ; plan réel : beaucoup de lignes des sessions du 8–9/11 paraissent absentes (ex. 60 625 trades sur 60 685) — même réserve |
+| `tools/prouver_scellement.py` (preuve par identité des « à prouver ») | fait, 3 tests (2 gardes rouges) ; plan réel (128 fichiers) : **13 630 086 lignes déjà au coffre, 4 498 381 absentes** (fills : 100 % présents ; trades, asset_ctx, dispersion, carnets de venues : familles ajoutées au certificateur APRÈS ces sessions) ; preuve réelle après la réparation |
 | ⚠ **mon passage `--recensement` a redéposé 784 648 lignes BBO** (rotations sans preuve d'état scellées à l'aveugle) | consigné dans `runtime/coffre_certifie/DOUBLONS_CONNUS.json` (shards intacts) ; règle corrigée : rotation sans preuve = `A_PROUVER` |
 | ⚠ **défaut du certificateur (antérieur)** : 8 préfixes gardés par ruban → une rotation ancienne non reconnue se rescellait en entier (49 086 micro-BBO) | corrigé : 64 préfixes |
 | ⚠ **défaut du certificateur (antérieur)** : pour une archive `.gz`, les 5 préfixes les plus longs essayés à l'aveugle ; un préfixe trop long faisait planter le hash | corrigé : longueur lue sans décompresser (index ou ISIZE), essai par longueur ; 2 gardes rouges |
@@ -31,7 +31,7 @@ Carte blanche de l'opérateur : « je te laisse tout choisir, ne me demande rien
 | couverture du projet | 99,52 % au départ du passage ; **le rapport écrit (96,74 %) est faux** : le processus avait chargé le recensement avant que la zone Hydromancer n'existe |
 | 72 Go en clair dans `runtime/reports/copy_vault_quant_lab/<passage>/workspace/runtime/data/` | ce sont des COPIES des rubans de collecte faites par chaque passage du labo (ex. 7,1 Go de `vault_fills_live.jsonl` le 18/11) ; données déjà au coffre et aux archives. **Non compressées** : la reprise du labo relit les passages précédents — vérifier ses lecteurs d'abord |
 | suite des tests liés (tous les fichiers qui touchent un module modifié) | **808 verts**, 0 échec |
-| push | retenu : Codex travaille dans le dépôt |
+| push | **fait** à 15:38 UTC quand Codex était au repos : `SYNCHRONIZED`, SHA local = GitHub `928e9a54a542` ; les 14 nouveaux fichiers et les modifications vérifiés dans le commit |
 
 ## 🗜️ 23/11/2026, 14:13 (heure lue) — compression sans perte, recensement à 100 %, et un défaut du certificateur
 
