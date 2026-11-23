@@ -1264,3 +1264,14 @@ même sémantique (lien ou non-fichier -> None). Avant/après sur 25 000 shards 
 (~5,4 -> ~2,5 min pour 1,79 M), identités identiques sur 2 000 contrôles. 316 tests de restauration verts. Le
 parallélisme (encore x4,7 sur NVMe) n'est PAS appliqué : il demanderait de figer l'identité avant usage, à concevoir.
 
+### H22-P — confrontation prospective de H22 aux données de NOS collecteurs (pré-enregistrée le 23/11 à 02:38 heure de Paris)
+
+Règle H22 inchangée (gel `FREEZE_H22.json`, code 9d809bf4a3d7). Données : UNIQUEMENT ce que nos collecteurs enregistrent
+APRÈS le gel (2026-11-23T01:19:57Z) : carnet `copy_vault_l2_tape.jsonl` (5 niveaux avec tailles), trades
+`copy_vault_trades_lane.jsonl` (côté agresseur), ouvertures de leaders du journal du moteur. Constat au moment de
+l'inscription : 0 ligne de carnet ni de trade après le gel (carnet jusqu'au 22/11 20:28 UTC, trades jusqu'à 23:44 UTC).
+- Garde de causalité (n'ajoute aucun gain) : un fill reçu plus de 60 s après son exécution ne pouvait pas être copié à
+  t + 60 s -> NO-TRADE, compté 0 dans le PnL total.
+- **Verdict seulement si** >= 100 signaux mesurables sur >= 5 jours distincts ; sinon `MORE_DATA`.
+- Critère : PnL total par signal IC95 > 0 -> `PROMISING` (prospectif, toujours pas PROVEN) ; sinon `REJECTED`.
+
