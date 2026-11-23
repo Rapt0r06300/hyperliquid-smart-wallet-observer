@@ -31,7 +31,8 @@ def test_sizing_defaults_conservative():
     from hl_observer.config.runtime_flags import load_sizing
 
     sz = load_sizing()
-    assert sz.capital_usd == 350.0
+    from hl_observer.contrat_paper import PAPER_EQUITY_USD
+    assert sz.capital_usd == PAPER_EQUITY_USD == 100.0
     assert sz.leverage == 5
     assert sz.max_open_positions == 2
     assert sz.kelly_sizing_enabled is True

@@ -14,8 +14,8 @@ RACINE = Path(__file__).resolve().parents[1]
 
 
 def _replication(statut, net, intervalle, jours, run="r1"):
-    return {"run_id": run, "evidence_tier": "T", "summary": {"net_usd_per_day": net, "interval_95": intervalle,
-                                                              "distinct_days": jours},
+    return {"run_id": run, "evidence_tier": "T", "config": {"capital_usd": 100.0},   # capital de l'essai
+            "summary": {"net_usd_per_day": net, "interval_95": intervalle, "distinct_days": jours},
             "verdicts": [{"hypothesis": "copy_vault_slow_replication_350usd", "status": statut, "reason": "x"}]}
 
 
@@ -23,7 +23,8 @@ def _ouvertures(statut, net_bps, intervalle, jours, usd):
     return {"run_id": "o1", "evidence_tier": "T", "config": {"min_days": 30},
             "primary": {"net": {"moyenne_bps": net_bps, "intervalle_bps": intervalle, "jours": jours},
                         "niveau_intervalle": 0.95},
-            "compte_paper": {"net_usd_par_jour": usd},
+            # le producteur (`simulate_capital`) ecrit toujours le capital de la simulation
+            "compte_paper": {"capital_usd": 100.0, "net_usd_par_jour": usd},
             "verdicts": [{"hypothesis": "copy_vault_aggressive_open_drift", "status": statut, "reason": "x"}]}
 
 
@@ -155,8 +156,29 @@ def test_la_selection_de_leaders_est_lue_par_le_planificateur():
     record = {"run_id": "o2", "config": {"min_days": 30},
               "selection": {"primaire": {"retenus": {"net": {"moyenne_bps": 15.0, "intervalle_bps": [4.0, 26.0], "jours": 35},
                                                      "niveau_intervalle": 0.95},
-                                         "compte_paper": {"esperance_usd_par_jour": 0.9}}},
+                                         "compte_paper": {"capital_usd": 100.0, "esperance_usd_par_jour": 0.9}}},
               "verdicts": [{"hypothesis": "copy_vault_aggressive_open_selected_leaders", "status": "PROMISING", "reason": "x"}]}
     ligne = P.build_plan([record])["hypotheses"][0]
     assert ligne["effet"] == 15.0 and ligne["usd_par_jour"] == 0.9 and ligne["lecture"] == "SIGNAL_PROMETTEUR"
     assert ligne["p_positif"] > 0.99 and ligne["priorite"] > 0
+
+
+def test_un_montant_mesure_sur_un_autre_capital_n_est_ni_transpose_ni_priorise() -> None:
+    """23/11/2026 : les esperances des anciens essais etaient mesurees sur 350 USD ; le plan (100 USD) les
+    classait comme si elles valaient pour 100 USD. Un montant ne vaut que pour SON capital."""
+    from hl_observer.backtesting import copy_vault_research_planner as P
+
+    def enregistrement(capital: float) -> dict:
+        return {"verdicts": [{"hypothesis": "copy_vault_aggressive_open_drift", "status": "MORE_DATA"}],
+                "config": {"min_days": 30},
+                "primary": {"net": {"moyenne_bps": 6.0, "intervalle_bps": [2.0, 10.0], "jours": 40}},
+                "capital_350": {"capital_usd": capital, "esperance_usd_par_jour": 3.0}}
+
+    a_350 = P.build_plan([enregistrement(350.0)], capital_usd=100.0)["hypotheses"][0]
+    assert a_350["usd_par_jour"] is None and a_350["usd_par_jour_mesure"] == 3.0
+    assert a_350["capital_usd_de_la_mesure"] == 350.0 and a_350["priorite"] == 0.0
+    assert "remesurer au capital paper de 100 USD" in a_350["action"]
+    a_100 = P.build_plan([enregistrement(100.0)], capital_usd=100.0)["hypotheses"][0]
+    assert a_100["usd_par_jour"] == 3.0 and a_100["priorite"] > 0          # au bon capital : il compte
+    rendu = P.render_plan(P.build_plan([enregistrement(350.0)], capital_usd=100.0))
+    assert "USD/jour (100 USD)" in rendu and "n/d (sur 350 USD : +3.000)" in rendu

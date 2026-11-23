@@ -44,7 +44,6 @@ def _stub_main(monkeypatch, module, root, *, dirty=False, origin=None, local_hea
         ("remote", "get-url", "origin"): current_origin,
         ("fetch", "--no-tags", "origin", "main"): "",
         ("rev-parse", "refs/remotes/origin/main"): "b" * 40,
-        ("merge", "--ff-only", "refs/remotes/origin/main"): "",
         ("rev-parse", "HEAD"): "b" * 40,
     }
 
@@ -54,11 +53,16 @@ def _stub_main(monkeypatch, module, root, *, dirty=False, origin=None, local_hea
             raise AssertionError(f"unexpected git command {args}")
         if args == ("rev-parse", "HEAD"):
             return etat["head"]
-        if args[0] == "merge":
-            etat["head"] = "b" * 40          # l'avance rapide amène HEAD sur origin/main
         return responses[args]
 
+    def adopter(_root):
+        # 23/11/2026 : plus de `merge --ff-only` (index entier relu, écran noir 15-30 min) ;
+        # l'avance rapide passe par le moteur de POUSSER-GITHUB en mode `--adopter-seulement`.
+        calls.append(("ADOPTION_SANS_BALAYAGE",))
+        etat["head"] = "b" * 40
+
     monkeypatch.setattr(module, "_git", command)
+    monkeypatch.setattr(module, "_adopter_github_main", adopter)
     # synchronize_main interroge désormais _modified_code_paths (code seul).
     monkeypatch.setattr(
         module, "_modified_code_paths",
@@ -73,9 +77,8 @@ def test_clean_local_main_fetches_then_fast_forwards_without_reset(monkeypatch, 
     root = tmp_path.resolve()
     calls = _stub_main(monkeypatch, module, root, local_head="a" * 40)     # HEAD en retard
     assert module.synchronize_main(root) == "b" * 40
-    assert calls.index(("fetch", "--no-tags", "origin", "main")) < calls.index(
-        ("merge", "--ff-only", "refs/remotes/origin/main")
-    )
+    assert calls.index(("fetch", "--no-tags", "origin", "main")) < calls.index(("ADOPTION_SANS_BALAYAGE",))
+    assert not any(args[0] == "merge" for args in calls)                  # jamais l'index entier
     assert not any("reset" in args or "rebase" in args or "stash" in args for args in calls)
 
 
@@ -139,15 +142,11 @@ def test_non_fast_forward_fails_without_altering_local_history(monkeypatch, tmp_
     # HEAD en retard : sans cela la fusion n'est plus tentée (raccourci du 13/11) et ce test,
     # qui vérifie le refus d'une avance non rapide, ne vérifiait plus rien.
     calls = _stub_main(monkeypatch, module, tmp_path.resolve(), local_head="a" * 40)
-    original_git = module._git
+    def refus(_root):
+        raise module.SyncError("adoption de GitHub main refusee (code 2) : historique divergent")
 
-    def git(root, *args):
-        if args[0] == "merge":
-            raise module.SyncError("git merge failed (exit 1): not possible to fast-forward")
-        return original_git(root, *args)
-
-    monkeypatch.setattr(module, "_git", git)
-    with pytest.raises(module.SyncError, match="fast-forward"):
+    monkeypatch.setattr(module, "_adopter_github_main", refus)
+    with pytest.raises(module.SyncError, match="refusee"):
         module.synchronize_main(tmp_path)
     assert not any("reset" in args or "rebase" in args for args in calls)
 
@@ -245,7 +244,7 @@ def test_root_entrypoints_are_reusable_in_existing_checkout():
     assert 'call "%UNIFIED%" --shards-only --preflight-only --skip-update' not in windows
     assert "EnableDelayedExpansion" in windows
     assert "for /f \"delims=\" %%R in (\"!RC!\")" in windows
-    assert 'exec python3 tools/sync_complete_clone.py "$@"' in unix
+    assert 'exec python3 -m tools.sync_complete_clone "$@"' in unix   # forme du commit 04e7b46 (imports deterministes)
     assert "GIT_LFS_SKIP_SMUDGE=1" in unix
 
 
@@ -958,3 +957,21 @@ def test_double_click_cmd_downloads_all_safe_with_verified_unpack_and_supports_p
     assert "--all-safe" in launcher
     assert "--unpack-safe" in launcher
     assert "Option AlinaSync inconnue" in launcher
+
+
+def test_adoption_passe_par_le_moteur_en_mode_adopter_seulement(monkeypatch, tmp_path):
+    """Jamais de publication : le moteur est appelé avec `--adopter-seulement`, son refus remonte."""
+    module = _module()
+    vus = []
+
+    def run(command, **kwargs):
+        vus.append((command, kwargs))
+        return SimpleNamespace(returncode=2)
+
+    monkeypatch.setattr(module.subprocess, "run", run)
+    with pytest.raises(module.SyncError, match="POUSSER-GITHUB"):
+        module._adopter_github_main(tmp_path)
+    commande, options = vus[0]
+    assert commande[1].endswith("alina_git_code_sync.py") and "--adopter-seulement" in commande
+    assert options["stdin"] is module.subprocess.DEVNULL and "stdout" not in options   # progression visible
+

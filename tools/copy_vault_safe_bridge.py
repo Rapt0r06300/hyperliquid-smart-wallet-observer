@@ -198,10 +198,21 @@ def _fills(record: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
         or (data.get("user") and str(data["user"]).lower() != vault)
     ):
         raise SafeBridgeError("Copy-Vault fill identity or message mismatch")
-    if data.get("isSnapshot") is True:
+    drapeau = data.get("isSnapshot")
+    if drapeau is True:
         return [], len(data.get("fills") or [])
-    if data.get("isSnapshot") is not False:
-        raise SafeBridgeError("Copy-Vault fill snapshot flag missing")
+    if drapeau is None:
+        # 23/11/2026 -- DRAPEAU ABSENT. Le type officiel est `isSnapshot?: boolean` et le SDK le plus repandu
+        # (nktkas) le type `isSnapshot?: true` : seul l'INSTANTANE porte le drapeau, toujours a `true`. Les
+        # 29 messages SAFE en direct (01/10 -> 17/10, 35 fills) n'ont pas le champ ; ils etaient TOUS mis en
+        # quarantaine, d'ou 0 fill admissible et le NO_GO du labo. On ne devine pas pour autant : l'absence
+        # n'est acceptee que si le collecteur, qui a vu la connexion, l'a AUSSI classe `is_snapshot: false`.
+        # Absent des deux cotes, ou contradictoire : refus, comme avant.
+        resume = record.get("parsed_summary")
+        if not isinstance(resume, dict) or resume.get("is_snapshot") is not False:
+            raise SafeBridgeError("Copy-Vault fill snapshot flag missing")
+    elif drapeau is not False:
+        raise SafeBridgeError("Copy-Vault fill snapshot flag invalid")
     fills = parser_message_userfills(
         message, vault=vault, received_at_ms=receive,
         receive_mono_ns=record.get("local_monotonic_ns"),
@@ -422,6 +433,21 @@ def _safe_registry_rows(
     if (type(expected) is not int or expected <= 0 or len(raw) != expected
             or unpack.get("certified_shards") != expected):
         raise SafeBridgeError("SAFE archive, extraction and registry shard counts disagree")
+    # 23/11/2026 : le deballage se limite aux familles ACTIVES (copy_vault_*) ; le registre complet
+    # vient d'etre controle ci-dessus, on ne lit ensuite que ce qui a ete deballe. Avant, le pont
+    # parcourait les 1 792 577 shards (deux empreintes chacun) pour en ecarter 99 %.
+    if unpack.get("unpack_scope") == "COPY_VAULT_ONLY":
+        try:
+            from tools.unpack_verified_safe import PREFIXE_ACTIF, _catalog_safe_bytes
+        except ModuleNotFoundError:
+            from unpack_verified_safe import PREFIXE_ACTIF, _catalog_safe_bytes
+        selection, _familles = _catalog_safe_bytes(
+            catalog_path, recovery, catalog, family_prefix=PREFIXE_ACTIF,
+        )
+        actifs = {s.relative_to(recovery).as_posix() for s in selection}
+        raw = [row for row in raw if str(row[0]).replace(chr(92), "/") in actifs]
+        if len(raw) != len(actifs) or unpack.get("unpacked_shards") != len(raw):
+            raise SafeBridgeError("active-family SAFE shards and their extraction disagree")
     return catalog, [
         (str(row[0]), int(row[1]), str(row[2]), tuple(int(v) for v in row[3:]))
         for row in raw

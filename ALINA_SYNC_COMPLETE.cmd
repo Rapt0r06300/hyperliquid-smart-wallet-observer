@@ -120,7 +120,7 @@ rem reconciliation (trous entre sources, couverture des leaders) et le contexte 
 rem plus pres de chaque fill ne servaient donc a rien. Fail-soft comme le reste de la
 rem chaine : un refus (ruban absent) compte comme lane manquee, jamais comme succes.
 call "%ALINA_ROOT%tools\launcher_log.cmd" "ALINA_SYNC_COMPLETE" STEP github-lanes "reconcilier_sources.py" ""
-"!ALINA_SYNC_PYTHON!" !ALINA_SYNC_PY_ARGS! "%ALINA_ROOT%toolseconcilier_sources.py" --root "%ALINA_ROOT%." --source "poll=runtime/data/vault_fills_live.jsonl" --source "ws_lane=runtime/data/vault_fills_ws_lane.jsonl" --source "node=runtime/data/node_fills_tape.jsonl" --out "runtime/reports/reconciliation_sources.json" >>"%ALINA_ROOT%runtime\logs\launchers\ALINA_SYNC_COMPLETE.output.log" 2>&1
+"!ALINA_SYNC_PYTHON!" !ALINA_SYNC_PY_ARGS! "%ALINA_ROOT%tools\reconcilier_sources.py" --root "%ALINA_ROOT%." --source "poll=runtime/data/vault_fills_live.jsonl" --source "ws_lane=runtime/data/vault_fills_ws_lane.jsonl" --source "node=runtime/data/node_fills_tape.jsonl" --out "runtime/reports/reconciliation_sources.json" >>"%ALINA_ROOT%runtime\logs\launchers\ALINA_SYNC_COMPLETE.output.log" 2>&1
 set "LANE_RC=!ERRORLEVEL!"
 call "%ALINA_ROOT%tools\launcher_log.cmd" "ALINA_SYNC_COMPLETE" RESULT github-lanes "reconcilier_sources.py" "!LANE_RC!"
 if not "!LANE_RC!"=="0" set /a LANE_FAILURES+=1
@@ -195,6 +195,9 @@ if not "!RC!"=="0" (
     echo.
 )
 call "%ALINA_ROOT%tools\launcher_log.cmd" "ALINA_SYNC_COMPLETE" EXIT completion "sync-complete" "!RC!"
+rem 23/11/2026 : ouvert d un double-clic, la fenetre se refermait AVANT qu on lise le resultat
+rem (signale comme << AlinaSync s est ferme sans raison >>). Meme convention que POUSSER-GITHUB.cmd.
+if /I not "%HYPERSMART_PUSH_NO_PAUSE%"=="1" pause
 endlocal & exit /b %RC%
 
 :missing_python

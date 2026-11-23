@@ -65,7 +65,10 @@ def vagues(liq: pd.DataFrame, debut: int, fin: int) -> pd.DataFrame:
     return pd.DataFrame(sorties)
 
 
-def evenements(fills: pd.DataFrame, vg: pd.DataFrame, *, notionnel_min: float = 1000.0) -> pd.DataFrame:
+def evenements(fills: pd.DataFrame, vg: pd.DataFrame, *, notionnel_min: float = 1000.0,
+               sens_cible: str = "absorbeur") -> pd.DataFrame:
+    """`absorbeur` (H17) : le leader ouvre CONTRE la vague ; `suiveur` (H19) : il ouvre DANS son sens."""
+    signe = 1 if sens_cible == "absorbeur" else -1
     ev = E.evenements(fills)
     ev = ev[ev["ouverture"] & (ev["notionnel"] >= notionnel_min)].copy()
     par_coin = {c: g.sort_values("heure_ms") for c, g in vg.groupby("coin")}
@@ -80,7 +83,7 @@ def evenements(fills: pd.DataFrame, vg: pd.DataFrame, *, notionnel_min: float = 
         for j in range(k, len(h)):
             if h[j] > t:
                 break
-            if h[j] <= t < h[j] + 2 * G.HEURE_MS and int(g["sens_absorbeur"].iloc[j]) == int(sens):
+            if h[j] <= t < h[j] + 2 * G.HEURE_MS and signe * int(g["sens_absorbeur"].iloc[j]) == int(sens):
                 dans_vague[i] = True
                 entree[i] = max(entree[i], int(h[j]) + G.HEURE_MS)       # la vague est connue en entier
                 break
@@ -135,13 +138,15 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--segment", default="exploration", choices=("exploration",))
     p.add_argument("--sans-registre", action="store_true")
+    p.add_argument("--sens", default="absorbeur", choices=("absorbeur", "suiveur"),
+                   help="absorbeur = H17 ; suiveur = H19 (pre-enregistree, nee des donnees de l'essai 33)")
     a = p.parse_args(argv)
     debut, fin = G.bornes(a.segment)
     vg = vagues(liquidations_horaires(debut, fin), debut, fin)
     fills = G.charger("fills", a.segment)
     bougies = G.charger("candles_1h", a.segment, marge_avant_ms=4 * G.JOUR_MS, marge_apres_ms=2 * G.JOUR_MS)
     fills = fills[fills["coin"].isin(set(bougies["coin"]))]
-    ev = evenements(fills, vg)
+    ev = evenements(fills, vg, sens_cible=a.sens)
     df = mesurer(ev, bougies, debut=debut, fin=fin)
     cout = G.frais_aller_retour_bps() + 6.0
     print(f"  H17 | {a.segment} | {len(vg):,} vagues sur {vg['coin'].nunique() if len(vg) else 0} coins"
@@ -168,17 +173,22 @@ def main(argv: list[str] | None = None) -> int:
         k = int(np.searchsorted(t, v["heure_ms"] + G.HEURE_MS))
         if k + 24 < len(t) and t[k + 24] - t[k] == 24 * G.HEURE_MS:
             o = b["o"].to_numpy(float)
-            diag.append((int(v["heure_ms"] // G.JOUR_MS), 1e4 * v["sens_absorbeur"] * (o[k + 24] / o[k] - 1.0)))
+            s = v["sens_absorbeur"] if a.sens == "absorbeur" else -v["sens_absorbeur"]
+            diag.append((int(v["heure_ms"] // G.JOUR_MS), 1e4 * s * (o[k + 24] / o[k] - 1.0)))
     if diag:
         d = G.ic_bootstrap_par_blocs(np.array([x[1] for x in diag]), np.array([x[0] for x in diag]))
         resultats["diagnostic_marche_apres_vague_24h"] = {"n": len(diag), "brut": [round(float(x), 2) for x in d]}
         print(f"  diagnostic marche apres vague (sans leader) 24 h | n {len(diag)} | {f(d)} bps")
     r = resultats.get("absorbe_24h", {})
     critere = bool(r.get("n")) and r["exces"][1] > 0 and r["net"][1] > 0 and r["exces_sans_meilleur"][1] > 0
+    if a.sens == "suiveur" and critere:      # H19 : le leader doit faire AU MOINS aussi bien que la vague seule
+        vague = resultats.get("diagnostic_marche_apres_vague_24h", {}).get("brut")
+        critere = bool(vague) and r["brut"][0] >= vague[0]
     statut = "CANDIDAT_PROSPECTIF" if critere else ("UNMEASURABLE" if not r.get("n") else "REJECTED")
     print(f"  -> {statut}")
     if not a.sans_registre:
-        G.enregistrer({"hypothese": "H17_absorption_des_liquidations", "segment": a.segment, "statut": statut,
+        nom = "H17_absorption_des_liquidations" if a.sens == "absorbeur" else "H19_suivre_la_vague_de_liquidations"
+        G.enregistrer({"hypothese": nom, "segment": a.segment, "statut": statut, "sens": a.sens,
                        "parametres": {"seuil_usd": SEUIL_USD, "multiple": MULTIPLE, "fenetre_h": FENETRE_H,
                                       "latence_ms": LATENCE_MS, "horizons_h": list(HORIZONS), "ecart_bps": 6.0,
                                       "source_liquidations": "Ironflow events (CC BY 4.0), recoupe"},

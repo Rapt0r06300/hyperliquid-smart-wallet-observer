@@ -298,3 +298,46 @@ def test_long_release_paths_are_normalized_before_unpack_io(tmp_path, monkeypatc
     assert report["status"] == "SAFE_UNPACK_COMPLETE"
     assert canonical_windows_io_path(target).read_bytes() == b'{"px":123}\n'
     assert any(Path(path).resolve() == root.resolve() for path in normalized)
+
+
+def _corpus_complet_deux_familles(tmp_path):
+    """Restauration TOUTES familles (ALL_SAFE_REPLAYABLE) : un shard CopyVault et un shard d'une autre famille."""
+    cv = tmp_path / "usable" / "shards" / "cv-release" / "cv.jsonl.gz"
+    autre = tmp_path / "usable" / "shards" / "other-release" / "other.jsonl.gz"
+    for p, contenu in ((cv, b'{"copy_vault":true}\n'), (autre, b'{"other":true}\n')):
+        p.parent.mkdir(parents=True)
+        p.write_bytes(gzip.compress(contenu, mtime=0))
+    rows = [{"dataset_id": i, "family": f, "release_tag": s.parent.name, "release_asset": s.name,
+             "quality_status": "SAFE", "replay_compatible": True,
+             "sha256": hashlib.sha256(s.read_bytes()).hexdigest(), "bytes": s.stat().st_size}
+            for i, f, s in (("cv", "copy_vault_fills", cv), ("other", "trades", autre))]
+    index = tmp_path / "catalog" / "DATA_INDEX.json"
+    index.parent.mkdir(parents=True)
+    index.write_text(json.dumps({"schema": "alina.data_index.v2", "shards": rows}), encoding="utf-8")
+    (tmp_path / "RESTORE_REPORT.json").write_text(json.dumps({
+        "status": "REPLAY_READY_COMPLETE", "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "classification": {"materialization_complete": True, "usable_shards": 2},
+        "catalog_verification": {"source_index_sha256": _digest(tmp_path), "selection_scope": "ALL_SAFE_REPLAYABLE"},
+    }), encoding="utf-8")
+    return cv, autre
+
+
+def test_corpus_complet_ne_deballe_que_les_familles_actives(tmp_path, monkeypatch):
+    """23/11/2026 : deballer les 1,77 M de shards hors CopyVault coutait des heures pour rien."""
+    monkeypatch.delenv("ALINA_DEBALLER_TOUTES_FAMILLES", raising=False)
+    _cv, autre = _corpus_complet_deux_familles(tmp_path)
+    report = _expand(tmp_path)
+    assert report["status"] == "SAFE_UNPACK_COMPLETE"
+    assert report["certified_shards"] == 2 and report["unpacked_shards"] == 1
+    assert report["unpack_scope"] == "COPY_VAULT_ONLY" and report["selection_scope"] == "ALL_SAFE_REPLAYABLE"
+    assert (tmp_path / "usable" / "unpacked" / "cv-release" / "cv.jsonl").is_file()
+    assert not (tmp_path / "usable" / "unpacked" / "other-release").exists()
+    assert autre.is_file()                                     # rien n'est deplace ni supprime
+
+
+def test_toutes_familles_sur_demande_explicite(tmp_path, monkeypatch):
+    monkeypatch.setenv("ALINA_DEBALLER_TOUTES_FAMILLES", "1")
+    _corpus_complet_deux_familles(tmp_path)
+    report = _expand(tmp_path)
+    assert report["unpack_scope"] == "ALL_SAFE_REPLAYABLE" and report["unpacked_shards"] == 2
+    assert (tmp_path / "usable" / "unpacked" / "other-release" / "other.jsonl").is_file()

@@ -98,3 +98,38 @@ def test_la_garde_voit_les_trois_formes_d_appel():
         trouve = APPEL.findall(ligne + "\r\n")
         assert trouve, ligne
         assert trouve[0].endswith(attendu), (ligne, trouve)
+
+
+#: Tout script `tools\X.py` cite par un lanceur, QUELLE QUE SOIT la forme de l'appel. Le motif
+#: `APPEL` ne voit que `call` / `start` / `cmd /c` : un lanceur qui execute Python directement
+#: (`"!PYTHON!" "%ROOT%tools\x.py"`) lui echappait entierement.
+SCRIPT_TOOLS = re.compile(r"tools[\/]([A-Za-z0-9_]+\.py)\b", re.IGNORECASE)
+
+
+def test_aucun_octet_de_controle_dans_un_lanceur():
+    """23/11/2026 : `tools\reconcilier_sources.py` etait devenu `tools` + 0x0D + `econcilier...`.
+
+    Un `\r` ecrit dans une chaine Python NON brute devient un vrai retour chariot. `cmd` a cherche
+    `toolseconcilier_sources.py`, l'etape echouait a chaque lancement d'AlinaSync, et le motif de
+    la garde ci-dessus (`[^\r\n]*?`) s'arretait justement sur ce caractere.
+    """
+    fautes = []
+    for lanceur in _lanceurs():
+        octets = lanceur.read_bytes()
+        for k, o in enumerate(octets):
+            cr_isole = o == 13 and (k + 1 >= len(octets) or octets[k + 1] != 10)
+            if cr_isole or (o < 32 and o not in (9, 10, 13)):
+                fautes.append(f"{lanceur.name} octet {k} = 0x{o:02X} : {octets[max(0, k - 30):k + 10]!r}")
+    assert not fautes, "octets de controle dans un lanceur :\n" + "\n".join(fautes[:10])
+
+
+def test_tout_script_tools_cite_par_un_lanceur_existe():
+    manquants = []
+    for lanceur in _lanceurs():
+        for ligne in lanceur.read_text(encoding="utf-8", errors="replace").splitlines():
+            if ligne.lstrip().lower().startswith(("rem ", "::")):
+                continue
+            for nom in SCRIPT_TOOLS.findall(ligne):
+                if not (RACINE / "tools" / nom).is_file():
+                    manquants.append(f"{lanceur.name} : tools/{nom}")
+    assert not manquants, "scripts cites mais absents :\n" + "\n".join(sorted(set(manquants)))

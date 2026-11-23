@@ -1,11 +1,14 @@
 """Q-007 — Source unique type-safe pour les flags runtime HYPERSMART_.
 
 Toutes les lectures d'env vars HYPERSMART_ passent par ce module.
-Les défauts sont alignés sur LANCER_HYPERSMART.cmd (capital 350 USDT).
+Les défauts sont alignés sur LANCER_HYPERSMART.cmd ; le capital vient de la source unique
+``PAPER_EQUITY_USD`` (``hl_observer.contrat_paper``, 100 USD) — jamais recopié en dur.
 """
 from __future__ import annotations
 
 import os
+
+from hl_observer.contrat_paper import PAPER_EQUITY_USD
 from dataclasses import dataclass
 
 from hl_observer.backtesting.copy_vault_protocol import PAPER_EQUITY_USD
@@ -113,7 +116,7 @@ def load_security() -> SecurityInvariants:
 
 def load_sizing() -> SizingFlags:
     return SizingFlags(
-        capital_usd=_float("HYPERSMART_SIMULATION_INITIAL_EQUITY_USDT", 350.0),
+        capital_usd=_float("HYPERSMART_SIMULATION_INITIAL_EQUITY_USDT", PAPER_EQUITY_USD),
         leverage=_int("HYPERSMART_SIMULATION_LEVERAGE", 5),
         max_total_exposure_usd=_float("HYPERSMART_MAX_TOTAL_EXPOSURE_USDT", 100.0),
         max_open_positions=_int("HYPERSMART_MAX_OPEN_POSITIONS", 2),

@@ -141,13 +141,16 @@ def test_CANARI_la_fusion_est_SAUTEE_quand_il_n_y_a_rien_a_fusionner():
     m = _module()
     source = textwrap.dedent(inspect.getsource(m.synchronize_main))
     arbre = ast.parse(source)
-    appels_merge = [n for n in ast.walk(arbre)
-                    if isinstance(n, ast.Call) and any(
-                        isinstance(a, ast.Constant) and a.value == "merge" for a in n.args)]
-    assert appels_merge, "plus aucun merge : le raccourci est alle trop loin"
-    # Le merge doit etre SOUS une condition, jamais au premier niveau de la fonction.
+    # 23/11/2026 : la mise a jour passe par `_adopter_github_main` (avance rapide SANS balayage de
+    # l'index, moteur de POUSSER-GITHUB en `--adopter-seulement`) au lieu de `merge --ff-only`.
+    def _est_une_mise_a_jour(n):
+        return isinstance(n, ast.Call) and (
+            any(isinstance(a, ast.Constant) and a.value == "merge" for a in n.args)
+            or (isinstance(n.func, ast.Name) and n.func.id == "_adopter_github_main"))
+
+    appels_merge = [n for n in ast.walk(arbre) if _est_une_mise_a_jour(n)]
+    assert appels_merge, "plus aucune mise a jour : le raccourci est alle trop loin"
+    # La mise a jour doit etre SOUS une condition, jamais au premier niveau de la fonction.
     corps_direct = [n for n in arbre.body[0].body if isinstance(n, ast.Expr)]
     for noeud in corps_direct:
-        if isinstance(noeud.value, ast.Call):
-            assert not any(isinstance(a, ast.Constant) and a.value == "merge"
-                           for a in noeud.value.args), "merge appele inconditionnellement"
+        assert not _est_une_mise_a_jour(noeud.value), "mise a jour appelee inconditionnellement"

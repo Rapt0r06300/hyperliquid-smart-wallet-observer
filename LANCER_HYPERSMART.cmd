@@ -212,9 +212,10 @@ REM a 15000 ms (fresh): admet la latence WS mediane ~11 s, rejette le chasing. R
 REM AUDIT ENG-009 : ouverture=10s, reduction=15s (L152), direct_copy=10s (L409). Asymetrie voulue:
 REM les reductions tolerent plus de latence que les ouvertures (15s vs 10s). Pas de doublon.
 set "HYPERSMART_SIMULATION_MAX_SIGNAL_AGE_MS=10000"
-REM 06/11 — CAPITAL PAPER CANONIQUE Copy-Vault : 350 USDT, aligne sur le contrat de replay/labo.
+REM 23/11 — CAPITAL PAPER CANONIQUE : 100 USD = PAPER_EQUITY_USD (src/hl_observer/contrat_paper.py),
+REM source unique depuis le 18/11 ; ce lanceur forcait encore 350 (garde : test_capital_de_lancement_suit_le_contrat).
 REM Ce montant est une base de simulation, jamais un solde exchange et jamais une autorisation d'ordre.
-set "HYPERSMART_SIMULATION_INITIAL_EQUITY_USDT=350"
+set "HYPERSMART_SIMULATION_INITIAL_EQUITY_USDT=100"
 REM Legacy ARBITRAGE DE DISLOCATION paper v1 : QUARANTAINE DEFINITIVE.
 REM Le cross-venue actif est EXPERIMENTAL_PAPER v2 (deux jambes, couts complets, ledger isole).
 REM Re-activer ce flag recreerait un second chemin economique ambigu : contrat runtime = 0.

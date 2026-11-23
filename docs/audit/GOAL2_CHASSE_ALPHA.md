@@ -1043,3 +1043,107 @@ Tardis est une suite d'instantanés** (~0,54 s), **20 niveaux par côté jusqu'e
 le coût d'un petit ordre au meilleur prix, pas pour une profondeur complète. Niveau 3. Matrice complète :
 `docs/audit/MATRICE_DONNEES_EXTERNES.md`.
 
+### H19 — le leader qui ouvre DANS LE SENS d'une vague de liquidations (pré-enregistrée le 23/11 à 01:04 heure de Paris, heure lue)
+
+**HYPOTHÈSE NÉE DES DONNÉES** (diagnostic de l'essai 33 : les vagues continuent). Elle ne peut donc PAS
+devenir une preuve sur l'exploration qui l'a suggérée : au mieux `CANDIDAT_PROSPECTIF`, à confronter UNE
+fois au fichier Ironflow de novembre (données jamais vues) avec cette règle figée.
+- Règle : celle de H17 à l'identique (vague = 1 M USD ET 5 x la médiane causale des 30 jours ; entrée
+  après la fin de la vague + 120 s), mais l'ouverture du leader est dans le sens des positions LIQUIDÉES
+  (longs liquidés → le leader vend), c'est-à-dire avec la pression forcée.
+- **Mécanisme à départager** : (1) le leader n'ajoute rien, il surfe la continuation que la vague seule
+  donne déjà ; (2) le leader sait quelles vagues vont continuer. Témoin décisif : le **marché après la
+  vague dans le même sens, sans condition de leader** (diagnostic de H17, retourné).
+- Critère d'exploration, à 24 h : net (brut − 15 bps) IC95 > 0 ET excès sur jumeau IC95 > 0 ET excès sans
+  le meilleur leader IC95 > 0 ET brut ≥ continuation moyenne de toutes les vagues → `CANDIDAT_PROSPECTIF`.
+  Sinon `REJECTED`. Même atteint, le seuil corrigé de la mission (99,85 % à 34 essais) n'est PAS franchi
+  par l'exploration : seule la confirmation sur novembre compte.
+
+### Essai 34 — H19 mesurée (exploration) : `REJECTED`
+
+174 ouvertures de leaders dans le sens d'une vague (27 leaders, 82 jours). À 24 h : brut **−1,0 [−84,1 ; 74,6]**,
+net −16,0, excès sur jumeau −14,1 [−104,3 ; 74,4]. La vague seule, même sens : **+72,9 [0,6 ; 149,0]**.
+Le leader fait MOINS bien que la vague : il n'identifie pas les vagues qui continuent (mécanisme 1 de la
+pré-inscription, en pire). Aucune confirmation sur novembre à faire : la règle est rejetée dès l'exploration.
+Le fait de marché (continuation des vagues) reste hors périmètre CopyVault (famille Liquidations désactivée).
+
+### H20 — décroissance de l'avantage du leader, sur une source INDÉPENDANTE (pré-enregistrée le 23/11 à 01:31 heure de Paris)
+
+**But.** Reproduire Q3 (juillet : dérive −7,75 bps sur les 5 min AVANT le fill, +0,6 bps à 5 min APRÈS) avec le
+carnet de Tardis (instantanés ~0,54 s, horloge de la bourse), pas avec nos collecteurs. Jours : 01/05, 01/06,
+01/07, 01/08/2026 (exploration) ; BTC, ETH, HYPE ; 555 fills de 22 leaders.
+- Markout(h) = signe du fill × (mid(t+h) / mid(t) − 1), en bps ; h dans −300, −60, −10, +10, +60, +120, +300, +900, +3600 s.
+- Prix obtenu par le leader = signe × (mid(t) / px − 1) (positif = mieux que le mid, donc passif).
+- **Copie** : entrée au mid à t + 120 s (notre latence), sortie au mid 1 h plus tard, coût 12 bps
+  (taker aller-retour + écart, comme les cycles fantômes).
+- IC à 95 % par bootstrap sur les blocs (jour, leader).
+- **Critère (figé)** : la copie n'est « copiable » que si net IC95 > 0. Prédiction tirée de Q3, donc
+  réfutable : pré-dérive < 0, post-markout ≈ 0, net copie < 0. Si la pré-dérive était > 0 avec IC, Q3 serait
+  contredit et la conclusion « le leader est contrarien » tomberait.
+
+### Essai 35 — H20 mesurée : `REJECTED` ; l'avantage meurt à NOTRE latence
+
+555 fills (22 leaders), mid Tardis. Ouvertures : markout +3,86 (10 s), **+5,16 (60 s)**, **+0,07 (120 s)**, −3,59 (300 s) :
+l'avantage culmine vers 60 s à ~5 bps puis disparaît exactement à notre latence (120 s). Même copiée à 60 s,
+l'ouverture resterait sous le coût (12 bps). Copie réaliste : −9,43 [−28,6 ; 20,6] (ouvertures), −26,41
+[−43,2 ; −3,3] (tous fills). Prix obtenu par le leader : −1,04 à −1,79 bps vs mid (preneur). Q3 partiellement
+reproduit : pré-dérive −2,34 [−4,19 ; −1,07] à 10 s ; les −7,75 à 5 min ne le sont pas (−1,38, n.s.).
+
+### H21 — être du côté qui REÇOIT un funding extrême (pré-enregistrée le 23/11 à 01:33 heure de Paris)
+
+**Mécanisme.** Le côté surpeuplé paie le funding chaque heure ; un leader qui ouvre du côté qui le REÇOIT, quand le
+taux est extrême, encaisse un portage connu d'avance. Seuil : à |taux| = 1 bp/h, 24 h rapportent 24 bps > 15 bps de
+coût. Proche de L11 (portage dans le sens du leader, REJECTED) mais conditionné, d'avance, au taux EXTRÊME et au
+côté receveur : déclaré comme sous-famille de L11, pas comme une famille neuve.
+- Événement : ouverture agrégée (≥ 1 000 USD) ; taux de l'heure d'entrée ≥ 90e centile des |taux| des 30 jours
+  PRÉCÉDENTS du coin (causal) ; le leader reçoit (long si taux < 0, short si taux > 0). Témoin : mêmes extrêmes, le
+  leader PAIE. Entrée première bougie 1 h ≥ dernier fill + 120 s, tenue 24 h.
+- PnL = mouvement de prix signé + funding encaissé sur les 24 h suivantes (taux réglés, cache SAFE recoupé avec
+  Ironflow) − coût (frais taker aller-retour + 6 bps). IC par blocs de jours.
+- Critère (exploration) : receveur net IC95 > 0 ET receveur − payeur IC95 > 0 → `CANDIDAT_PROSPECTIF` ; sinon `REJECTED`.
+
+### Essai 36 — H21 mesurée : `REJECTED` (avec une limite de conception déclarée)
+
+Receveur « extrême » (n 613, 30 leaders) : prix −88,4, funding +4,5 [3,3 ; 6,1], **net −98,9 [−202,2 ; −0,1]** ; payeur :
+net +19,1 [−67,9 ; 112,2] ; écart −52,3 [−146,1 ; 41,8]. Le funding encaissé est minuscule et le prix va CONTRE le
+receveur. **Limite** : 1 981 ouvertures sur 3 930 sont « extrêmes » : le taux est souvent bloqué au plancher
+d'Hyperliquid, et le 90e centile tombe sur ce plancher. Les vrais extrêmes ne sont pas isolés. Pas de retouche
+après coup : H21b (seuil ABSOLU fixé d'avance) va au backlog.
+
+## 23. Carte des mécanismes économiques (23/11, cycle « chasse à l'alpha »)
+
+Coût de copie de référence : ~12-15 bps aller-retour (taker 2 x 4,5 + écart). Capital 100 USD : 5 lignes de 20 USD,
+ordre minimal 10 USD : la capacité n'est contrainte pour AUCUN de ces mécanismes ; c'est le coût qui tue.
+
+| # | mécanisme (qui paie -> qui gagne) | info avant décision | placebo / contre-test | seuil (bps) | preuve | statut |
+|---|---|---|---|---|---|---|
+| 1 | wallets informés (non-informés -> informés) | markout passé du wallet | 200 cohortes aléatoires | >= 12 à >= 120 s | H15/H15b ; Zhai, Ding (3,11 bps à 10 s) | REJECTED |
+| 2 | décroissance de l'avantage (le copieur lent paie) | heure du fill | même fill, horizons décalés | > 12 après 120 s | H20 : +5,2 à 60 s, +0,1 à 120 s | REJECTED |
+| 3 | pression temporaire, contre-pied (impatients -> patients) | clôture en perte agressive | jumeau même mouvement | > 15 | L2, robustesse x5 | REJECTED |
+| 4 | absorber les ventes forcées (liquidés -> absorbeurs) | vague de liquidations | jumeau + vague seule | > 15 | H17 : excès −59 | REJECTED |
+| 5 | suivre la vague (continuation) | vague | vague seule (+72,9) | > 15 et >= vague | H19 : −1,0 | REJECTED |
+| 6 | NE PAS copier contre une vague (filtre) | vague | copies non filtrées | gain > 0 | H18, figée | MORE_DATA (déc.) |
+| 7 | côté receveur du funding (surpeuplé -> receveur) | taux réglé | côté payeur | funding > 15/24 h | H21 : funding +4,5, net −98,9 | REJECTED (limite déclarée) |
+| 8 | portage dans le sens du leader | position du leader | sans leader | > 15 | L11 | REJECTED |
+| 9 | sortie miroir / gestion | clôture du leader | jumeau | > coût ~9,5 | L12c : excès +14,5, net +1,7 n.s. | REJECTED |
+| 10 | réallocation (gérant habile -> suiveur) | clôture + ouverture ailleurs | fermetures sans réallocation | > 15 | H14 | REJECTED |
+| 11 | consensus indépendant de leaders | plusieurs leaders | κ (course vs découpage) | > 15 | L9 ; κ médian 0,02 | REJECTED |
+| 12 | fourniture de liquidité (preneurs -> teneurs de marché) | TVL et courbe de HLP | autres vaults (survie) | > 0 net | V5 : +230 bps/28 j ; Jia et al. (+208 M$) | PROMISING (prospectif 17/12) |
+| 13 | refus prospectifs (absorbé, tard, petit) | contexte d'entrée | copies non filtrées | gain > 0 | H16, figée | MORE_DATA (~28/11) |
+| 14 | TWAP / métaordres | twapId | — | — | 0,19 % des fills | UNMEASURABLE (trop rare) |
+
+**Lecture.** Copier un leader en taker, c'est être un preneur algorithmique : ~0 avant frais (Jia et al.). Le seul
+avantage mesuré dans les fills vit sous la minute (mécanisme 2) et meurt à notre latence. L'argent du marché va à la
+fourniture de liquidité (mécanisme 12), seul PROMISING.
+
+## 24. Backlog réalisable (23/11)
+
+1. [opérateur] `POUSSER-GITHUB.cmd` puis `ALINA_SYNC_COMPLETE.cmd` (toutes les corrections de cette nuit).
+2. [cloud] campagnes CopyVault : aucune donnée SAFE certifiée après le 18/10 ; la correction du watchdog est sur GitHub.
+3. [~28/11] H16 et l'apprenant ; [déc.] H18 avec le fichier Ironflow de novembre.
+4. H21b : seuil de funding ABSOLU, fixé d'avance (ex. |taux| >= 3 x le plancher), sur données neuves seulement.
+5. Remesurer au capital de 100 USD les anciennes études à 350 USD (action affichée par le planificateur).
+6. Restauration AlinaSync (21 min) : vérifications de fichiers en parallèle sur NVMe, à mesurer d'abord.
+7. Exécution maker à moins de 60 s : seule voie théorique pour le mécanisme 2 ; exige un carnet en direct et un modèle
+   de remplissage réaliste (« touché » n'est pas « exécuté »).
+

@@ -135,7 +135,7 @@ $env:HYPERSMART_RUNTIME_STOP_FILE = $runtimeStopFile
 $env:HYPERSMART_ACTIVE_STRATEGY_SCOPE = "copy_vault"
 $env:HYPERSMART_SCOPE_VERSION = "COPY_VAULT_PAPER_V2"
 $env:HYPERSMART_CONFIG_AUTHORITY = "tools/start_hypersmart_simulation.ps1"
-Set-HyperSmartDefaultEnv "HYPERSMART_SIMULATION_INITIAL_EQUITY_USDT" "350"
+Set-HyperSmartDefaultEnv "HYPERSMART_SIMULATION_INITIAL_EQUITY_USDT" "100"   # = PAPER_EQUITY_USD (contrat_paper.py)
 $startupProfile = [string]$env:HYPERSMART_STARTUP_PROFILE
 if ([string]::IsNullOrWhiteSpace($startupProfile)) {
     $startupProfile = "core"
@@ -912,7 +912,7 @@ try {
         # RESET seulement si DEMANDE EXPLICITEMENT (=1). Defaut (unset/0) = CONSERVER. AUTOPILOT et
         # restart passent =0 -> jamais de reset. Le vrai reset volontaire passe par reset-paper --confirm.
         $paperStartingEquity = [string]$env:HYPERSMART_SIMULATION_INITIAL_EQUITY_USDT
-        if ([string]::IsNullOrWhiteSpace($paperStartingEquity)) { $paperStartingEquity = "200" }
+        if ([string]::IsNullOrWhiteSpace($paperStartingEquity)) { $paperStartingEquity = "100" }   # etait 200 : troisieme valeur du meme capital
         $resetOutput = & $PythonExe -m hl_observer reset-simulation-state --starting-equity $paperStartingEquity 2>&1
         $resetExitCode = [int]$LASTEXITCODE
         foreach ($line in $resetOutput) { Write-LauncherLog $line }

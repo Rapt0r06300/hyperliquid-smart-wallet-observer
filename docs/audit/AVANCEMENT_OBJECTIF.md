@@ -2782,3 +2782,39 @@ fournis. Sans collecte, le labo n a toujours pas d episode complet de l entree a
 - Nœud Hyperliquid : impossible sur ce PC (128 Go de RAM exigés, 32 Go présents).
 - Non poussé (aucun push automatique) : ingesteurs, H17/H18, matrice.
 
+## 23/11/2026 (nuit) — AlinaSync : des heures -> une demi-heure environ
+
+- **Mesure** : après une restauration qui réutilisait déjà les 1 792 577 shards (23:59 -> 00:20), le
+  DÉBALLAGE repartait sur les 18 familles : 7 Mo/s, 523 ouvertures de fichier par seconde, ~6 h. Puis le
+  pont CopyVault relisait les 1,79 M de shards (deux empreintes chacun) pour en écarter 99 %. Seuls
+  15 456 shards (CopyVault) servent au labo ; les autres familles sont DISABLED_BY_SCOPE.
+- **Correction** : `tools/unpack_verified_safe.py` ne déballe plus que les familles actives `copy_vault_*`
+  APRÈS avoir contre-vérifié le corpus entier (comptes, familles, catalogue) ; `tools/copy_vault_safe_bridge.py`
+  contrôle le registre complet puis ne lit que le périmètre déballé (`unpack_scope`, `unpacked_shards`).
+  Restauration inchangée (son mode CopyVault seul mettrait 1,77 M de shards en quarantaine : écarté).
+  `ALINA_DEBALLER_TOUTES_FAMILLES=1` rétablit l'ancien comportement. 82 tests verts, dont 4 nouveaux.
+- Au passage : `test_root_entrypoints_are_reusable_in_existing_checkout` était cassé par le commit 04e7b46
+  (autre session) qui a changé `ALINA_SYNC_COMPLETE.sh` sans le test ; test aligné.
+- Pour en profiter : arrêter le lancement en cours (ancien code déjà chargé) et relancer.
+- **Écran noir du début d'AlinaSync supprimé** : `git merge --ff-only` (index entier, 15-30 min muettes,
+  7 249 s mesurées le 21/11) est remplacé par l'avance rapide SANS balayage du moteur de POUSSER-GITHUB,
+  nouveau mode `alina_git_code_sync.py --adopter-seulement` (n'emprunte que `_fast_path_if_clean` ; refuse
+  NO_GO s'il faudrait committer/rejouer/pousser ; jamais de publication). Phases annoncées dès la 1re seconde
+  (`DEMARRAGE`, `CONTROLE_DU_CODE_LOCAL`, `ADOPTION_SANS_BALAYAGE`) et progression du moteur à l'écran.
+  Tests : 2 de bout en bout sur un vrai dépôt (avance rapide propre ; refus SANS commit ni push), 1 d'appel,
+  canari adapté ; 220 + 101 verts. Effet de bord : l'adoption réécrit `runtime/reports/git-sync/LAST_SYNC.json`.
+
+## 23/11/2026 (nuit) — /goal « trois chantiers » : faits, mesurés
+
+1. **Planificateur : capital canonique.** Les USD/jour des anciens essais (mesurés sur 350 USD : 54 enregistrements
+   vérifiés) étaient classés comme valant 100 USD, sous un en-tête « (350 USD) ». Désormais chaque preuve porte
+   `capital_usd_de_la_mesure` ; un montant d'un autre capital n'est ni transposé ni priorisé (« n/d (sur 350 USD :
+   -1.620) ») et l'action dit « remesurer au capital paper de 100 USD ». 157 tests verts.
+2. **Chaîne SAFE -> Lab Quant débloquée.** Déballage CopyVault certifié en 367 s (avant : ~6 h projetées, jamais fini) ;
+   pont : `SAFE_COPY_NO_GO` 0 fill -> `SAFE_COPY_WORKSPACE_READY` 62 fills en direct. Cause : 29 messages en direct
+   sans `isSnapshot` (type officiel `isSnapshot?: boolean`, SDK nktkas `isSnapshot?: true`) ; accepté SEULEMENT si le
+   collecteur les a aussi classés `is_snapshot: false`. Vérifié : SAFE CopyVault = 01/10 -> 18/10/2026 (catalogue).
+3. **H19 (suivre la vague de liquidations)** pré-enregistrée puis mesurée : `REJECTED` (leaders -1,0 bps à 24 h contre
+   +72,9 pour la vague seule). 34 essais.
+- Au passage : fins de ligne de 2 fichiers de test remises en LF ; reçus rejoués (0 périmé).
+

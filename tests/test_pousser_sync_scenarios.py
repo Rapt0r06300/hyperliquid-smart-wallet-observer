@@ -263,3 +263,28 @@ def test_e2e_fichier_sensible_suivi_et_modifie_reste_bloquant(tmp_path):
     code, report = _run_sync(work)
     assert code != 0 and report["status"] not in ("SYNCHRONIZED", "PUSHED"), report.get("status")
     assert _git(remote, "rev-parse", "main") == avant                                  # rien n'est parti
+
+
+def test_e2e_adopter_seulement_avance_rapide_propre(tmp_path):
+    """23/11/2026 (AlinaSync) : GitHub en avance, local propre -> avance rapide, sans rien publier."""
+    work, remote = _repo_avec_remote(tmp_path)
+    _push_concurrent(remote, tmp_path, "autre", "tools/y.py", "print('distant')\n")
+    avant = _git(remote, "rev-parse", "main")
+    code, report = _run_sync(work, adopter_seulement=True)
+    assert code == 0 and report["status"] == "SYNCHRONIZED"
+    assert _git(work, "rev-parse", "HEAD") == avant == _git(remote, "rev-parse", "main")
+    assert (work / "tools" / "y.py").read_text(encoding="utf-8") == "print('distant')\n"
+
+
+def test_e2e_adopter_seulement_refuse_sans_publier_quand_du_code_local_existe(tmp_path):
+    """Du code local à publier : refus NO_GO, et GitHub n'a RIEN reçu (aucun commit, aucun push)."""
+    work, remote = _repo_avec_remote(tmp_path)
+    _push_concurrent(remote, tmp_path, "autre", "tools/y.py", "print('distant')\n")
+    distant_avant = _git(remote, "rev-parse", "main")
+    local_avant = _git(work, "rev-parse", "HEAD")
+    (work / "tools" / "x.py").write_text("print('modif locale')\n", encoding="utf-8")
+    code, report = _run_sync(work, adopter_seulement=True)
+    assert code == 2 and report["status"] == "NO_GO" and "ADOPTION SEULE" in report.get("error", "")
+    assert _git(remote, "rev-parse", "main") == distant_avant           # rien poussé
+    assert _git(work, "rev-parse", "HEAD") == local_avant               # rien committé
+    assert (work / "tools" / "x.py").read_text(encoding="utf-8") == "print('modif locale')\n"

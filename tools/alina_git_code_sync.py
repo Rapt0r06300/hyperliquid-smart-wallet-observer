@@ -1269,10 +1269,16 @@ class Synchronizer:
     def __init__(self, root: Path, git: str = "git", *, dry_run: bool = False,
                  allow_test_remote: bool = False,
                  promote_current_to_main: bool = False,
-                 verbose_terminal: bool | None = None):
+                 verbose_terminal: bool | None = None,
+                 adopter_seulement: bool = False):
         self.root = root.resolve()
         self.git = git
         self.dry_run = dry_run
+        # 23/11/2026 -- MODE << ADOPTER SEULEMENT >> (utilise par AlinaSync). Il n'emprunte QUE le
+        # chemin propre `_fast_path_if_clean` : constat d'egalite, ou avance rapide SANS balayage de
+        # l'index (6,8 s mesurees contre 7 249 s pour `merge --ff-only` sur ce depot). S'il faudrait
+        # committer, rejouer ou pousser quoi que ce soit, il REFUSE : jamais de publication.
+        self.adopter_seulement = adopter_seulement
         self.allow_test_remote = allow_test_remote
         self.promote_current_to_main = promote_current_to_main
         self.verbose_terminal = (
@@ -4861,6 +4867,12 @@ class Synchronizer:
                 if not self.dry_run and not wip_only and not promotion_needed:
                     self.progress(20, "Inventaire borne des changements locaux")
                     fast_path = self._fast_path_if_clean()
+                if self.adopter_seulement and not fast_path:
+                    raise SyncBlocked(
+                        "ADOPTION SEULE refusee : du code local est a publier, ou l'historique "
+                        "local n'est pas un ancetre de GitHub. AlinaSync ne publie jamais : "
+                        "lancer POUSSER-GITHUB.cmd, puis relancer AlinaSync."
+                    )
                 if fast_path:
                     pass
                 else:
@@ -4969,7 +4981,13 @@ def main(argv: list[str] | None = None) -> int:
         help="promouvoir la branche active vers main par fast-forward seulement",
     )
     parser.add_argument("--test-remote", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--adopter-seulement", action="store_true",
+        help="avance rapide propre vers GitHub main, sans jamais committer ni pousser (AlinaSync)",
+    )
     options = parser.parse_args(argv)
+    if options.adopter_seulement and (options.dry_run or options.wip_only or options.promote_current_to_main):
+        parser.error("--adopter-seulement est incompatible avec --dry-run, --wip-only et la promotion.")
     if options.dry_run and options.wip_only:
         parser.error("Modes --dry-run et --wip-only incompatibles.")
     if options.promote_current_to_main and (options.dry_run or options.wip_only):
@@ -4984,6 +5002,7 @@ def main(argv: list[str] | None = None) -> int:
         options.root, options.git, dry_run=options.dry_run,
         allow_test_remote=options.test_remote,
         promote_current_to_main=options.promote_current_to_main,
+        adopter_seulement=options.adopter_seulement,
     ).run(wip_only=options.wip_only)
 
 

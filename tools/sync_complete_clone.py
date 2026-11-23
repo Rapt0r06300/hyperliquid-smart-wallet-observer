@@ -178,6 +178,36 @@ def _tracked_files_changed(root: Path) -> bool:
     return bool(_modified_code_paths(root))
 
 
+def _adopter_github_main(root: Path) -> None:
+    """Avance rapide vers GitHub main SANS balayer l'index, par le moteur de POUSSER-GITHUB.
+
+    23/11/2026 -- L'ECRAN NOIR DU DEBUT D'ALINASYNC. `git merge --ff-only` relit et reecrit l'index
+    entier (1,9 M d'entrees) sans rien afficher : 15 a 30 min annoncees, 7 249 s mesurees le 21/11
+    pour 4 fichiers. Le moteur de synchronisation du code possede deja le chemin borne par le diff
+    d'ARBRES (`_adopter_tete_sans_balayage`, 6,8 s mesurees) avec toutes ses gardes (donnees
+    protegees, fichiers non suivis, verification du SHA distant). On le reutilise en mode
+    `--adopter-seulement` : il n'adopte que si l'avance rapide est propre, et REFUSE sinon -- il ne
+    committe ni ne pousse jamais. Sa progression s'affiche en direct (sortie heritee).
+    """
+    moteur = Path(__file__).resolve().parent / "alina_git_code_sync.py"
+    print("ALINA_SYNC_PHASE=ADOPTION_SANS_BALAYAGE (moteur de POUSSER-GITHUB, avance rapide seule)",
+          file=sys.stderr, flush=True)
+    try:
+        done = subprocess.run(
+            [sys.executable, str(moteur), "--root", str(root), "--adopter-seulement"],
+            check=False, stdin=subprocess.DEVNULL, timeout=_DELAI_DEFAUT_S,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise SyncError(f"adoption sans balayage depasse {exc.timeout or 0:.0f} s") from exc
+    except OSError as exc:
+        raise SyncError(f"moteur d'adoption introuvable : {exc}") from exc
+    if done.returncode != 0:
+        raise SyncError(
+            f"adoption de GitHub main refusee (code {done.returncode}) : code local a publier ou "
+            "historique divergent -- lancer POUSSER-GITHUB.cmd, puis relancer AlinaSync"
+        )
+
+
 def synchronize_main(root: Path, *, update: bool = True) -> str:
     """Fast-forward ONLY canonical main; never reset/rebase/stash local changes."""
     root = root.resolve()
@@ -195,6 +225,7 @@ def synchronize_main(root: Path, *, update: bool = True) -> str:
 
     # This intentionally ignores untracked/ignored research files; Git itself
     # must refuse a merge that would overwrite any of those paths.
+    print("ALINA_SYNC_PHASE=CONTROLE_DU_CODE_LOCAL", file=sys.stderr, flush=True)
     modified_code = _modified_code_paths(root)
     if modified_code:
         apercu = ", ".join(modified_code[:5])
@@ -224,11 +255,10 @@ def synchronize_main(root: Path, *, update: bool = True) -> str:
         # distingue « ca fusionne » de « c est plante » -- et on finit par l interrompre, ce
         # qui est arrive aujourd hui (exit 143, fusion tuee a mi-chemin).
         print(
-            f"ALINA_SYNC_PHASE=MERGE_START depuis={head[:12]} vers={remote_sha[:12]} "
-            "attendu=15_a_30_min ecran_muet=normal_git_merge_n_affiche_rien",
+            f"ALINA_SYNC_PHASE=MERGE_START depuis={head[:12]} vers={remote_sha[:12]}",
             file=sys.stderr, flush=True,
         )
-        _git(root, "merge", "--ff-only", "refs/remotes/origin/main")
+        _adopter_github_main(root)
         head = _git(root, "rev-parse", "HEAD")
         print("ALINA_SYNC_PHASE=MERGE_COMPLETE", file=sys.stderr, flush=True)
     if head != remote_sha:
@@ -840,6 +870,9 @@ def main(argv: list[str] | None = None) -> int:
         print("ALINA_SYNC_FAIL: Python 3.10 or newer is required", file=sys.stderr)
         return 2
     root = Path(__file__).resolve().parents[1]
+    # Aucun ecran noir : la premiere ligne part avant tout travail Git.
+    print("ALINA_SYNC_PHASE=DEMARRAGE (controle du code, mise a jour de main, puis SAFE)",
+          file=sys.stderr, flush=True)
     try:
         head = synchronize_main(root, update=not args.skip_update)
         print(f"ALINA_MAIN_SHA={head}", flush=True)

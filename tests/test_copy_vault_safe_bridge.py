@@ -517,3 +517,57 @@ def test_bridge_persists_auditable_no_go_when_live_fills_are_absent(tmp_path: Pa
     decisions = diagnostic_files[0].parent / "SAFE_INPUT_DECISIONS.jsonl"
     assert decisions.is_file()
     assert _sha(decisions.read_bytes()) == diagnostic["input_decisions"]["sha256"]
+
+
+def _perimetre_copy_vault(tmp_path: Path, monkeypatch, unpacked_shards: int) -> Path:
+    """Registre complet de 3 shards ; les deux premiers seulement sont dans le périmètre actif déballé."""
+    import tools.unpack_verified_safe as U
+
+    recovery = _corpus(tmp_path, [_envelope("copy_vault_fills"), _envelope("copy_vault_l2"), _envelope("copy_vault_fills")])
+    rapport = json.loads((recovery / "UNPACK_REPORT.json").read_text())
+    rapport.update({"unpack_scope": "COPY_VAULT_ONLY", "unpacked_shards": unpacked_shards})
+    (recovery / "UNPACK_REPORT.json").write_text(json.dumps(rapport), encoding="utf-8")
+    actifs = {recovery / "usable" / "shards" / "test-release" / f"safe-{n}.jsonl.gz": (1, "x") for n in (0, 1)}
+    monkeypatch.setattr(U, "_catalog_safe_bytes", lambda *a, **k: (actifs, ["copy_vault_fills", "copy_vault_l2"]))
+    return recovery
+
+
+def test_le_pont_ne_lit_que_le_perimetre_deballe(tmp_path: Path, monkeypatch) -> None:
+    """23/11/2026 : le pont parcourait les 1,79 M de shards du registre pour en écarter 99 %."""
+    _perimetre_copy_vault(tmp_path, monkeypatch, unpacked_shards=2)
+    report = build_safe_copy_workspace(tmp_path)
+    assert report["status"] == "SAFE_COPY_WORKSPACE_READY" and report["selected_shards"] == 2   # le 3e est ignoré
+
+
+def test_le_pont_refuse_un_perimetre_et_un_deballage_qui_divergent(tmp_path: Path, monkeypatch) -> None:
+    import pytest
+
+    from tools.copy_vault_safe_bridge import SafeBridgeError
+
+    _perimetre_copy_vault(tmp_path, monkeypatch, unpacked_shards=3)
+    with pytest.raises(SafeBridgeError, match="disagree"):
+        build_safe_copy_workspace(tmp_path)
+
+
+def _sans_drapeau(classement_collecteur):
+    """Fill en direct dont le message brut n'a PAS `isSnapshot` (cas reel des 29 messages SAFE)."""
+    env = _envelope("copy_vault_fills")
+    message = json.loads(env["raw_payload"])
+    del message["data"]["isSnapshot"]
+    env["raw_payload"] = json.dumps(message, sort_keys=True, separators=(",", ":"))
+    env["raw_sha256"] = _sha(env["raw_payload"].encode("utf-8"))
+    if classement_collecteur is not None:
+        env["parsed_summary"] = {"is_snapshot": classement_collecteur}
+    return env
+
+
+def test_drapeau_absent_mais_collecteur_d_accord_est_un_fill_en_direct(tmp_path: Path) -> None:
+    _corpus(tmp_path, [_sans_drapeau(False), _envelope("copy_vault_l2")])
+    report = build_safe_copy_workspace(tmp_path)
+    assert report["counts"]["copy_vault_fills"] == 1 and report["input_decisions"]["quarantined"] == 0
+
+
+def test_drapeau_absent_et_collecteur_contradictoire_reste_en_quarantaine(tmp_path: Path) -> None:
+    _corpus(tmp_path, [_envelope("copy_vault_fills"), _sans_drapeau(True), _envelope("copy_vault_l2")])
+    report = build_safe_copy_workspace(tmp_path)
+    assert report["counts"]["copy_vault_fills"] == 1 and report["input_decisions"]["quarantined"] == 1

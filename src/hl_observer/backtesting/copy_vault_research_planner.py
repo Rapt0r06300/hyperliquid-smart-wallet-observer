@@ -4,7 +4,10 @@ Le registre des expériences dit, pour chaque hypothèse, un statut. Il ne dit p
 ensuite. Ce module lit le DERNIER enregistrement de chaque hypothèse et calcule, sans modèle ni
 appel extérieur, de quoi décider :
 
-* l'effet mesuré et son incertitude (ramenés à des USD par jour pour 350 USD quand c'est possible) ;
+* l'effet mesuré et son incertitude, en USD par jour au capital paper CANONIQUE (`PAPER_EQUITY_USD`,
+  100 USD). Un montant mesuré sur un AUTRE capital (les anciens essais à 350 USD) n'est jamais
+  transposé : ordres minimaux et places finançables ne sont pas linéaires (sur 350 USD les 144 paires
+  étaient finançables, sur 100 seules 28). Il reste affiché avec son capital, hors priorité ;
 * la probabilité que l'effet soit positif — d'abord telle que les données la donnent, puis avec un
   a priori SCEPTIQUE centré sur zéro (une stratégie de copie rentable est rare : un effet mal
   mesuré est ramené vers zéro d'autant plus que son incertitude est grande) ;
@@ -45,6 +48,7 @@ def _depuis_persistance(resume: Mapping[str, Any] | None, config: Mapping[str, A
     return {"effet": resume["exces_tete_bps_jour"], "intervalle": resume.get("exces_tete_intervalle_bps_jour"),
             "niveau": resume.get("niveau_intervalle") or 0.95, "unite": "bps_par_jour",
             "usd_par_jour": resume["exces_tete_bps_jour"] / 1e4 * PAPER_EQUITY_USD,
+            "capital_usd_de_la_mesure": PAPER_EQUITY_USD,      # conversion d'un excès en bps du capital
             "jours": int(resume.get("dates") or 0) * periode,
             "jours_requis": int(config.get("min_dates") or 12) * periode,
             "note": "excès brut du meilleur quantile, avant coût de réplication"}
@@ -65,6 +69,7 @@ def _replication(record: Mapping[str, Any]) -> Preuve | None:
                 "unite": "usd_par_jour", "note": "aucune journée où le leader est assez observé"}
     return {"effet": resume["net_usd_per_day"], "intervalle": resume.get("interval_95"), "niveau": 0.95,
             "unite": "usd_par_jour", "usd_par_jour": resume["net_usd_per_day"],
+            "capital_usd_de_la_mesure": (record.get("config") or {}).get("capital_usd"),
             "jours": int(resume.get("distinct_days") or 0), "jours_requis": 20,
             "note": "net de frais, écart, funding et ordre minimal"}
 
@@ -78,7 +83,8 @@ def _ouvertures(record: Mapping[str, Any]) -> Preuve | None:
     usd = capital.get("esperance_usd_par_jour", capital.get("net_usd_par_jour"))
     return {"effet": net.get("moyenne_bps"), "intervalle": net.get("intervalle_bps"),
             "niveau": primaire.get("niveau_intervalle") or 0.95, "unite": "bps_par_decision",
-            "usd_par_jour": usd, "jours": int(net.get("jours") or 0),
+            "usd_par_jour": usd, "capital_usd_de_la_mesure": capital.get("capital_usd"),
+            "jours": int(net.get("jours") or 0),
             "jours_requis": requis, "note": "net de frais et d'écart, décisions observées en direct"}
 
 
@@ -89,7 +95,8 @@ def _selection(record: Mapping[str, Any]) -> Preuve | None:
     capital = (choix.get("compte_paper") or choix.get("capital_350")) or {}
     return {"effet": net.get("moyenne_bps"), "intervalle": net.get("intervalle_bps"),
             "niveau": retenus.get("niveau_intervalle") or 0.95, "unite": "bps_par_decision",
-            "usd_par_jour": capital.get("esperance_usd_par_jour"), "jours": int(net.get("jours") or 0),
+            "usd_par_jour": capital.get("esperance_usd_par_jour"),
+            "capital_usd_de_la_mesure": capital.get("capital_usd"), "jours": int(net.get("jours") or 0),
             "jours_requis": int((record.get("config") or {}).get("min_days") or 30),
             "note": "leaders retenus sur leurs décisions passées, net de frais et d'écart, observés en direct"}
 
@@ -159,7 +166,13 @@ def build_plan(records: Iterable[Mapping[str, Any]], *, capital_usd: float = PAP
         jours, requis = int(preuve.get("jours") or 0), int(preuve.get("jours_requis") or 0)
         cible = max(requis, mesure["jours_pour_trancher"] or 0)
         restants = max(0, cible - jours) if (requis or mesure["jours_pour_trancher"]) else None
-        usd = preuve.get("usd_par_jour")
+        usd_mesure = preuve.get("usd_par_jour")
+        capital_mesure = preuve.get("capital_usd_de_la_mesure")
+        # 23/11/2026 : un montant en USD/jour ne vaut que pour le capital sur lequel il a ete MESURE.
+        # Avant, des esperances mesurees sur 350 USD etaient classees a cote de montants a 100 USD.
+        au_capital_du_plan = (usd_mesure is not None and isinstance(capital_mesure, (int, float))
+                              and abs(float(capital_mesure) - float(capital_usd)) < 1e-9)
+        usd = usd_mesure if au_capital_du_plan else None
         if usd is not None and mesure.get("effet_sceptique") is not None and preuve.get("effet"):
             usd_sceptique = float(usd) * mesure["effet_sceptique"] / float(preuve["effet"])
         else:
@@ -191,12 +204,16 @@ def build_plan(records: Iterable[Mapping[str, Any]], *, capital_usd: float = PAP
                       if restants else "relancer l'étude : l'échantillon exigé est atteint, l'intervalle ne tranche pas encore")
         else:
             action = ACTIONS.get(statut, "relancer l'étude")
+        if usd_mesure is not None and not au_capital_du_plan and statut not in ("REJECTED",):
+            action += (f" ; montant mesuré sur {capital_mesure if capital_mesure is not None else 'un capital inconnu'}"
+                       f" USD, non transposable : remesurer au capital paper de {capital_usd:.0f} USD")
         lignes.append({
             "hypothesis": hypothese, "status": statut, "lecture": lecture, "reason": verdict.get("reason"),
             "run_id": record.get("run_id"), "evidence_tier": record.get("evidence_tier"),
             "essais_enregistres": essais[hypothese],
             "effet": preuve.get("effet"), "intervalle": preuve.get("intervalle"), "unite": preuve.get("unite"),
             "usd_par_jour": usd, "usd_par_jour_sceptique": usd_sceptique, "note": preuve.get("note"),
+            "usd_par_jour_mesure": usd_mesure, "capital_usd_de_la_mesure": capital_mesure,
             "p_positif": mesure["p_positif"], "p_positif_sceptique": mesure["p_positif_sceptique"],
             "jours_mesures": jours, "jours_requis": requis or None,
             "jours_pour_trancher": mesure["jours_pour_trancher"], "jours_restants": restants,
@@ -217,6 +234,16 @@ def build_plan(records: Iterable[Mapping[str, Any]], *, capital_usd: float = PAP
     }
 
 
+def _usd_cellule(h: Mapping[str, Any], num: Callable[..., str]) -> str:
+    """Montant au capital du plan ; sinon le montant MESURÉ, annoncé avec son capital (jamais transposé)."""
+    if h.get("usd_par_jour") is not None:
+        return num(h["usd_par_jour"], 3)
+    if h.get("usd_par_jour_mesure") is not None:
+        cap = h.get("capital_usd_de_la_mesure")
+        return f"n/d (sur {float(cap):.0f} USD : {num(h['usd_par_jour_mesure'], 3)})" if cap else "n/d (capital inconnu)"
+    return "n/d"
+
+
 def render_plan(plan: Mapping[str, Any]) -> str:
     def num(value: Any, digits: int = 2, signe: bool = True) -> str:
         if value is None:
@@ -230,14 +257,14 @@ def render_plan(plan: Mapping[str, Any]) -> str:
         "travail ; il ne prouve rien et ne promeut aucun candidat.", "",
         "- " + " · ".join(f"{statut} : {n}" for statut, n in resume.items()) + ".",
         f"- Probabilité « sceptique » : a priori centré sur zéro (écart-type {plan['a_priori_sceptique']}).", "",
-        "| rang | hypothèse | statut | lecture | effet mesuré | USD/jour (350 USD) | P(effet > 0) | P sceptique | jours mesurés | jours restants | priorité |",
+        f"| rang | hypothèse | statut | lecture | effet mesuré | USD/jour ({float(plan['capital_usd']):.0f} USD) | P(effet > 0) | P sceptique | jours mesurés | jours restants | priorité |",
         "|---:|---|---|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for rang, h in enumerate(plan["hypotheses"], 1):
         effet = "n/d" if h["effet"] is None else f"{num(h['effet'])} {str(h['unite']).replace('_', ' ')}"
         lignes.append(
             f"| {rang} | `{h['hypothesis']}` | {h['status']} | {h['lecture'].replace('_', ' ').lower()} | {effet} | "
-            f"{num(h['usd_par_jour'], 3)} | "
+            f"{_usd_cellule(h, num)} | "
             f"{num(h['p_positif'], 2, False)} | {num(h['p_positif_sceptique'], 2, False)} | {h['jours_mesures']} | "
             f"{'n/d' if h['jours_restants'] is None else h['jours_restants']} | {h['priorite']:.4f} |")
     lignes += ["", "## Que faire, hypothèse par hypothèse", ""]

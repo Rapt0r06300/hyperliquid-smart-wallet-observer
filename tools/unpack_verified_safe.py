@@ -111,6 +111,21 @@ def _catalog_safe_bytes(
 
 
 VAR_SCEAUX_SEULS = "ALINA_SAFE_SEAL_ONLY"
+# 23/11/2026 -- PERIMETRE DU DEBALLAGE. La restauration certifie TOUT le corpus SAFE (1 792 577 shards,
+# 18 familles) ; mais CopyVault est la SEULE famille active (AGENTS.md : les autres sont
+# DISABLED_BY_SCOPE) et le seul lecteur du deballage est le pont CopyVault. Deballer les 1 777 000
+# autres shards coutait des HEURES (mesure : 7 Mo/s, 523 ouvertures de fichier par seconde, ~6 h)
+# pour un resultat que personne ne lit. Le deballage se limite donc aux familles `copy_vault_*` ;
+# la restauration et ses controles d'integrite restent COMPLETS. `ALINA_DEBALLER_TOUTES_FAMILLES=1`
+# retablit l'ancien comportement.
+VAR_TOUTES_FAMILLES = "ALINA_DEBALLER_TOUTES_FAMILLES"
+PREFIXE_ACTIF = "copy_vault_"
+
+
+def prefixe_de_deballage(demande: str | None = "auto") -> str | None:
+    if demande != "auto":
+        return demande
+    return None if os.environ.get(VAR_TOUTES_FAMILLES, "").strip() == "1" else PREFIXE_ACTIF
 
 
 def _sceaux_seuls(demande=None) -> bool:
@@ -133,9 +148,10 @@ def _sceaux_seuls(demande=None) -> bool:
 
 def expand_safe_corpus(
     destination: Path, *, catalog_sha256: str, catalog_path: Path,
-    seal_only: bool | None = None,
+    seal_only: bool | None = None, famille_prefixe: str | None = "auto",
 ) -> dict:
     sceaux_seuls = _sceaux_seuls(seal_only)
+    prefixe = prefixe_de_deballage(famille_prefixe)
     destination_display = Path(destination).resolve()
     destination = _windows_io_path(destination_display)
     catalog_path = _windows_io_path(Path(catalog_path).absolute())
@@ -192,6 +208,23 @@ def expand_safe_corpus(
     sources = sorted(expected_gz)
     if len(sources) != expected:
         raise SafeUnpackError(f"SAFE gzip count mismatch: {len(sources)} != {expected}")
+    # Le corpus ENTIER vient d'etre contre-verifie contre la restauration (comptes + familles) ;
+    # on ne deballe ensuite que le perimetre actif. Rien n'est deplace ni supprime ailleurs.
+    unpack_scope = selection_scope
+    if prefixe is not None and selection_scope == "ALL_SAFE_REPLAYABLE":
+        selection, _familles = _catalog_safe_bytes(
+            Path(catalog_path), destination, catalog_sha256, family_prefix=prefixe,
+        )
+        if any(s not in expected_gz for s in selection):
+            raise SafeUnpackError("active-family SAFE selection is not a subset of the certified corpus")
+    else:
+        selection = {}
+    # Sans aucune famille active dans le corpus, rien a restreindre : deballage complet (ancien comportement).
+    if selection:
+        sources = sorted(selection)
+        unpack_scope = "COPY_VAULT_ONLY"
+        print(f"ALINA_UNPACK_SCOPE=COPY_VAULT_ONLY shards={len(sources)}/{expected} "
+              f"(familles actives seulement ; restauration complete et verifiee)", file=sys.stderr, flush=True)
     planned = []
     selected_targets: set[Path] = set()
     reused = 0
@@ -296,7 +329,7 @@ def expand_safe_corpus(
     # Old previously-expanded SAFE files must never pollute a changed working
     # set. Quarantine only sealed byte-identical outputs; never destroy them.
     stale_outputs = 0
-    if selection_scope == "ALL_SAFE_REPLAYABLE":
+    if selection_scope == "ALL_SAFE_REPLAYABLE" and unpack_scope == "ALL_SAFE_REPLAYABLE":
         for stale in sorted(outroot.glob("*/*.jsonl")):
             if stale in selected_targets:
                 continue
@@ -411,6 +444,9 @@ def expand_safe_corpus(
         "selection_scope": selection_scope,
         "selection_families": catalog_families,
         "certified_shards": expected,
+        # perimetre effectivement deballe : le pont ne lit QUE celui-ci
+        "unpack_scope": unpack_scope,
+        "unpacked_shards": len(sources),
         "created": created,
         "reused_verified": reused,
         "quarantined_stale_outputs": stale_outputs,

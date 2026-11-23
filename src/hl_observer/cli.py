@@ -1411,8 +1411,8 @@ def simulate_magic_bot(
     scenario: str = typer.Option("conservative", "--scenario", help="Simulation scenario label."),
 ) -> None:
     """Start/report a local simulation plan; no order, no network."""
-    if abs(capital - 350.0) > 0.001:
-        typer.echo("Safety warning: product default is 350 USDT fictive; custom capital is report-only.")
+    if abs(capital - PAPER_EQUITY_USD) > 0.001:
+        typer.echo(f"Safety warning: product default is {PAPER_EQUITY_USD:.0f} USD fictive; custom capital is report-only.")
     typer.echo("simulate_magic_bot=local_simulation_without_money")
     typer.echo(f"capital={capital:.2f}")
     typer.echo(f"scenario={scenario}")
@@ -1430,7 +1430,7 @@ def simulation_report(
     typer.echo("simulation_report=local_without_money")
     typer.echo(f"period={period}")
     typer.echo(f"state_path={simulation_state_path(settings)}")
-    typer.echo("starting_equity_usdt=350.00")
+    typer.echo(f"starting_equity_usdt={PAPER_EQUITY_USD:.2f}")
 
 
 @app.command("simulation-loss-report")
@@ -3813,7 +3813,7 @@ def testnet_loop_observe(
 
 @app.command("reset-simulation-state")
 def reset_simulation_state_command(
-    starting_equity: float = typer.Option(350.0, "--starting-equity", help="Fresh local simulated USDT balance for the next UI session."),
+    starting_equity: float = typer.Option(PAPER_EQUITY_USD, "--starting-equity", help="Fresh local simulated USDT balance for the next UI session."),
 ) -> None:
     """Reset the local UI simulation session; no orders, no network, no testnet."""
     settings = _settings()

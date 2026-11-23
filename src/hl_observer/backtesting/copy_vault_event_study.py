@@ -72,7 +72,7 @@ class EventStudyConfig:
     confidence: float = 0.95
     seed: int = 20_261_111
     capital_usd: float = PAPER_EQUITY_USD
-    slots: int = 5                         # 350 USD en 5 lignes de 70 USD, sans levier
+    slots: int = 5                         # capital paper canonique (100 USD) en 5 lignes de 20 USD, sans levier
     # Sélection en marche avant : un leader n'est suivi qu'après ``selection_min_history`` décisions
     # DÉNOUÉES, et seulement si leur net moyen, ramené vers zéro comme s'il avait déjà fait
     # ``selection_prior_events`` décisions nulles, est positif.
@@ -263,7 +263,7 @@ def _rang_stable(table: pd.DataFrame) -> np.ndarray:
 
 
 def simulate_capital(table: pd.DataFrame, *, horizon_h: int, config: EventStudyConfig | None = None) -> dict[str, Any]:
-    """Ce qu'un compte PAPER de 350 USD aurait fait : ``slots`` lignes égales, sans levier, ordre minimal
+    """Ce qu'un compte PAPER de ``config.capital_usd`` (canonique : 100 USD) aurait fait : ``slots`` lignes égales, sans levier, ordre minimal
     respecté, une ligne par décision tant qu'une place est libre, coût connu obligatoire."""
     config = config or EventStudyConfig()
     taille = config.capital_usd / max(1, config.slots)

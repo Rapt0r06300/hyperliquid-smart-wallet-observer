@@ -37,3 +37,15 @@ def test_l_entree_attend_la_fin_de_la_vague() -> None:
                            "tid": 1}])
     ev = A.evenements(fills, vg)
     assert bool(ev["absorbe"].iloc[0]) and int(ev["entree_ms"].iloc[0]) >= 11 * H
+
+
+def test_le_suiveur_retient_l_ouverture_dans_le_sens_de_la_vague() -> None:
+    """H19 : longs liquidés (ventes forcées) -> le SUIVEUR est celui qui VEND, pas celui qui achète."""
+    vg = pd.DataFrame([{"coin": "BTC", "heure_ms": 10 * H, "sens_absorbeur": 1, "liquide_usd": 2e6}])
+    base = {"vault": "a", "ts_ms": 10 * H + 60_000, "coin": "BTC", "px": 100.0, "sz": 50.0, "start_position": 0.0,
+            "crossed": True, "fee": 0.0, "closed_pnl": 0.0}
+    achat = pd.DataFrame([{**base, "signe": 1, "dir": "Open Long", "tid": 1}])
+    vente = pd.DataFrame([{**base, "signe": -1, "dir": "Open Short", "tid": 2}])
+    assert not bool(A.evenements(achat, vg, sens_cible="suiveur")["absorbe"].iloc[0])
+    assert bool(A.evenements(vente, vg, sens_cible="suiveur")["absorbe"].iloc[0])
+    assert bool(A.evenements(achat, vg, sens_cible="absorbeur")["absorbe"].iloc[0])     # H17 inchangée
