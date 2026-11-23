@@ -50,7 +50,8 @@ jobs:
       - name: Collecte contexte (lane ${{ matrix.shard_index }})
         run: |
           export PYTHONPATH=src
-          python -B tools/collecter_contexte_lane.py             --leaders-file config/copy_vault_leaders.json             --shard-count "${SHARD_COUNT}"             --shard-index "${{ matrix.shard_index }}"             --duree-s "${{ github.event.inputs.duree_s || '1500' }}"             --pos-out runtime/data/copy_vault_positions_lane.jsonl             --twap-out runtime/data/copy_vault_twap_lane.jsonl           || true
+          python -B tools/collecter_contexte_lane.py             --leaders-file config/copy_vault_leaders.json             --shard-count "${SHARD_COUNT}"             --shard-index "${{ matrix.shard_index }}"             --duree-s "${{ github.event.inputs.duree_s || '1500' }}"             --pos-out runtime/data/copy_vault_positions_lane.jsonl             --twap-out runtime/data/copy_vault_twap_lane.jsonl \
+            --result-out runtime/data/copy_vault_context_result.json
       - name: Publier
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -61,5 +62,6 @@ jobs:
             runtime/data/copy_vault_twap_lane.jsonl
             runtime/data/copy_vault_snapshots_lane.jsonl
             runtime/data/copy_vault_orders_lane.jsonl
-          if-no-files-found: ignore
+            runtime/data/copy_vault_context_result.json
+          if-no-files-found: error
           retention-days: 5
