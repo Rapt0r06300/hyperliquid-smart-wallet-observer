@@ -15,6 +15,7 @@ import argparse
 import asyncio
 import json
 import math
+import os
 import sys
 import time
 from pathlib import Path
@@ -30,8 +31,19 @@ from hl_observer.collection.univers_perps import charger_univers, filtrer_abonna
 WS_URL = "wss://api.hyperliquid.xyz/ws"
 TRADES_OUT = Path("runtime") / "data" / "copy_vault_trades_lane.jsonl"
 CANDLE_OUT = Path("runtime") / "data" / "copy_vault_candle_lane.jsonl"
+RESULT_OUT = Path("runtime") / "data" / "copy_vault_market_result.json"
 DEFAULT_COINS_FILE = "config/copy_vault_coins.json"
 COINS_PAR_CONNEXION = 40
+
+
+def _ecrire_resultat(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporaire = path.with_name(path.name + ".tmp")
+    temporaire.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    temporaire.replace(path)
 
 
 def _nb(v):
@@ -233,6 +245,9 @@ def _charger_coins(root: Path, chemin: str) -> list[str]:
 
 async def _boucle(args: argparse.Namespace) -> int:
     root = Path(args.root)
+    result_out = Path(getattr(args, "result_out", "") or (root / RESULT_OUT))
+    result_out = result_out if result_out.is_absolute() else root / result_out
+    started_at_ms = int(time.time() * 1000)
     tous = _charger_coins(root, args.coins_file)
     lane_coins = shard_leaders(tous, args.shard_count, args.shard_index)
     # Un abonnement à un marché inconnu fait fermer toute la connexion : seuls les marchés
@@ -243,7 +258,22 @@ async def _boucle(args: argparse.Namespace) -> int:
               f"{', '.join(inconnus[:12])}", flush=True)
     if not lane_coins:
         print("[market] aucun coin pour cette lane.", flush=True)
-        return 0
+        _ecrire_resultat(result_out, {
+            "schema": "hypersmart.collector_lane_result.v1",
+            "collector": "copy_vault_market",
+            "status": "EMPTY",
+            "reason": "no_subscribable_coins",
+            "code_sha": os.environ.get("GITHUB_SHA", ""),
+            "shard_index": int(args.shard_index),
+            "shard_count": int(args.shard_count),
+            "coins_configured": len(tous),
+            "coins_unknown": len(inconnus),
+            "counts": {"trades": 0, "candles": 0, "closed_candles": 0},
+            "reconnects": 0,
+            "started_at_ms": started_at_ms,
+            "finished_at_ms": int(time.time() * 1000),
+        })
+        return 2
     trades_out = Path(args.trades_out) if args.trades_out else (root / TRADES_OUT)
     candle_out = Path(args.candle_out) if args.candle_out else (root / CANDLE_OUT)
     trades_out = trades_out if trades_out.is_absolute() else root / trades_out
@@ -259,7 +289,29 @@ async def _boucle(args: argparse.Namespace) -> int:
     await asyncio.gather(*taches, return_exceptions=True)
     print(f"[market] fini : {lane.trades} trades + {lane.candles} bougies, "
           f"{lane.reconnects} reconnexions -> {lane.trades_out}", flush=True)
-    return 0
+    total_records = lane.trades + lane.candles + lane.cloturees
+    status = "OK" if total_records > 0 else "EMPTY"
+    _ecrire_resultat(result_out, {
+        "schema": "hypersmart.collector_lane_result.v1",
+        "collector": "copy_vault_market",
+        "status": status,
+        "reason": "" if status == "OK" else "no_records",
+        "code_sha": os.environ.get("GITHUB_SHA", ""),
+        "shard_index": int(args.shard_index),
+        "shard_count": int(args.shard_count),
+        "coins_configured": len(tous),
+        "coins_subscribed": len(lane_coins),
+        "coins_unknown": len(inconnus),
+        "counts": {
+            "trades": lane.trades,
+            "candles": lane.candles,
+            "closed_candles": lane.cloturees,
+        },
+        "reconnects": lane.reconnects,
+        "started_at_ms": started_at_ms,
+        "finished_at_ms": int(time.time() * 1000),
+    })
+    return 0 if status == "OK" else 2
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -274,6 +326,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--duree-s", type=float, default=1500.0)
     p.add_argument("--trades-out", default="")
     p.add_argument("--candle-out", default="")
+    p.add_argument("--result-out", default="", help="manifeste JSON du résultat de la lane")
     args = p.parse_args(argv)
     try:
         return asyncio.run(_boucle(args))
