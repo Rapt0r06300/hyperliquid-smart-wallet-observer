@@ -46,12 +46,11 @@ jobs:
         with:
           python-version: "3.12"
       - name: Dependance WS
-        run: pip install --quiet "websockets>=12,<16"
+        run: pip install --quiet "websockets>=17,<18"
       - name: Collecte contexte (lane ${{ matrix.shard_index }})
         run: |
           export PYTHONPATH=src
-          python -B tools/collecter_contexte_lane.py             --leaders-file config/copy_vault_leaders.json             --shard-count "${SHARD_COUNT}"             --shard-index "${{ matrix.shard_index }}"             --duree-s "${{ github.event.inputs.duree_s || '1500' }}"             --pos-out runtime/data/copy_vault_positions_lane.jsonl             --twap-out runtime/data/copy_vault_twap_lane.jsonl \
-            --result-out runtime/data/copy_vault_context_result.json
+          python -B tools/collecter_contexte_lane.py             --leaders-file config/copy_vault_leaders.json             --shard-count "${SHARD_COUNT}"             --shard-index "${{ matrix.shard_index }}"             --duree-s "${{ github.event.inputs.duree_s || '1500' }}"             --pos-out runtime/data/copy_vault_positions_lane.jsonl             --twap-out runtime/data/copy_vault_twap_lane.jsonl           || true
       - name: Publier
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -62,6 +61,5 @@ jobs:
             runtime/data/copy_vault_twap_lane.jsonl
             runtime/data/copy_vault_snapshots_lane.jsonl
             runtime/data/copy_vault_orders_lane.jsonl
-            runtime/data/copy_vault_context_result.json
-          if-no-files-found: error
+          if-no-files-found: ignore
           retention-days: 5

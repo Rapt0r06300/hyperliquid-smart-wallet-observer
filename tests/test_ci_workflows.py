@@ -87,12 +87,12 @@ def test_labo_continu_sparse_checkout_ne_garde_que_ses_surfaces_utiles():
 
 def test_labo_continu_installs_runtime_import_dependencies():
     txt = _texte("labo-continu-ci.yml")
-    assert "python -m pip install --disable-pip-version-check pytest PyYAML httpx pydantic websockets" in txt
+    assert 'python -m pip install --disable-pip-version-check pytest PyYAML httpx pydantic "websockets>=17,<18"' in txt
 
 
 def test_local_l2_hosted_job_installs_import_dependencies():
     txt = _texte("local-l2-certification-tests.yml")
-    assert "python -m pip install --disable-pip-version-check pytest PyYAML httpx pydantic websockets" in txt
+    assert 'python -m pip install --disable-pip-version-check pytest PyYAML httpx pydantic "websockets>=17,<18"' in txt
 
 
 def test_local_l2_hosted_job_avoids_raw_dataset_checkout():
