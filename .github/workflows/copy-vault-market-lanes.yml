@@ -55,7 +55,8 @@ jobs:
           COINS_FILE: ${{ github.event.inputs.coins_file || 'config/copy_vault_coins.json' }}
         run: |
           export PYTHONPATH=src
-          python -B tools/collecter_market_lane.py             --coins-file "${COINS_FILE}"             --shard-count "${SHARD_COUNT}"             --shard-index "${{ matrix.shard_index }}"             --duree-s "${{ github.event.inputs.duree_s || '1500' }}"             --trades-out runtime/data/copy_vault_trades_lane.jsonl             --candle-out runtime/data/copy_vault_candle_lane.jsonl           || true
+          python -B tools/collecter_market_lane.py             --coins-file "${COINS_FILE}"             --shard-count "${SHARD_COUNT}"             --shard-index "${{ matrix.shard_index }}"             --duree-s "${{ github.event.inputs.duree_s || '1500' }}"             --trades-out runtime/data/copy_vault_trades_lane.jsonl             --candle-out runtime/data/copy_vault_candle_lane.jsonl \
+            --result-out runtime/data/copy_vault_market_result.json
       - name: Publier
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -64,5 +65,6 @@ jobs:
           path: |
             runtime/data/copy_vault_trades_lane.jsonl
             runtime/data/copy_vault_candle_lane.jsonl
-          if-no-files-found: ignore
+            runtime/data/copy_vault_market_result.json
+          if-no-files-found: error
           retention-days: 5
