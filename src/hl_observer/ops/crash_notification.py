@@ -49,7 +49,6 @@ def write_crash_signal(
     }
     try:
         sig_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        logger.warning("CRASH_SIGNAL written: %s — %s", sig_path, reason)
     except OSError as exc:
         logger.error("Failed to write crash signal: %s", exc)
     return sig_path
