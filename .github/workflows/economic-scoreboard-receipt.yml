@@ -1,6 +1,7 @@
 name: economic-scoreboard-receipt
 env:
   PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/src"
+  GH_TOKEN: "${{ github.token }}"
 on:
   workflow_dispatch:
   schedule:
@@ -12,8 +13,6 @@ on:
       - "src/hl_observer/simulation/economic_family_scoreboard.py"
       - "tools/export_economic_family_scoreboards.py"
       - ".github/workflows/economic-scoreboard-receipt.yml"
-env:
-  GH_TOKEN: "${{ github.token }}"
 
 permissions:
   # contents: read is the baseline; publication jobs elevate only where required.
