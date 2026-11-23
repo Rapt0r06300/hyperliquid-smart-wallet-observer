@@ -59,6 +59,8 @@ FICHE: dict[str, tuple[str, str, str]] = {
     "M15": ("dépôt <= capital ; frais de performance du gérant", "aucun fill : dépôt en vault", "rendement < HLP après correction de survie (V : -436 bps/28 j)"),
     "M16": (COPIE, TAKER, "excès des gros fills <= 0 (L8 >= 40 % : -9,12 brut à 4 h)"),
     "M18": (COPIE, "maker au meilleur prix à t+60 s ; rempli si le volume agresseur dépasse la file", "PnL total <= 0 en prospectif (H22-P, gel 9d809bf4a3d7)"),
+    "M19": ("dépôt <= capital ; verrou 4 j", "aucun fill : dépôt en vault au début de période", "écart haut - bas <= 0 ou permutation p >= 0,025 (H23 : p 0,186)"),
+    "M20": ("dépôt <= capital ; verrou 4 j", "aucun fill : dépôt en vault au début de période", "écart haut - bas <= 0 ou permutation p >= 0,025 (H24 : p 0,345)"),
     "M17": (REPLICATION, "taker au mid + demi-écart, réalignement périodique", "net <= 0 ou quasi-inactivité à 100 USD (rejeu 23/11)"),
 }
 
@@ -85,6 +87,10 @@ MECANISMES = (
     # l'hypothèse « gros ordre informé » se lit sur la tranche >= 40 % : brut 4 h -9,12 [-36,46 ; 21,64] - coût 15.
     Mecanisme("M18 capture de l'écart en maker", "preneurs impatients -> fournisseur passif",
               "H22 Tardis, maker à 60 s, PnL total par signal", 7.40, (-24.67, 29.14), 0.6, "REJECTED"),
+    Mecanisme("M19 dépôt HLP après liquidations", "liquidés -> HLP (liquidateur de dernier recours)",
+              "H23, haut - bas par période (~2 sem.)", 75.47, (-23.30, 275.47), 0.6, "REJECTED"),
+    Mecanisme("M20 dépôt HLP après funding extrême", "côté surpeuplé -> HLP (teneur de marché)",
+              "H24, haut - bas par période (~2 sem.)", 36.57, (-38.80, 162.54), 0.6, "REJECTED"),
     Mecanisme("M16 taille du fill du leader", "contrepartie d'un gros ordre -> son auteur", "L8 tranche >= 40 %, excès 4 h - coût 15", -24.12, (-51.46, 6.64), 0.6, "REJECTED"),
 )
 
@@ -108,6 +114,8 @@ MESURES: dict[str, tuple[str, str, str]] = {
     "M15": ("-436 [-823 ; -61] bps / 28 j", "> HLP", "HLP : +230"),
     "M16": ("-9,12 [-36,5 ; 21,6] à 4 h (>= 40 %)", "15", "tranche 0-1 % : +4,65 [-4,8 ; 14,3]"),
     "M18": ("remplis +14,9 brut ; PnL total +7,4 [-24,7 ; 29,1]", "1,5 maker + 4,5 taker + demi-écart", "taker à 120 s : -9,4 ; non remplis -3,2"),
+    "M19": ("+75,5 bps/période après le tiers haut des liquidations", "0 (dépôt) ; écart > 0", "2 000 permutations : p = 0,186"),
+    "M20": ("+36,6 bps/période après le tiers haut du |funding|", "0 (dépôt) ; écart > 0", "2 000 permutations : p = 0,345"),
     "M17": ("-1,05 bps/j du capital [-17,4 ; 11,4]", "0 (vs NO-TRADE)", "même rejeu à 350 USD : -2,58 bps/j"),
 }
 
@@ -123,6 +131,7 @@ FAMILLES = {
     "M12": "comportement grégaire", "M13": "fourniture de liquidité déléguée", "M14": "impact des métaordres",
     "M15": "gestion déléguée et survie des fonds", "M16": "information contenue dans la taille",
     "M17": "friction de micro-capital (ordre minimal)", "M18": "capture de l'écart (maker)",
+    "M19": "prime de liquidation captée par dépôt (moment du dépôt)", "M20": "prime de surpeuplement captée par dépôt",
 }
 
 

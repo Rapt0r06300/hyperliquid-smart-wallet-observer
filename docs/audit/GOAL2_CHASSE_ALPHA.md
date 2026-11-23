@@ -1341,3 +1341,26 @@ imposé par le périmètre CopyVault. Ajout : M18 capture de l'écart en maker (
   17 familles économiques distinctes pour 18 mécanismes
 ```
 
+### H23 / H24 — QUAND déposer dans HLP (instrument SANS copie de leader ; pré-enregistrées le 23/11 à 12:36 heure de Paris)
+
+**Instrument** : le moment du dépôt dans le vault HLP (verrou 4 j ; aucun frais de transaction). Données : historique de
+PnL et de valeur de HLP (API officielle `vaultDetails`, pas ~2 semaines, 2023-05 -> 2026-11), liquidations et funding
+Ironflow (recoupés). Rendement de période i = (PnL[i+1] − PnL[i]) / valeur[i] (les flux de dépôts n'entrent pas dans le PnL).
+- **H23, prime de liquidation** (liquidés -> HLP, liquidateur de dernier recours et teneur de marché) : le notionnel liquidé
+  de la période PRÉCÉDENTE (marchés natifs) annonce-t-il le rendement de HLP de la période suivante ?
+- **H24, prime de surpeuplement** (côté surpeuplé -> teneur de marché) : idem avec le |funding| moyen de la période précédente.
+- Test : rendement moyen des périodes suivant le TIERS SUPÉRIEUR de l'indicateur moins celui suivant le tiers inférieur ;
+  IC95 par bootstrap des périodes ; placebo : 2 000 permutations de l'indicateur. Bonferroni sur 2 tests (alpha 0,025).
+- Critère : écart IC97,5 > 0 ET permutation p < 0,025 -> `CANDIDAT_PROSPECTIF` (règle : déposer après une période
+  haute) ; sinon `REJECTED`. Peu de périodes (~38 sur la fenêtre Ironflow) : la puissance est faible, c'est dit d'avance.
+
+### Essais 38-39 — H23 / H24 mesurées (instrument : moment du dépôt dans HLP, SANS copie de leader) : `REJECTED`
+
+37 périodes (~2 semaines) de l'historique officiel de HLP, indicateurs Ironflow de la période précédente. HLP rapporte en
+moyenne +58,1 bps par période. **H23** (après le tiers haut des liquidations) : écart haut − bas **+75,5 bps**
+[−23,3 ; 275,5], permutation p = 0,186 ; **H24** (après le tiers haut du |funding|) : +36,6 [−38,8 ; 162,5], p = 0,345.
+Le sens est celui du mécanisme (HLP gagne sur les ventes forcées et le surpeuplement), mais 37 périodes ne suffisent
+pas : rejet au critère. Ajoutés à la carte : M19, M20 (familles « prime de liquidation captée par dépôt », « prime de
+surpeuplement captée par dépôt »). Instruments de la carte : copie de leader (M1-M12, M16-M18), dépôt en vault (M13, M15,
+M19, M20), métaordres (M14).
+
