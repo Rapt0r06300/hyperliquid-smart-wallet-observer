@@ -42,6 +42,12 @@ def _iron(jeu: str, colonnes: list[str], sous: str = "") -> pd.DataFrame:
     morceaux = []
     for f in sorted((IRON / jeu / "data" / sous).glob("*.parquet")):
         morceaux.append(pq.read_table(f, columns=colonnes).to_pandas())
+    if not morceaux:
+        # Les historiques Ironflow sont des assets externes et peuvent être absents d'un
+        # runner propre.  Retourner un schéma vide permet au calcul appelant de conclure
+        # UNMEASURABLE au lieu de fabriquer une observation ou de planter sur concat([]).
+        return pd.DataFrame({colonne: pd.Series(dtype="object") for colonne in colonnes} |
+                            {"t_ms": pd.Series(dtype="int64")})
     d = pd.concat(morceaux, ignore_index=True)
     d["t_ms"] = d["timestamp"].astype("int64") // (1000 if str(d["timestamp"].dtype).endswith("us, UTC]") else 1)
     return d
@@ -52,6 +58,9 @@ def indicateurs(p: pd.DataFrame) -> pd.DataFrame:
     liq = liq[~liq["market"].str.contains(":", regex=False)]
     fun = _iron("funding", ["timestamp", "dex", "funding_rate"])
     fun = fun[fun["dex"].fillna("") == ""]
+    colonnes = [*p.columns, "liquide_usd_prec", "funding_abs_prec"]
+    if liq.empty or fun.empty or p.empty:
+        return pd.DataFrame(columns=dict.fromkeys(colonnes))
     lt, lv = liq["t_ms"].to_numpy(np.int64), liq["notional_usd"].to_numpy(float)
     ft, fv = fun["t_ms"].to_numpy(np.int64), np.abs(fun["funding_rate"].to_numpy(float))
     o = np.argsort(lt); lt, lv = lt[o], lv[o]
@@ -70,6 +79,10 @@ def indicateurs(p: pd.DataFrame) -> pd.DataFrame:
 
 
 def tester(df: pd.DataFrame, colonne: str, *, graine: int = 20261123) -> dict:
+    if len(df) < 3 or colonne not in df or df[colonne].dropna().empty:
+        return {"n_periodes": int(len(df)), "n_haut": 0, "n_bas": 0, "ecart_bps": None,
+                "ic_975": [None, None], "p_permutation": None,
+                "rendement_moyen_bps": None, "statut": "UNMEASURABLE"}
     v, r = df[colonne].to_numpy(float), df["rendement_bps"].to_numpy(float)
     bas, haut = np.quantile(v, [1 / 3, 2 / 3])
     hi, lo = r[v >= haut], r[v <= bas]

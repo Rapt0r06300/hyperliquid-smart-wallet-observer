@@ -34,6 +34,7 @@ from hl_observer.collection.copy_vault_checkpoint_socle import (
     MAX_TARGET_LAG_MS,
     _append_jsonl,
     _file_identity,
+    _file_identity_changed,
     _parse_book,
     _strict_int,
     fetch_hyperliquid_l2_book,
@@ -279,7 +280,7 @@ class CopyVaultCheckpointTail(VoiePreSignal):
                 counters.setdefault(name, value)
             if "input_file_identity" not in loaded:
                 try:
-                    loaded["input_file_identity"] = _file_identity(self.input_path.stat())
+                    loaded["input_file_identity"] = _file_identity(self.input_path.stat(), self.input_path)
                 except OSError:
                     loaded["input_file_identity"] = None
             # 16/11/2026 — MIGRATION HONNETE VERS LE JOURNAL DE FENETRES. Un etat ecrit par
@@ -332,7 +333,7 @@ class CopyVaultCheckpointTail(VoiePreSignal):
             }
             state["counters"]["identity_migration_resets"] = 1
         try:
-            state["input_file_identity"] = _file_identity(self.input_path.stat())
+            state["input_file_identity"] = _file_identity(self.input_path.stat(), self.input_path)
         except OSError:
             state["input_file_identity"] = None
         _atomic_write(self.state_path, state)
@@ -346,10 +347,12 @@ class CopyVaultCheckpointTail(VoiePreSignal):
         with handle:
             stat = os.fstat(handle.fileno())
             size = int(stat.st_size)
-            identity = _file_identity(stat)
             offset = int(self.state.get("input_offset") or 0)
             prior_identity = self.state.get("input_file_identity")
-            input_rotated = (prior_identity is not None and prior_identity != identity) or size < offset
+            prefix_len = (int(prior_identity[2]) if isinstance(prior_identity, list) and len(prior_identity) > 2
+                          and type(prior_identity[2]) is int else None)
+            identity = _file_identity(stat, self.input_path, prefix_len)
+            input_rotated = (prior_identity is not None and _file_identity_changed(prior_identity, identity)) or size < offset
             if input_rotated:
                 offset = 0
                 # A replacement file may already contain a reconnect snapshot or
@@ -384,6 +387,8 @@ class CopyVaultCheckpointTail(VoiePreSignal):
             return []
         consumed = chunk[: complete_end + 1]
         self.state["input_offset"] = offset + len(consumed)
+        if prefix_len == 0 and self.state["input_offset"] > 0:
+            self.state["input_file_identity"] = _file_identity(stat, self.input_path)
         rows: list[dict[str, Any]] = []
         for line in consumed.splitlines():
             if not line.strip():

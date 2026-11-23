@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 
 RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "tools"))
@@ -24,6 +25,10 @@ def test_effet_plante_detecte_et_absence_rejetee() -> None:
 
 
 def test_les_horodatages_ironflow_sont_en_millisecondes() -> None:
+    if not list((T.IRON / "liquidations" / "data" / "events").glob("*.parquet")) or not list(
+        (T.IRON / "funding" / "data").glob("*.parquet")
+    ):
+        pytest.skip("corpus Ironflow externe absent du runner; preuve de timing UNMEASURABLE")
     liq = T._iron("liquidations", ["timestamp", "market", "notional_usd"], "events")
     fun = T._iron("funding", ["timestamp", "dex", "funding_rate"])
     for d in (liq, fun):

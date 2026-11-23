@@ -13,7 +13,9 @@ signature, aucune clé : la seule destination réseau est l'endpoint public ``/i
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import hashlib
 import os
 import urllib.request
 from collections.abc import Mapping
@@ -77,10 +79,42 @@ def fetch_hyperliquid_l2_book(coin: str, *, timeout_s: float = 2.0) -> dict[str,
     return payload if isinstance(payload, dict) else None
 
 
-def _file_identity(stat: os.stat_result) -> list[int]:
-    """Stable identity for replacement detection; size/mtime change on append."""
+def _file_identity(
+    stat: os.stat_result, path: Path | None = None, prefix_len: int | None = None
+) -> list[int | str]:
+    """Stable identity for replacement detection; appends must not look like rotation.
 
-    return [int(stat.st_dev), int(stat.st_ino)]
+    Device/inode is normally enough, but a filesystem may reuse the same inode immediately
+    after unlink/recreate.  A bounded hash of the first 4 KiB makes that replacement visible
+    without hashing the 666 MiB lane or changing when bytes are appended at the end.
+    """
+    head = ""
+    longueur = 0
+    if path is not None:
+        try:
+            with path.open("rb") as handle:
+                longueur = min(max(0, int(prefix_len)) if prefix_len is not None else 4096,
+                                int(stat.st_size))
+                head = hashlib.sha256(handle.read(longueur)).hexdigest()
+        except OSError:
+            head = ""
+            longueur = 0
+    return [int(stat.st_dev), int(stat.st_ino), longueur, head]
+
+
+def _file_identity_changed(previous: Any, current: list[int | str]) -> bool:
+    """Detect replacement while tolerating append growth of a short file."""
+    if not isinstance(previous, list) or len(previous) < 2:
+        return previous is not None
+    if previous[:2] != current[:2]:
+        return True
+    if len(previous) < 4:
+        return False
+    try:
+        longueur = int(previous[2])
+    except (TypeError, ValueError):
+        return True
+    return longueur > 0 and previous[3] != current[3]
 
 
 def _parse_book(raw: Mapping[str, Any], *, received_at_ms: int) -> dict[str, Any] | None:

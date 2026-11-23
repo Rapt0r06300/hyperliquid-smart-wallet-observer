@@ -19,7 +19,9 @@ from typing import Any
 from hl_observer.backtesting.copy_vault_executable import CHECKPOINT_COLLECTOR_PROTOCOL
 from hl_observer.backtesting.copy_vault_protocol import INSTRUMENT_IDENTITY_SCHEMA
 from hl_observer.collection import copy_vault_reference_binding as LIAISON
-from hl_observer.collection.copy_vault_checkpoint_socle import _append_jsonl, _file_identity
+from hl_observer.collection.copy_vault_checkpoint_socle import (
+    _append_jsonl, _file_identity, _file_identity_changed,
+)
 from hl_observer.instrument_identity import preserve_native_instrument_symbol
 
 COMPANION_PROTOCOL = CHECKPOINT_COLLECTOR_PROTOCOL
@@ -51,11 +53,13 @@ class VoiePreSignal:
             stat = self.lane_path.stat()
         except OSError:
             return 0
-        identite = _file_identity(stat)
+        precedente = self.state.get("lane_file_identity")
+        prefix_len = (int(precedente[2]) if isinstance(precedente, list) and len(precedente) > 2
+                      and type(precedente[2]) is int else None)
+        identite = _file_identity(stat, self.lane_path, prefix_len)
         taille = int(stat.st_size)
         offset = int(self.state.get("lane_offset") or 0)
-        precedente = self.state.get("lane_file_identity")
-        if precedente is None or precedente != identite or taille < offset:
+        if precedente is None or _file_identity_changed(precedente, identite) or taille < offset:
             # Premier passage ou rotation : on se cale sur la fin. Aucune ligne historique n'entre.
             self.state["lane_offset"] = taille
             self.state["lane_file_identity"] = identite
@@ -92,6 +96,8 @@ class VoiePreSignal:
                 del file[:-CARNETS_PAR_COIN]
             lues += 1
         self.state["lane_offset"] = offset + len(consomme)
+        if prefix_len == 0 and self.state["lane_offset"] > 0:
+            self.state["lane_file_identity"] = _file_identity(stat, self.lane_path)
         return lues
 
     def _emettre_reference_liee(self, base: Mapping[str, Any], *, signal_received_ms: int) -> bool:

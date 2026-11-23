@@ -274,11 +274,19 @@ def _charger_tier_local(
             continue
         famille = str(entree.get("famille") or "")
         est_signal = famille in _COFFRE_FAMILLES_SIGNAUX
+        if (arret_chargement is None
+                and comptes_replay["fills"] + comptes_replay["carnets"] + comptes_replay["bbo"]
+                >= int(max_lignes)):
+            arret_chargement = "PLAFOND_LIGNES"
         # Les familles de contexte sont lues en streaming quand garder_signaux=False :
         # elles ne consomment pas la RAM de matérialisation et doivent donc continuer
         # après l'arrêt volontaire des gros fills/carnets. Sinon un plafond mémoire
         # transformait silencieusement les dernières familles du coffre en données jamais lues.
-        if arret_chargement is not None and not (est_signal and not garder_signaux):
+        # Les familles de contexte sont comptées en flux quand les signaux ne sont pas
+        # matérialisés. Elles doivent donc rester lisibles après le plafond de replay : le
+        # plafond protège la RAM des fills/carnets, pas la mesure de couverture des contextes.
+        contexte_en_flux = est_signal and not garder_signaux
+        if arret_chargement is not None and not contexte_en_flux:
             shards_non_lus += 1
             continue
         # 23/11/2026 -- DONNÉE EXTERNE (Ironflow, Tardis ; l'index le dit). Elle reste à la disposition de la
