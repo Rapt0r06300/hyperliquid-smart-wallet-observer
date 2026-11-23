@@ -1275,3 +1275,69 @@ l'inscription : 0 ligne de carnet ni de trade après le gel (carnet jusqu'au 22/
 - **Verdict seulement si** >= 100 signaux mesurables sur >= 5 jours distincts ; sinon `MORE_DATA`.
 - Critère : PnL total par signal IC95 > 0 -> `PROMISING` (prospectif, toujours pas PROVEN) ; sinon `REJECTED`.
 
+### 23d. Carte finale : 18 mécanismes, 17 familles ÉCONOMIQUES distinctes (testé : >= 12)
+
+La famille est la SOURCE de l'avantage (qui paie et pourquoi). La copie d'un leader n'est que l'instrument de mesure
+imposé par le périmètre CopyVault. Ajout : M18 capture de l'écart en maker (H22), mesuré mais absent de la carte.
+
+```
+  rang mécanisme                            qui paie -> qui gagne              p(net>0)      V    F priorité  statut
+  1    M10 sortie / gestion                 sortie tardive -> sortie miroir       0.672  0.882  0.6    0.466  REJECTED
+  2    M18 capture de l'écart en maker      preneurs impatients -> fournisseur passif    0.705  0.832  0.6    0.461  REJECTED
+  3    M6 éviter la vague (NO-TRADE)        copieur naïf -> copieur filtré        0.500  1.000  0.6    0.450  MORE_DATA
+  4    M7 refus absorbé/tard/petit          copieur naïf -> copieur filtré        0.500  1.000  0.6    0.450  MORE_DATA
+  5    M13 fourniture de liquidité (HLP)    preneurs -> teneurs de marché         0.800  0.640  0.6    0.432  PROMISING
+  6    M17 réplication lente du portefeuille suiveur -> porteur de risque observé    0.443  0.987  0.6    0.429  REJECTED
+  7    M11 réallocation                     gérant -> suiveur                     0.363  0.925  0.6    0.387  REJECTED
+  8    M12 consensus indépendant            foule -> consensus                    0.349  0.909  0.6    0.377  REJECTED
+  9    M5 suivre la cascade                 retardataires -> suiveurs             0.346  0.906  0.6    0.376  REJECTED
+  10   M2 décroissance / latence            copieur lent -> preneur rapide        0.226  0.700  0.3    0.139  REJECTED
+  11   M3 pression temporaire               impatients -> patients                0.096  0.346  0.6    0.133  REJECTED
+  12   M1 wallets informés                  non-informés -> informés              0.115  0.408  0.3    0.078  REJECTED
+  13   M16 taille du fill du leader         contrepartie d'un gros ordre -> son auteur    0.052  0.197  0.6    0.075  REJECTED
+  14   M4 absorber les ventes forcées       liquidés -> absorbeurs                0.051  0.195  0.6    0.074  REJECTED
+  15   M9 portage du leader                 payeur de funding -> porteur          0.041  0.158  0.6    0.060  REJECTED
+  16   M8 prime de funding (receveur)       côté surpeuplé -> receveur            0.028  0.107  0.6    0.040  REJECTED
+  17   M15 sélection de vaults gagnants     déposant tardif -> gérant (frais, survie)    0.012  0.049  0.6    0.018  REJECTED
+  18   M14 flux résiduel des métaordres     métaordre visible -> anticipateur     0.500  1.000  0.0    0.000  UNMEASURABLE
+
+  M10  [effet de disposition / gestion de sortie] brut : +11,8 [-0,1 ; 20,2] | seuil : ~9,5 (sortie miroir) | témoin : jumeau : excès +14,5 [6,3 ; 20,4]
+       capacité : lignes de 20 USD >= ordre min. 10 USD : OK | fill : entrée taker, sortie miroir taker | réfutation : net <= 0 en prospectif (apprenant, 27/11)
+  M18  [capture de l'écart (maker)] brut : remplis +14,9 brut ; PnL total +7,4 [-24,7 ; 29,1] | seuil : 1,5 maker + 4,5 taker + demi-écart | témoin : taker à 120 s : -9,4 ; non remplis -3,2
+       capacité : lignes de 20 USD >= ordre min. 10 USD : OK | fill : maker au meilleur prix à t+60 s ; rempli si le volume agresseur dépasse la file | réfutation : PnL total <= 0 en prospectif (H22-P, gel 9d809bf4a3d7)
+  M6   [sélection adverse évitée (NO-TRADE)] brut : non encore mesuré (gel 22/11) | seuil : gain du refus > 0 | témoin : copies non filtrées, mêmes jours
+       capacité : lignes de 20 USD >= ordre min. 10 USD : OK | fill : aucun (refus) | réfutation : gain du refus <= 0 sur novembre (H18)
+  M7   [sélection adverse évitée (NO-TRADE)] brut : non encore mesuré (gel 22/11) | seuil : gain du refus > 0 | témoin : copies non filtrées, mêmes jours
+       capacité : lignes de 20 USD >= ordre min. 10 USD : OK | fill : aucun (refus) | réfutation : gain du refus <= 0 après le gel (H16)
+  M13  [fourniture de liquidité déléguée] brut : +230 bps / 28 j | seuil : 0 (dépôt, pas de frais de transaction) | témoin : vaults d'utilisateurs : -436 [-823 ; -61]
+       capacité : dépôt <= capital ; verrou 4 j de HLP | fill : aucun fill : dépôt en vault | réfutation : rendement 28 j <= 0 en prospectif (17/12)
+  M17  [friction de micro-capital (ordre minimal)] brut : -1,05 bps/j du capital [-17,4 ; 11,4] | seuil : 0 (vs NO-TRADE) | témoin : même rejeu à 350 USD : -2,58 bps/j
+       capacité : MESURÉ : 96,5 % des ordres refusés par l'ordre min. à 100 USD (68,5 % à 350) | fill : taker au mid + demi-écart, réalignement périodique | réfutation : net <= 0 ou quasi-inactivité à 100 USD (rejeu 23/11)
+  M11  [coût d'opportunité du capital] brut : +4,3 [-54,8 ; 64,9] à 24 h | seuil : 15 | témoin : jumeau : excès -14,2 [-64,0 ; 38,2]
+       capacité : lignes de 20 USD >= ordre min. 10 USD : OK | fill : taker au meilleur prix + écart, après 120 s | réfutation : excès sur témoin <= 0 (H14 : -14,2)
+  M12  [comportement grégaire] brut : +13,3 [-46,3 ; 74,6] à 24 h | seuil : 15 | témoin : jumeau +26,0 : excès -12,6 [-76,7 ; 50,8]
+       capacité : lignes de 20 USD >= ordre min. 10 USD : OK | fill : taker au meilleur prix + écart, après 120 s | réfutation : excès <= 0 (L9 : -12,6) ; kappa ~ 0 (pas de course commune)
+  M5   [momentum de cascade] brut : -1,0 [-84,1 ; 74,6] à 24 h | seuil : 15 et >= vague seule | témoin : vague seule : +72,9 [0,6 ; 149,0]
+       capacité : lignes de 20 USD >= ordre min. 10 USD : OK | fill : taker au meilleur prix + écart, après 120 s | réfutation : leader <= vague seule (H19 : -1,0 vs +72,9)
+  M2   [course à la latence] brut : +5,16 à 60 s ; +0,07 à 120 s | seuil : 12 (taker aller-retour + écart) | témoin : tous fills : copie -26,4 [-43,2 ; -3,3]
+       capacité : lignes de 20 USD >= ordre min. 10 USD : OK | fill : taker à 120 s ; maker < 60 s exigerait un modèle de remplissage | réfutation : markout à 120 s <= coût (H20 : +0,07 vs 12)
+  M3   [pression temporaire de prix] brut : +9,2 [0,5 ; 17,9] à 1 h | seuil : 15 | témoin : clôture en perte PASSIVE : -7,7 [-23,6 ; 7,9]
+       capacité : lignes de 20 USD >= ordre min. 10 USD : OK | fill : taker au meilleur prix + écart, après 120 s | réfutation : rebond 1 h - coût <= 0 (L2 : -5,8)
+  M1   [asymétrie d'information] brut : tiers sup. +23,7 (excès 24 h) | seuil : écart > 0 et net > 15 | témoin : tous les leaders +20,2 ; 200 tirages : rang 57 %
+       capacité : lignes de 20 USD >= ordre min. 10 USD : OK | fill : taker au meilleur prix + écart, après 120 s | réfutation : excès top-tiers <= 0 sur segment vierge (H15b : -28,7)
+  M16  [information contenue dans la taille] brut : -9,12 [-36,5 ; 21,6] à 4 h (>= 40 %) | seuil : 15 | témoin : tranche 0-1 % : +4,65 [-4,8 ; 14,3]
+       capacité : lignes de 20 USD >= ordre min. 10 USD : OK | fill : taker au meilleur prix + écart, après 120 s | réfutation : excès des gros fills <= 0 (L8 >= 40 % : -9,12 brut à 4 h)
+  M4   [ventes forcées (liquidations)] brut : -41,9 [-115,3 ; 20,7] à 24 h | seuil : 15 | témoin : jumeau : excès -59,4 ; hors vague : -23,3
+       capacité : lignes de 20 USD >= ordre min. 10 USD : OK | fill : taker au meilleur prix + écart, après 120 s | réfutation : excès sur jumeau <= 0 (H17 : -59,4)
+  M9   [portage (carry)] brut : prix -41,2 + funding +3,1 | seuil : 15 | témoin : jumeau : excès -20,7 [-89,8 ; 43,6]
+       capacité : lignes de 20 USD >= ordre min. 10 USD : OK | fill : taker au meilleur prix + écart, après 120 s ; tenue 24 h | réfutation : net <= 0 (L11 : -53,1)
+  M8   [prime de surpeuplement (funding)] brut : prix -88,4 + funding +4,5 | seuil : 15 | témoin : côté payeur : net +19,1 [-67,9 ; 112,2]
+       capacité : lignes de 20 USD >= ordre min. 10 USD : OK | fill : taker au meilleur prix + écart, après 120 s ; funding réglé horaire | réfutation : receveur - payeur <= 0 (H21 : -52,3)
+  M15  [gestion déléguée et survie des fonds] brut : -436 [-823 ; -61] bps / 28 j | seuil : > HLP | témoin : HLP : +230
+       capacité : dépôt <= capital ; frais de performance du gérant | fill : aucun fill : dépôt en vault | réfutation : rendement < HLP après correction de survie (V : -436 bps/28 j)
+  M14  [impact des métaordres] brut : 0,19 % des fills | seuil : — | témoin : —
+       capacité : lignes de 20 USD >= ordre min. 10 USD : OK | fill : — | réfutation : trop rare pour un test (0,19 % des fills)
+
+  17 familles économiques distinctes pour 18 mécanismes
+```
+

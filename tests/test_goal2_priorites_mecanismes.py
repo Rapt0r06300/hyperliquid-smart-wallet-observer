@@ -33,3 +33,7 @@ def test_chaque_mecanisme_reel_a_une_fiche_complete_et_un_payeur() -> None:
                                        s["brut_mesure"], s["seuil_bps"], s["temoin_mesure"]), s["code"]
         assert "->" in s["transfert"], s["code"]
 
+
+def test_au_moins_douze_familles_economiques_distinctes() -> None:
+    familles = {s["famille"] for s in P.classement()}
+    assert "NON_RENSEIGNE" not in familles and len(familles) >= 12

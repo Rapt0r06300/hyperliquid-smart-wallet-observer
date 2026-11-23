@@ -58,6 +58,7 @@ FICHE: dict[str, tuple[str, str, str]] = {
     "M14": (COPIE, "—", "trop rare pour un test (0,19 % des fills)"),
     "M15": ("dépôt <= capital ; frais de performance du gérant", "aucun fill : dépôt en vault", "rendement < HLP après correction de survie (V : -436 bps/28 j)"),
     "M16": (COPIE, TAKER, "excès des gros fills <= 0 (L8 >= 40 % : -9,12 brut à 4 h)"),
+    "M18": (COPIE, "maker au meilleur prix à t+60 s ; rempli si le volume agresseur dépasse la file", "PnL total <= 0 en prospectif (H22-P, gel 9d809bf4a3d7)"),
     "M17": (REPLICATION, "taker au mid + demi-écart, réalignement périodique", "net <= 0 ou quasi-inactivité à 100 USD (rejeu 23/11)"),
 }
 
@@ -82,6 +83,8 @@ MECANISMES = (
               "rejeu 23/11 à 100 USD, 127 leaders", -1.05, (-17.4, 11.4), 0.6, "REJECTED"),
     # 23/11 : corrigé -- la 1re version prenait la tranche des PLUS PETITS ordres (0-1 % du volume, +4,65) ;
     # l'hypothèse « gros ordre informé » se lit sur la tranche >= 40 % : brut 4 h -9,12 [-36,46 ; 21,64] - coût 15.
+    Mecanisme("M18 capture de l'écart en maker", "preneurs impatients -> fournisseur passif",
+              "H22 Tardis, maker à 60 s, PnL total par signal", 7.40, (-24.67, 29.14), 0.6, "REJECTED"),
     Mecanisme("M16 taille du fill du leader", "contrepartie d'un gros ordre -> son auteur", "L8 tranche >= 40 %, excès 4 h - coût 15", -24.12, (-51.46, 6.64), 0.6, "REJECTED"),
 )
 
@@ -104,7 +107,22 @@ MESURES: dict[str, tuple[str, str, str]] = {
     "M14": ("0,19 % des fills", "—", "—"),
     "M15": ("-436 [-823 ; -61] bps / 28 j", "> HLP", "HLP : +230"),
     "M16": ("-9,12 [-36,5 ; 21,6] à 4 h (>= 40 %)", "15", "tranche 0-1 % : +4,65 [-4,8 ; 14,3]"),
+    "M18": ("remplis +14,9 brut ; PnL total +7,4 [-24,7 ; 29,1]", "1,5 maker + 4,5 taker + demi-écart", "taker à 120 s : -9,4 ; non remplis -3,2"),
     "M17": ("-1,05 bps/j du capital [-17,4 ; 11,4]", "0 (vs NO-TRADE)", "même rejeu à 350 USD : -2,58 bps/j"),
+}
+
+
+#: Famille ÉCONOMIQUE de chaque mécanisme : la SOURCE de l'avantage (qui paie et pourquoi). La copie d'un leader n'est
+#: que l'instrument de mesure, imposé par le périmètre CopyVault ; deux mécanismes testés par une copie ne sont pas
+#: pour autant le même mécanisme. M6 et M7 partagent une famille (sélection adverse évitée) : 16 familles pour 18.
+FAMILLES = {
+    "M1": "asymétrie d'information", "M2": "course à la latence", "M3": "pression temporaire de prix",
+    "M4": "ventes forcées (liquidations)", "M5": "momentum de cascade", "M6": "sélection adverse évitée (NO-TRADE)",
+    "M7": "sélection adverse évitée (NO-TRADE)", "M8": "prime de surpeuplement (funding)", "M9": "portage (carry)",
+    "M10": "effet de disposition / gestion de sortie", "M11": "coût d'opportunité du capital",
+    "M12": "comportement grégaire", "M13": "fourniture de liquidité déléguée", "M14": "impact des métaordres",
+    "M15": "gestion déléguée et survie des fonds", "M16": "information contenue dans la taille",
+    "M17": "friction de micro-capital (ordre minimal)", "M18": "capture de l'écart (maker)",
 }
 
 
@@ -119,7 +137,7 @@ def score(m: Mecanisme) -> dict:
     v = 4 * p * (1 - p)
     capacite, fill, refutation = FICHE.get(m.code.split()[0], ("NON_RENSEIGNE",) * 3)
     brut, seuil, temoin = MESURES.get(m.code.split()[0], ("NON_RENSEIGNE",) * 3)
-    return {"brut_mesure": brut, "seuil_bps": seuil, "temoin_mesure": temoin, "capacite_100_usd": capacite, "fill_utile": fill, "test_de_refutation": refutation, "code": m.code, "transfert": m.transfert, "preuve": m.preuve, "statut": m.statut,
+    return {"famille": FAMILLES.get(m.code.split()[0], "NON_RENSEIGNE"), "brut_mesure": brut, "seuil_bps": seuil, "temoin_mesure": temoin, "capacite_100_usd": capacite, "fill_utile": fill, "test_de_refutation": refutation, "code": m.code, "transfert": m.transfert, "preuve": m.preuve, "statut": m.statut,
             "p_net_positif": round(p, 3), "valeur_info": round(v, 3), "faisabilite": m.faisabilite,
             "priorite": round(m.faisabilite * (p + v) / 2, 3)}
 
@@ -141,8 +159,10 @@ def main() -> int:
               f" {s['faisabilite']:>4.1f} {s['priorite']:>8.3f}  {s['statut']}")
     print()
     for s in classement():
-        print(f"  {s['code'].split()[0]:<4} brut : {s['brut_mesure']} | seuil : {s['seuil_bps']} | témoin : {s['temoin_mesure']}")
+        print(f"  {s['code'].split()[0]:<4} [{s['famille']}] brut : {s['brut_mesure']} | seuil : {s['seuil_bps']} | témoin : {s['temoin_mesure']}")
         print(f"       capacité : {s['capacite_100_usd']} | fill : {s['fill_utile']} | réfutation : {s['test_de_refutation']}")
+    familles = sorted({s["famille"] for s in classement()})
+    print(f"\n  {len(familles)} familles économiques distinctes pour {len(MECANISMES)} mécanismes")
     return 0
 
 
