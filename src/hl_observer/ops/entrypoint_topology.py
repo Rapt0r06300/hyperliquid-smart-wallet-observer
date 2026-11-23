@@ -48,6 +48,11 @@ ENTRYPOINT_ROLES: dict[str, EntrypointRole] = {
     # ROOT_SUPPORT_ENTRYPOINTS, le test de politique, le registre du harnais) -- le 16/11, la
     # moitie du travail avait laisse l'audit rouge en croyant l'avoir repare.
     "ETA_COLLECTE.cmd": EntrypointRole.MAINTENANCE,
+    # 23/11/2026 — COFFRE_DONNEES_EXTERNES.cmd : recolte les donnees externes GRATUITES (Ironflow, 1ers du mois
+    # Tardis), les recoupe dex par dex avec les notres et fait sceller par le certificateur ce qui est fiable et
+    # absent du coffre, etiquete EXTERNE. Aucun ordre, aucune cle, aucun collecteur touche. Declare aux quatre
+    # endroits le jour meme (ici, ROOT_SUPPORT_ENTRYPOINTS, le test de politique, le registre du harnais).
+    "COFFRE_DONNEES_EXTERNES.cmd": EntrypointRole.MAINTENANCE,
     # AlinaSync is also a supported root entrypoint, separate from the four main CMD roles.
     # Remaining commands are support/compatibility tools kept under tools/launchers/.
     "tools/launchers/Alina-restore.cmd": EntrypointRole.COMPAT,
@@ -123,6 +128,8 @@ ROOT_SUPPORT_ENTRYPOINTS = {
     # 22/11/2026 — l'ETA de collecte, lecture seule (voir ENTRYPOINT_ROLES ci-dessus). C'est CET
     # ensemble que lit l'audit de topologie : l'oublier ici, c'est la panne du 17/11 a nouveau.
     "ETA_COLLECTE.cmd",
+    # 23/11/2026 — donnees externes gratuites -> coffre (voir ENTRYPOINT_ROLES ci-dessus).
+    "COFFRE_DONNEES_EXTERNES.cmd",
 }
 
 OFFICIAL_ENTRYPOINTS = {

@@ -45,6 +45,8 @@ def _series_d_un_shard(chemin: Path, famille: str) -> dict[str, dict[str, list[i
                 x = json.loads(ligne)
             except ValueError:
                 continue
+            if x.get("data_origin") == "EXTERNAL_HISTORICAL":
+                continue                         # 23/11 : une source externe ne dispense pas Alina de télécharger
             if famille == "funding_history":
                 serie, t = "funding", x.get("ts_ms")
             else:

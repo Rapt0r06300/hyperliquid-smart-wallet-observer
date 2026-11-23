@@ -113,6 +113,14 @@ def test_continuous_lab_runs_the_fail_closed_copy_vault_closure_gate():
     assert "tests/test_copy_vault_closure_gate.py" in txt
 
 
+def test_operator_intent_has_one_top_level_env_block():
+    """YAML ne doit pas écraser PYTHONPATH par un second mapping ``env``."""
+    txt = _texte("alina-operator-intent.yml")
+    assert txt.count("\nenv:\n") == 1
+    assert '  PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/src"' in txt
+    assert '  GH_TOKEN: "${{ github.token }}"' in txt
+
+
 def test_labo_hosted_job_runs_read_only_evidence_inventory():
     txt = _texte("labo-continu-ci.yml")
     assert "tests/test_copy_vault_evidence_inventory.py" in txt

@@ -41,6 +41,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from hl_observer.datasets.coffre_certifie import (  # noqa: E402
+    ORIGINE_EXTERNE,
+    PREFIXE_SOURCE_EXTERNE,
     FAMILLE_BBO,
     FAMILLE_BOOK_L2,
     FAMILLE_FILLS_BACKFILL,
@@ -268,6 +270,22 @@ def _sha256_fichier(path: Path) -> str:
     return h.hexdigest()
 
 
+def _sha256_contenu_source(path: Path) -> str:
+    """Empreinte du contenu logique d'un ruban, pas de son emballage gzip.
+
+    Le registre de reprise identifie un ruban par les octets JSONL décompressés. Une
+    archive doit donc avoir la même identité que le ruban clair qu'elle remplace ;
+    hasher les membres gzip bruts ferait croire à une nouvelle source et redéposerait
+    tout le ruban.
+    """
+    h = hashlib.sha256()
+    ouvrir = gzip.open if path.suffix == ".gz" else open
+    with ouvrir(path, "rb") as handle:
+        for bloc in iter(lambda: handle.read(4 * 1024 * 1024), b""):
+            h.update(bloc)
+    return h.hexdigest()
+
+
 class _SortieHachee(io.RawIOBase):
     """Relais d'écriture qui HACHE les octets au passage.
 
@@ -392,10 +410,43 @@ def _reprise_append_only(source: Path, fin: int | None, etat: dict[str, Any], *,
     nouveaux. Sans préfixe reconnu (fichier réécrit, nouvelle session) on rescelle tout :
     jamais de donnée sautée sur une simple supposition."""
     candidats = [c for c in _prefixes_connus(source, etat, version) if fin is None or c[0] <= fin]
+    if source.suffix == ".gz":
+        # 23/11/2026 -- ARCHIVE : sa longueur decompressee est connue sans la decompresser (index d'une archive par
+        # blocs, sinon champ ISIZE du gzip). Avant, les 5 prefixes les PLUS LONGS etaient essayes a l'aveugle : un
+        # prefixe plus long que l'archive faisait planter le hash (« source raccourcie »), et le bon prefixe -- de
+        # la longueur de l'archive -- n'etait jamais essaye des que l'historique depassait 5 entrees.
+        longueur, exacte = _longueur_claire(source)
+        if longueur is not None:
+            if exacte:
+                candidats = [c for c in candidats if c[0] <= longueur]
+            candidats.sort(key=lambda c: (abs(c[0] - longueur), -c[0]))
+        for octets, sha in candidats[:max(essais, 8)]:
+            try:
+                if _sha256_prefixe(source, octets) == sha:
+                    return octets
+            except OSError:
+                continue                     # archive plus courte que ce prefixe : ce n'est pas le sien
+        return 0
     for octets, sha in candidats[:essais]:
         if _sha256_prefixe(source, octets) == sha:
             return octets
     return 0
+
+
+def _longueur_claire(source: Path) -> tuple[int | None, bool]:
+    """(longueur decompressee, exacte ?) d'une archive ``.gz``, sans la decompresser."""
+    idx = source.with_name(source.name + ".idx.json")
+    if idx.is_file():
+        try:
+            return int(json.loads(idx.read_text(encoding="utf-8"))["taille_clair"]), True
+        except (OSError, ValueError, KeyError):
+            pass
+    try:
+        with source.open("rb") as f:
+            f.seek(-4, 2)
+            return int.from_bytes(f.read(4), "little"), False      # ISIZE : modulo 2^32, dernier membre seulement
+    except OSError:
+        return None, False
 
 
 def _lire_json(path: Path) -> Any:
@@ -511,7 +562,7 @@ def sceller_fichier(
             if expected_source_sha256 is not None:
                 if source_snapshot_octets is None:
                     raise ValueError("source_snapshot_octets manquant")
-                after_sha = (_sha256_fichier(source) if source.suffix == ".gz"
+                after_sha = (_sha256_contenu_source(source) if source.suffix == ".gz"
                              else _sha256_prefixe(source, source_snapshot_octets))
                 if after_sha != expected_source_sha256:
                     raise RuntimeError(f"source modifiee pendant la certification : {source}")
@@ -996,12 +1047,14 @@ def main(argv: list[str] | None = None) -> int:
                    help="ne certifie que cette famille (ex. snapshot) ; vide = toutes")
     p.add_argument("--budget-ticks-s", type=float, default=45.0,
                    help="duree maximale (s) consacree a verifier le magasin de ticks natifs a ce passage")
-    p.add_argument("--nom", default="",
-                   help="ne certifie que les fichiers de ce nom (ex. vault_fills_live.jsonl)")
+    p.add_argument("--nom", action="append", default=[],
+                   help="ne certifie que les fichiers de ce nom (ex. vault_fills_live.jsonl) ; répétable")
     p.add_argument("--boucle-s", type=float, default=0.0,
                    help="certifie EN CONTINU : une passe, puis attente de N secondes, sans fin "
                         "(0 = une seule passe, comportement d'origine). Sert a ne PAS perdre la "
                         "certification si une campagne est fermee brutalement.")
+    p.add_argument("--recensement", action="store_true",
+                   help="recense TOUT le projet, scelle les donnees oubliees, ecrit COUVERTURE_PROJET.json")
     p.add_argument("--archives", action="store_true",
                    help="inclut les rubans des sessions archivées (rattrapage après correction d'une règle)")
     args = p.parse_args(argv)
@@ -1066,7 +1119,26 @@ def main(argv: list[str] | None = None) -> int:
         if args.famille:
             fichiers = [f for f in fichiers if f[1] == args.famille]
         if args.nom:
-            fichiers = [f for f in fichiers if f[0].name == args.nom]
+            fichiers = [f for f in fichiers if f[0].name in set(args.nom)]
+        recensement_avant = None
+        if args.recensement:
+            # 23/11/2026 -- AUCUNE DONNEE OUBLIEE. Le recensement parcourt TOUT le projet avec ses propres regles
+            # (pas cette decouverte-ci, sinon la couverture serait de 100 % par construction) ; ce qu'il trouve en
+            # zone de collecte, de famille connue et absent du coffre (« A_SCELLER ») rejoint CE passage. Les
+            # sessions anterieures a la regle de l'archiveur (« A_PROUVER ») ne sont jamais rescellees a l'aveugle.
+            from hl_observer.datasets import recensement_donnees as RD
+            recensement_avant = RD.recenser(root)
+            deja = {_cle_fichier(f[0]) for f in fichiers}
+            ajoutes = 0
+            for a in recensement_avant["a_sceller"]:
+                chemin = root / a["fichier"]
+                if _cle_fichier(chemin) not in deja and (not args.famille or a["famille"] == args.famille):
+                    fichiers.append((chemin, a["famille"], a["source"]))
+                    deja.add(_cle_fichier(chemin))
+                    ajoutes += 1
+            _log(log, f"   -> recensement du projet ({recensement_avant['duree_s']} s, "
+                      f"{recensement_avant['fichiers_de_donnees']:,} fichiers de donnees, couverture "
+                      f"{recensement_avant['couverture_pct']} %) : {ajoutes} fichier(s) oublie(s) ajoute(s) a ce passage.")
         # COUVERTURE : ce que je vois mais ne certifie pas, et pourquoi (jamais en silence).
         non_certifies = recenser_non_certifies(root, archives=args.archives)
         inconnus = [l for l in non_certifies if l["categorie"] == "INCONNU"]
@@ -1119,7 +1191,7 @@ def main(argv: list[str] | None = None) -> int:
                            debit_mo_s=round((faits_octets / 1048576) / ecoule, 2) if ecoule > 0 else 0.0)
             cle_src = str(source.relative_to(root)) if root in source.parents else str(source)
             # Le hash et la lecture portent sur le même préfixe d'un ruban vivant.
-            sha_src = (_sha256_fichier(source) if source.suffix == ".gz"
+            sha_src = (_sha256_contenu_source(source) if source.suffix == ".gz"
                        else _sha256_prefixe(source, taille))
             ancien = etat.get(cle_src)
             version = version_certificateur(source.name)
@@ -1149,6 +1221,18 @@ def main(argv: list[str] | None = None) -> int:
                 if source.suffix != ".gz":
                     fin = taille
                     frontiere = _fin_derniere_ligne(source, taille)
+                    if "archive" in source.parts:
+                        # Session ARCHIVÉE : ruban figé, rien n'y est en cours d'écriture. Sa dernière ligne
+                        # est complète même sans retour final ; le préfixe scellé couvre tout ce qui est lu.
+                        frontiere = taille
+                    else:
+                        # 23/11/2026 -- LA LECTURE S'ARRÊTE À LA FRONTIÈRE. Avant, elle allait jusqu'à `taille` et
+                        # le préfixe réputé scellé s'arrêtait à la frontière : une dernière ligne complète mais
+                        # sans retour était déposée MAINTENANT puis UNE SECONDE FOIS au passage suivant (doublon),
+                        # et une ligne coupée en cours d'écriture partait en quarantaine pour rien. Trouvé par
+                        # tests/test_archive_gzip_blocs.py. Ce que `_lire_lignes` promettait déjà : « une ligne
+                        # encore en cours d'écriture n'est ni lue ni mise en quarantaine ».
+                        fin = frontiere
                 debut = _reprise_append_only(source, frontiere, etat, version=version)
                 rattrapage = False
                 if version > 1 and not debut and frontiere is not None:
@@ -1204,7 +1288,10 @@ def main(argv: list[str] | None = None) -> int:
             if ancien and ancien.get("prefixe_octets") and ancien.get("prefixe_sha256"):
                 historique.insert(0, [int(ancien["prefixe_octets"]), str(ancien["prefixe_sha256"])])
             if historique:
-                etat[cle_src]["prefixes_precedents"] = historique[:8]
+                # 23/11/2026 -- 8 -> PREFIXES_GARDES. Avec 8, un certificateur bloque plus d'une heure laissait
+                # s'empiler plus de 8 rotations : la plus ancienne n'etait plus reconnue et se rescellait EN
+                # ENTIER (2 rotations micro_bbo du 23/11 : 49 086 lignes deja au coffre, redeposees).
+                etat[cle_src]["prefixes_precedents"] = historique[:PREFIXES_GARDES]
             if fin is not None:
                 # identité du préfixe scellé : base de la reprise incrémentale au prochain passage
                 etat[cle_src]["prefixe_octets"] = frontiere
@@ -1301,6 +1388,20 @@ def main(argv: list[str] | None = None) -> int:
         _log(log, "     runtime\\coffre_certifie\\quarantine\\")
         _log(log, "  Le labo pourra puiser dans ce coffre pour ses backtests et replays.")
         _log(log, f"  Coffre : {coffre}")
+        if args.recensement:
+            # couverture APRES ce passage : ce qui vient d'etre scelle n'est plus « oublie »
+            from hl_observer.datasets import recensement_donnees as RD
+            apres = RD.recenser(root)
+            apres["avant_ce_passage"] = {k: recensement_avant[k] for k in ("couverture_pct", "totaux")}                 if recensement_avant else None
+            RD.ecrire_rapport(root, apres)
+            _log(log, "")
+            _log(log, f"  COUVERTURE DU PROJET : {apres['couverture_pct']} % des {apres['fichiers_de_donnees']:,} "
+                      f"fichiers de donnees ({'100 %' if apres['cent_pour_cent'] else 'reste a traiter'}) -> "
+                      f"runtime/coffre_certifie/COUVERTURE_PROJET.json")
+            for verdict in RD.BLOQUANTS:
+                n = apres["totaux"].get(verdict, {}).get("fichiers", 0)
+                if n:
+                    _log(log, f"     {verdict:<22} {n:>6,} fichier(s)")
         code_final = 4 if anomalies else 0   # 4 = lot déposé mais intégrité à corriger
         _ecrire_statut(root, active=False, termine=True, code=code_final, pct=100.0,
                        stage="TERMINE" if not anomalies else "INTEGRITE A CORRIGER",
@@ -1339,6 +1440,10 @@ def _maj_local_index(coffre: Path, manifeste: dict[str, Any]) -> None:
             "jours": list(entree.get("jours", {}).keys()),
             "ts_min_ms": entree.get("ts_min_ms"), "ts_max_ms": entree.get("ts_max_ms"),
             "quality_status": "LOCAL_CERTIFIED", "tier": "LOCAL",
+            # 23/11/2026 : une donnée EXTERNE (Ironflow, Tardis) le dit dans l'index, pas seulement ligne par
+            # ligne -- un lecteur qui choisit ses shards par famille la voit sans décompresser.
+            **({"provenance": ORIGINE_EXTERNE, "source_tag": str(entree.get("source_tag"))}
+               if str(entree.get("source_tag") or "").startswith(PREFIXE_SOURCE_EXTERNE) else {}),
         })
     idx["shards"] = shards
     _ecrire_json_atomique(idx_path, idx)
@@ -1445,8 +1550,102 @@ def _racine_des_args(args: list[str]) -> Path:
     return ROOT
 
 
+#: 23/11/2026 -- COMPRESSION INTELLIGENTE (demande de l'operateur : « tout doit etre compresse sans perte » ;
+#: « le certificateur doit savoir compresser intelligemment si besoin »). Mesure du jour : ~80 Go de rubans EN CLAIR
+#: dans les sessions archivees, que plus personne n'ecrit. Seuls ces dossiers de rubans FIGES sont compresses : un
+#: ruban qu'un collecteur ou le backfill ecrit encore ne l'est jamais (son ecrivain relit sa fin pour reprendre).
+DOSSIERS_COMPRESSIBLES = (Path("runtime") / "archive",)
+#: prefixes scelles gardes par chemin pour reconnaitre une rotation (voir l'historique dans main)
+PREFIXES_GARDES = 64
+COMPRESSION_TAILLE_MIN = 256 * 1024
+COMPRESSION_RAPPORT = Path("runtime") / "coffre_certifie" / "COMPRESSION.json"
+
+
+def _compresser_un(chemin: str) -> dict[str, Any]:
+    """Travailleur (processus separe) : un ruban -> archive gzip par blocs VERIFIEE, puis retrait du clair."""
+    from hl_observer.datasets import archive_gzip_blocs as A
+    p = Path(chemin)
+    avant = p.stat().st_size
+    try:
+        idx = A.remplacer_par_archive(p)
+        return {"fichier": chemin, "octets_clair": avant, "octets_archive": idx["octets_archive"],
+                "sha256_clair": idx["sha256_clair"], "statut": "COMPRESSE"}
+    except Exception as exc:  # noqa: BLE001 - chaque refus est NOMME dans le rapport, la source reste intacte
+        return {"fichier": chemin, "octets_clair": avant, "statut": f"CONSERVE_EN_CLAIR : {type(exc).__name__}: {exc}"}
+
+
+def compresser_rubans_figes(root: Path, *, age_min_s: float = 600.0, travailleurs: int = 3,
+                            maintenant: float | None = None) -> dict[str, Any]:
+    """Compresse SANS PERTE (gzip par blocs indexe, relecture integrale verifiee) les rubans en clair figes des
+    dossiers ``DOSSIERS_COMPRESSIBLES``. Le certificateur relit ces archives (prefixe du flux decompresse) et le
+    lecteur de preuves y retrouve chaque ligne a son offset d'origine. Rend un bilan ; n'echoue jamais en silence."""
+    from concurrent.futures import ProcessPoolExecutor
+
+    t = time.time() if maintenant is None else maintenant
+    candidats: list[Path] = []
+    ignores: dict[str, int] = {}
+    for base in DOSSIERS_COMPRESSIBLES:
+        for f in sorted((root / base).rglob("*.jsonl")) if (root / base).is_dir() else ():
+            try:
+                st = f.stat()
+            except OSError:
+                continue
+            if st.st_size < COMPRESSION_TAILLE_MIN:
+                ignores["trop_petit"] = ignores.get("trop_petit", 0) + 1
+            elif t - st.st_mtime < age_min_s:
+                ignores["modifie_recemment"] = ignores.get("modifie_recemment", 0) + 1
+            elif f.with_name(f.name + ".gz").exists():
+                ignores["archive_homonyme_deja_presente"] = ignores.get("archive_homonyme_deja_presente", 0) + 1
+            else:
+                candidats.append(f)
+    resultats: list[dict[str, Any]] = []
+    if candidats:
+        with ProcessPoolExecutor(max_workers=max(1, int(travailleurs))) as pool:
+            for r in pool.map(_compresser_un, [str(c) for c in sorted(candidats, key=lambda p: -p.stat().st_size)]):
+                resultats.append(r)
+                etat = "ok " if r["statut"] == "COMPRESSE" else "!! "
+                print(f"[coffre] compression {etat}{Path(r['fichier']).name} : {r['octets_clair'] / 1e6:,.0f} Mo -> "
+                      f"{(r.get('octets_archive') or r['octets_clair']) / 1e6:,.0f} Mo  {'' if etat == 'ok ' else r['statut']}",
+                      flush=True)
+    faits = [r for r in resultats if r["statut"] == "COMPRESSE"]
+    bilan = {"genere_ms": int(time.time() * 1000), "candidats": len(candidats), "compresses": len(faits),
+             "conserves_en_clair": [r for r in resultats if r["statut"] != "COMPRESSE"],
+             "octets_avant": sum(r["octets_clair"] for r in faits),
+             "octets_apres": sum(r["octets_archive"] for r in faits), "ignores": ignores,
+             "regle": "gzip par blocs indexe, decompression integrale verifiee (taille + SHA-256) avant retrait du clair"}
+    historique = _lire_json(root / COMPRESSION_RAPPORT) or {"passages": []}
+    historique["passages"] = (historique.get("passages") or [])[-49:] + [
+        {**bilan, "fichiers": [{k: r[k] for k in ("fichier", "octets_clair", "octets_archive", "sha256_clair")}
+                               for r in faits]}]
+    _ecrire_json_atomique(root / COMPRESSION_RAPPORT, historique)
+    print(f"[coffre] compression : {len(faits)} ruban(s), {bilan['octets_avant'] / 1e9:.2f} Go -> "
+          f"{bilan['octets_apres'] / 1e9:.2f} Go ; conserves en clair : {len(bilan['conserves_en_clair'])} ; "
+          f"ignores : {ignores}", flush=True)
+    return bilan
+
+
+def _extraire_compression(args: list[str]) -> tuple[list[str], str, float]:
+    """Retire ``--compresser`` / ``--compresser-seulement`` / ``--compresser-age-min N`` de la ligne passee a main."""
+    mode, age, reste, i = "", 10.0, [], 0
+    while i < len(args):
+        if args[i] in ("--compresser", "--compresser-seulement"):
+            mode = args[i][2:]
+        elif args[i] == "--compresser-age-min" and i + 1 < len(args):
+            age = float(args[i + 1])
+            i += 1
+        else:
+            reste.append(args[i])
+        i += 1
+    return reste, mode, age
+
+
 def _aiguiller(nettoye: list[str], intervalle: float) -> int:
     """Une passe unique, ou la boucle continue. Separe du verrou pour etre appelable sans lui."""
+    nettoye, compression, age_min = _extraire_compression(nettoye)
+    if compression:
+        code = 0 if compression == "compresser-seulement" else main(nettoye)
+        bilan = compresser_rubans_figes(_racine_des_args(nettoye), age_min_s=60.0 * age_min)
+        return code if code else (1 if bilan["conserves_en_clair"] else 0)
     if intervalle <= 0:
         try:
             return main(nettoye)

@@ -187,7 +187,10 @@ REGISTRE: tuple[dict[str, Any], ...] = (
      "intervalle_s": 1800,
      # Depart differe de 10 min : il ne dispute plus le disque et le CPU aux collecteurs qui s'abonnent.
      "delai_initial_s": 600,
-     "args": (),
+     # 23/11/2026 -- --recensement : chaque passage recense TOUT le projet (2 a 13 s) et scelle ce qui a ete
+     # oublie (zone de collecte, famille connue, jamais scelle) ; une rotation sans preuve d'etat est « a prouver »,
+     # jamais rescellee a l'aveugle. Ecrit runtime/coffre_certifie/COUVERTURE_PROJET.json a chaque passage.
+     "args": ("--recensement",),
      "limite_minutes": 50.0},
     {"nom": "lab-microstructure", "script": "tools/collecter_lab_microstructure.py",
      "intervalle_s": 30, "args": (), "limite_minutes": 5.0,

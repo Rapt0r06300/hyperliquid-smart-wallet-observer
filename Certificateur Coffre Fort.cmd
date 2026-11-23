@@ -101,7 +101,9 @@ if defined PLAN_SEUL (
 )
 
 echo === ETAPE 2/2 : certifier et sceller ===
-"%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\sceller_coffre_local.py" --root "%CV_ROOT%." %MODE% %RESET%
+rem 23/11/2026 : --recensement = AUCUNE donnee du projet oubliee (COUVERTURE_PROJET.json) ;
+rem             --compresser  = rubans figes des sessions compresses SANS PERTE (gzip par blocs, verifie).
+"%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\sceller_coffre_local.py" --root "%CV_ROOT%." %MODE% %RESET% --recensement --compresser
 set "RC=%ERRORLEVEL%"
 call "%CV_ROOT%tools\launcher_log.cmd" "Certificateur Coffre Fort" RESULT certification "sceller_coffre_local.py" "%RC%"
 echo.

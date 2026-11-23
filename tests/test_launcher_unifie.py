@@ -175,6 +175,8 @@ def test_la_racine_contient_uniquement_les_lanceurs_principaux_et_alinasync():
         "RATTRAPAGE.cmd",
         # 22/11/2026 : l'ETA de collecte (lecture seule, aucun collecteur demarre ni arrete).
         "ETA_COLLECTE.cmd",
+        # 23/11/2026 : donnees externes gratuites recoupees -> coffre (etiquetees EXTERNE, rien de payant).
+        "COFFRE_DONNEES_EXTERNES.cmd",
     }
     assert {name for name in cmd_racine if name in ENTRYPOINT_ROLES} == cmd_racine   # tous classés
     assert (RACINE / "ALINA_SYNC_COMPLETE.sh").is_file()

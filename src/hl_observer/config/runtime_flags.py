@@ -7,11 +7,9 @@ Les défauts sont alignés sur LANCER_HYPERSMART.cmd ; le capital vient de la so
 from __future__ import annotations
 
 import os
-
-from hl_observer.contrat_paper import PAPER_EQUITY_USD
 from dataclasses import dataclass
 
-from hl_observer.backtesting.copy_vault_protocol import PAPER_EQUITY_USD
+from hl_observer.contrat_paper import PAPER_EQUITY_USD
 
 
 def _bool(name: str, default: bool = False) -> bool:

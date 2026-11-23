@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 import sys
+import ast
 from pathlib import Path
 
 RACINE = Path(__file__).resolve().parents[1]
@@ -40,3 +41,17 @@ def test_les_defauts_python_suivent_le_contrat(monkeypatch) -> None:
     assert load_sizing().capital_usd == PAPER_EQUITY_USD
     cli = (RACINE / "src/hl_observer/cli.py").read_text(encoding="utf-8")
     assert "350.0" not in cli and "starting_equity_usdt=350" not in cli
+
+
+def test_runtime_flags_importe_le_capital_depuis_le_module_feuille() -> None:
+    """Le module de flags ne doit pas réintroduire l'import lourd du backtest."""
+    source = (RACINE / "src/hl_observer/config/runtime_flags.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    imports = {
+        (node.module, alias.name)
+        for node in tree.body
+        if isinstance(node, ast.ImportFrom)
+        for alias in node.names
+    }
+    assert ("hl_observer.contrat_paper", "PAPER_EQUITY_USD") in imports
+    assert ("hl_observer.backtesting.copy_vault_protocol", "PAPER_EQUITY_USD") not in imports

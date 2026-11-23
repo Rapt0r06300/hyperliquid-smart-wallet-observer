@@ -18,6 +18,8 @@ debit nul -> `INFINI` ; debit non mesurable -> `INCONNU` ; jamais une duree inve
 """
 from __future__ import annotations
 
+import json
+import os
 import sys
 from pathlib import Path
 
@@ -141,20 +143,25 @@ def test_un_ruban_ABSENT_rend_un_debit_INCONNU_et_le_nomme(tmp_path):
     assert lu["motif"] == "RUBAN_ILLISIBLE"
 
 
-def test_la_PREMIERE_mesure_ne_pretend_pas_connaitre_le_debit(tmp_path):
+def test_la_PREMIERE_mesure_ne_pretend_pas_connaitre_le_debit(tmp_path, monkeypatch):
     """Une croissance se mesure entre DEUX instants : la premiere lecture ne sait rien."""
     ruban = tmp_path / "fills.jsonl"
     ruban.write_text("\n".join('{"ts_ms":1,"coin":"BTC"}' for _ in range(50)) + "\n",
                      encoding="utf-8")
+    horloge = iter((0.0, 1.0))
+    monkeypatch.setattr(ETA.time, "monotonic", lambda: next(horloge))
     mesure = ETA.MesureDeDebit(ruban)
     assert mesure.lire()["motif"] == "PREMIERE_MESURE"
+    ruban.write_text(ruban.read_text(encoding="utf-8") + '{"ts_ms":2,"coin":"BTC"}\n', encoding="utf-8")
     assert mesure.lire()["debit_par_heure"] is not None   # la deuxieme, oui
 
 
-def test_un_ruban_qui_GRANDIT_donne_un_debit_positif(tmp_path):
+def test_un_ruban_qui_GRANDIT_donne_un_debit_positif(tmp_path, monkeypatch):
     ruban = tmp_path / "fills.jsonl"
     ligne = '{"ts_ms":1700000000000,"coin":"BTC","px":1.0}\n'
     ruban.write_text(ligne * 100, encoding="utf-8")
+    horloge = iter((0.0, 1.0))
+    monkeypatch.setattr(ETA.time, "monotonic", lambda: next(horloge))
     mesure = ETA.MesureDeDebit(ruban)
     mesure.lire()                                  # amorce
     with ruban.open("a", encoding="utf-8") as fh:
@@ -176,3 +183,39 @@ def test_le_ruban_est_CHERCHE_a_plusieurs_endroits_et_on_dit_lesquels(tmp_path):
     cible.write_text("{}\n", encoding="utf-8")
     trouve, _ = ETA.trouver_ruban(tmp_path)
     assert trouve == cible
+
+
+def test_la_sonde_par_defaut_choisit_le_rapport_le_plus_recent(tmp_path):
+    rapports = tmp_path / "runtime" / "reports"
+    rapports.mkdir(parents=True)
+    ancien = rapports / "sonde_horloges_20261122.json"
+    recent = rapports / "sonde_horloges_20261123.json"
+    ancien.write_text("{}", encoding="utf-8")
+    recent.write_text("{}", encoding="utf-8")
+    ancien.touch()
+    recent.touch()
+    os.utime(ancien, (1_000, 1_000))
+    os.utime(recent, (2_000, 2_000))
+
+    assert ETA.trouver_sonde(tmp_path) == recent
+
+
+def test_l_eta_recharge_la_sonde_a_chaque_rafraichissement(tmp_path, monkeypatch, capsys):
+    rapport = tmp_path / "runtime" / "reports" / "sonde_horloges_20261123.json"
+    rapport.parent.mkdir(parents=True)
+
+    def ecrire(jours: int) -> None:
+        rapport.write_text(
+            json.dumps({"appariement": {"jours_DENSES": jours}}), encoding="utf-8"
+        )
+
+    ecrire(0)
+
+    def avancer_la_sonde(_secondes: float) -> None:
+        ecrire(6)
+
+    monkeypatch.setattr(ETA.time, "sleep", avancer_la_sonde)
+    monkeypatch.setattr(ETA.os, "system", lambda _commande: 0)
+
+    assert ETA.main(["--racine", str(tmp_path), "--tours", "2"]) == 0
+    assert capsys.readouterr().out.count("[ATTEINT]") == 1

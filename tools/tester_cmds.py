@@ -87,6 +87,11 @@ REGISTRE: list[tuple[str, str, list[str], float, str]] = [
     # delai ; `--une-fois` rend une mesure puis sort, et le lanceur transmet bien `%*`. Lecture
     # seule, zero requete reseau, aucun collecteur touche : categorie `sur`.
     ("ETA_COLLECTE_une_fois", "ETA_COLLECTE.cmd",                  ["--une-fois"], 240,  "sur"),
+    # 23/11/2026 — COFFRE_DONNEES_EXTERNES telecharge (reseau) et verse au coffre : jamais en passe rapide.
+    # `--plan` lit les manifestes et affiche le reste a faire, SANS reseau ni ecriture (verrouille par
+    # tests/test_coffre_donnees_externes.py::test_le_plan_n_ecrit_rien) : categorie `sur`.
+    ("COFFRE_EXTERNE_plan",   "COFFRE_DONNEES_EXTERNES.cmd",       ["--plan"],    90,   "sur"),
+    ("COFFRE_EXTERNE",        "COFFRE_DONNEES_EXTERNES.cmd",       [],          3600,   "lourd"),
     # Dangereux : effets externes -> jamais en auto.
     ("POUSSER_GITHUB",        "POUSSER-GITHUB.cmd",          [],             0,   "danger"),
     ("Installer_Noeud_HL",    "Installer Noeud HL.cmd",            [],             0,   "danger"),

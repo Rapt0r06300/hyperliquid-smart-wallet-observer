@@ -117,7 +117,8 @@ def test_scellage_bout_en_bout(tmp_path):
         json.dumps(_fill(tid=3, observed_at_ms=None)),  # quarantaine forward
         "ligne non json",                       # quarantaine json
     ]
-    (data / "vault_fills_poll.jsonl").write_text("\n".join(lignes), encoding="utf-8")
+    # 23/11 : retour final, comme un vrai collecteur (une ligne sans retour est « en cours d'écriture »)
+    (data / "vault_fills_poll.jsonl").write_text("\n".join(lignes) + "\n", encoding="utf-8")
 
     rc = scl.main(["--root", str(root), "--now-ms", str(NOW)])
     assert rc == 0
@@ -223,7 +224,7 @@ def test_scellage_idempotent(tmp_path):
     root = tmp_path
     data = root / "runtime" / "data"
     data.mkdir(parents=True)
-    (data / "vault_fills_poll.jsonl").write_text(json.dumps(_fill(tid=7)), encoding="utf-8")
+    (data / "vault_fills_poll.jsonl").write_text(json.dumps(_fill(tid=7)) + "\n", encoding="utf-8")   # retour final
     assert scl.main(["--root", str(root), "--now-ms", str(NOW)]) == 0
     idx1 = json.loads((root / "runtime" / "coffre_certifie" / "LOCAL_INDEX.json").read_text(encoding="utf-8"))
     # 2e passage : fichier inchangé -> sauté, pas de nouveau shard
@@ -268,7 +269,7 @@ def test_reset_affichage_vide_le_brut(tmp_path):
     data = root / "runtime" / "data"
     data.mkdir(parents=True)
     src = data / "vault_fills_poll.jsonl"
-    src.write_text(json.dumps(_fill(tid=9)), encoding="utf-8")
+    src.write_text(json.dumps(_fill(tid=9)) + "\n", encoding="utf-8")   # retour final, comme un collecteur
     assert scl.main(["--root", str(root), "--now-ms", str(NOW), "--reset-affichage"]) == 0
     assert src.read_text(encoding="utf-8") == ""  # remis à zéro après scellage vérifié
 

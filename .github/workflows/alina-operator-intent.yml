@@ -1,6 +1,7 @@
 name: alina-operator-intent
 env:
   PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/src"
+  GH_TOKEN: "${{ github.token }}"
 on:
   workflow_dispatch:
     inputs:
@@ -27,9 +28,6 @@ on:
         required: false
         default: "{}"
         type: string
-env:
-  GH_TOKEN: "${{ github.token }}"
-
 permissions:
   contents: write
 concurrency:

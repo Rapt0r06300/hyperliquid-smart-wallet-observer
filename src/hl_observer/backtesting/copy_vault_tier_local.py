@@ -16,6 +16,10 @@ from typing import Any
 
 from hl_observer.collection.forward_poll_fills import CADENCE_ARCHIVE, cadence_plan, is_causal_live_source
 from hl_observer.backtesting import copy_vault_fenetre_locale as _FENETRE
+from hl_observer.datasets.coffre_certifie import ORIGINE_EXTERNE
+
+#: clé sous laquelle le pont range les signaux d'une donnée EXTERNE (famille + suffixe)
+SUFFIXE_SIGNAL_EXTERNE = "@externe"
 
 #: plan publié par l'étude de copiabilité : classe de chaque adresse suivie (voir ``cadence_plan``)
 PLAN_DE_COLLECTE = Path("runtime") / "data" / "copy_vault_besoins_collecte.json"
@@ -273,6 +277,10 @@ def _charger_tier_local(
             continue
         famille = str(entree.get("famille") or "")
         est_signal = famille in _COFFRE_FAMILLES_SIGNAUX
+        # 23/11/2026 -- DONNÉE EXTERNE (Ironflow, Tardis ; l'index le dit). Elle reste à la disposition de la
+        # recherche, sous sa propre clé, et ne grossit JAMAIS le compte des observations d'Alina.
+        cle_signal = (f"{famille}{SUFFIXE_SIGNAL_EXTERNE}" if entree.get("provenance") == ORIGINE_EXTERNE
+                      else famille)
         if famille not in familles_chargeables:
             continue
         # GARDE 1 — FENETRE. L'index porte les bornes de chaque shard (completees par le
@@ -337,9 +345,9 @@ def _charger_tier_local(
             continue
         # Aucun fragment d'un gzip incomplet ne doit survivre au rejet du shard.
         debut_fills, debut_books, debut_bbo = len(_fills), len(_books), len(_bbo)
-        debut_signaux = len(_signaux.get(famille, ()))
-        debut_compte = signaux_comptes.get(famille, 0)
-        debut_non_horodate = signaux_non_horodates.get(famille, 0)
+        debut_signaux = len(_signaux.get(cle_signal, ()))
+        debut_compte = signaux_comptes.get(cle_signal, 0)
+        debut_non_horodate = signaux_non_horodates.get(cle_signal, 0)
         debut_archive, debut_adaptees, debut_denses = fills_archive, bbo_adaptees, bbo_denses_non_retenues
         debut_comptes = dict(comptes_replay)
         try:
@@ -355,9 +363,9 @@ def _charger_tier_local(
                             continue
                     if est_signal and not garder_signaux:
                         if _HORODATAGE_DANS_LA_LIGNE.search(ligne) is not None:
-                            signaux_comptes[famille] = signaux_comptes.get(famille, 0) + 1
+                            signaux_comptes[cle_signal] = signaux_comptes.get(cle_signal, 0) + 1
                         else:
-                            signaux_non_horodates[famille] = signaux_non_horodates.get(famille, 0) + 1
+                            signaux_non_horodates[cle_signal] = signaux_non_horodates.get(cle_signal, 0) + 1
                         continue
                     try:
                         row = json.loads(ligne)
@@ -407,10 +415,10 @@ def _charger_tier_local(
                         # Signal de contexte LOCAL : tout enregistrement certifié avec
                         # un horodatage explicite est mis à disposition de la recherche.
                         if _signal_horodate(row):
-                            _signaux.setdefault(famille, []).append(row)
-                            signaux_comptes[famille] = signaux_comptes.get(famille, 0) + 1
+                            _signaux.setdefault(cle_signal, []).append(row)
+                            signaux_comptes[cle_signal] = signaux_comptes.get(cle_signal, 0) + 1
                         else:
-                            signaux_non_horodates[famille] = signaux_non_horodates.get(famille, 0) + 1
+                            signaux_non_horodates[cle_signal] = signaux_non_horodates.get(cle_signal, 0) + 1
         except (OSError, EOFError, UnicodeError, ValueError):
             del _fills[debut_fills:]
             del _books[debut_books:]
@@ -419,15 +427,15 @@ def _charger_tier_local(
                     _bbo_secondes.discard((row["coin"], row["received_at_ms"] // 1000))
             del _bbo[debut_bbo:]
             if est_signal:
-                del _signaux.setdefault(famille, [])[debut_signaux:]
+                del _signaux.setdefault(cle_signal, [])[debut_signaux:]
                 if debut_compte:
-                    signaux_comptes[famille] = debut_compte
+                    signaux_comptes[cle_signal] = debut_compte
                 else:
-                    signaux_comptes.pop(famille, None)
+                    signaux_comptes.pop(cle_signal, None)
                 if debut_non_horodate:
-                    signaux_non_horodates[famille] = debut_non_horodate
+                    signaux_non_horodates[cle_signal] = debut_non_horodate
                 else:
-                    signaux_non_horodates.pop(famille, None)
+                    signaux_non_horodates.pop(cle_signal, None)
             fills_archive, bbo_adaptees, bbo_denses_non_retenues = (
                 debut_archive, debut_adaptees, debut_denses
             )
@@ -453,8 +461,13 @@ def _charger_tier_local(
         # Les cotations ne sont jamais coupees : le ruban du cout de spread en depend.
         "bbo_toujours_materialise": True,
         "bbo_adaptees": bbo_adaptees, "bbo_denses_non_retenues": bbo_denses_non_retenues,
-        "signaux_par_famille": dict(sorted(signaux_comptes.items())),
-        "signaux_total": sum(signaux_comptes.values()),
+        "signaux_par_famille": dict(sorted((k, v) for k, v in signaux_comptes.items()
+                                           if not k.endswith(SUFFIXE_SIGNAL_EXTERNE))),
+        "signaux_total": sum(v for k, v in signaux_comptes.items() if not k.endswith(SUFFIXE_SIGNAL_EXTERNE)),
+        # données externes certifiées (jamais causales) : présentes, mais comptées à part
+        "signaux_externes_par_famille": dict(sorted((k[:-len(SUFFIXE_SIGNAL_EXTERNE)], v)
+                                                    for k, v in signaux_comptes.items()
+                                                    if k.endswith(SUFFIXE_SIGNAL_EXTERNE))),
         "signaux_non_horodates": dict(sorted(signaux_non_horodates.items())),
         "familles_indexees": dict(sorted(familles_indexees.items())),
         "familles_non_chargees": dict(sorted(familles_non_chargees.items())),

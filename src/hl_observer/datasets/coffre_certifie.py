@@ -141,7 +141,21 @@ _FICHIERS_CONNUS: dict[str, tuple[str, str]] = {
     # 833 jours — assez fin pour placer une entrée, assez profond pour quadrupler l'échantillon.
     "candles_4h.jsonl": (FAMILLE_CANDLE, "REST_BACKFILL_4H"),
     "funding_1h.jsonl": (FAMILLE_FUNDING_HISTORY, "REST_FUNDING_HISTORY"),   # funding horaire, même profondeur
+    # 23/11/2026 -- DONNÉES EXTERNES GRATUITES, recoupées avec les nôtres (tools/coffre_donnees_externes.py).
+    # Leur étiquette de source commence par PREFIXE_SOURCE_EXTERNE : l'index du coffre la porte (provenance),
+    # le pont du labo les compte À PART, et le lecteur du funding préfère toujours la donnée d'Alina à la même
+    # heure. Jamais une observation d'Alina : aucune heure de réception, `causal_observation: false`.
+    "externe_ironflow_funding_1h.jsonl": (FAMILLE_FUNDING_HISTORY, "EXTERNE_IRONFLOW"),
+    "externe_ironflow_asset_ctx.jsonl": (FAMILLE_ASSET_CTX, "EXTERNE_IRONFLOW"),
+    "externe_ironflow_liquidations.jsonl": (FAMILLE_LIQUIDATION, "EXTERNE_IRONFLOW"),
+    "externe_ironflow_candles_1h.jsonl": (FAMILLE_CANDLE, "EXTERNE_IRONFLOW"),
+    "externe_tardis_trades.jsonl": (FAMILLE_TRADES, "EXTERNE_TARDIS"),
 }
+
+#: Étiquette de source des données EXTERNES (jamais une réception par Alina).
+PREFIXE_SOURCE_EXTERNE = "EXTERNE_"
+#: `data_origin` porté par chaque ligne externe.
+ORIGINE_EXTERNE = "EXTERNAL_HISTORICAL"
 
 
 @dataclass

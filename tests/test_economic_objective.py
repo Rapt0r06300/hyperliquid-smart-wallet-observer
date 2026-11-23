@@ -8,6 +8,7 @@ import pytest
 
 from hl_observer.backtesting.copy_vault_executable import summarize
 from hl_observer.simulation.economic_objective import (
+    ECONOMIC_CONTRACT_VERSION,
     MIN_PROOF_DAYS,
     STARTING_CAPITAL_USD,
     TARGET_NET_USD,
@@ -156,6 +157,11 @@ def test_le_capital_du_contrat_est_unique_et_partage():
     )
     assert "INVALID_STARTING_CAPITAL" not in accepted["objective_reasons"]
     assert "INVALID_STARTING_CAPITAL" in rejected["objective_reasons"]
+
+
+def test_economic_contract_version_matches_current_paper_capital() -> None:
+    assert "350usd" not in ECONOMIC_CONTRACT_VERSION.lower()
+    assert "100usd" in ECONOMIC_CONTRACT_VERSION.lower()
 
 
 def test_equal_campaign_and_proof_sample_counts_must_reconcile_economics():

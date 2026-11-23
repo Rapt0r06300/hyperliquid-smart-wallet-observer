@@ -9,6 +9,75 @@ Règles qui encadrent chaque ligne : PAPER / READ-ONLY / FAIL-CLOSED ; Copy-Vaul
 manquante, aucun signal tardif, aucun fill raté et aucune sortie absente transformés en zéro ou en
 profit.
 
+## 📚 23/11/2026, 15:38 (heure lue) — carnets à la minute pour le labo, réparation, et deux défauts de rotation
+
+Carte blanche de l'opérateur : « je te laisse tout choisir, ne me demande rien ».
+
+| point | état |
+|---|---|
+| **Hydromancer Reservoir** (HF, CC BY 4.0) : carnets 20 niveaux/minute 21,1 Go, bougies 1 min 2 Go, instantanés 0,66 Go, liquidations 0,32 Go | **746/746 fichiers validés**, 23,99 Go, SHA-256 LFS vérifiés, gardés tels que publiés (Parquet ZSTD) |
+| alignement mesuré contre NOS carnets (8–16/11) | écart de mid médian **0,47 bps à décalage nul**, symétrique (3,3 bps à ±30 s) : aucune fuite du futur |
+| lecteur du labo `backtesting/carnets_externes_hydromancer.py` (non causal par construction, jamais SAFE) | fait, 4 tests |
+| **gain mesuré** : fills de leaders (2,12 M dans la période, échantillon 20 000) avec un carnet à ≤ 30 s | **99,78 %** (médiane 14,9 s ; « après » ≤ 30 s : 48,5 %) — contre 65 % des candidats TRAIN rejetés faute de carnet de sortie |
+| branchement dans la porte d'exécutabilité (variante séparée du verdict officiel) | **à faire** — ⚠ la porte veut un carnet APRÈS l'instant à ≤ 30 s (`copy_vault_executable._first_at_or_after`) : avec un instantané/minute, vrai pour 48,5 % des instants, donc **~1 candidat sur 4** pour entrée ET sortie. Atteindre ~99 % = tolérance 60 s, une HYPOTHÈSE d'exécution (retard ≤ 1 min) à nommer et tester en variante exploratoire (`require_causal_books=False`), jamais dans le verdict officiel |
+| quarantaine (6,5 M lignes) : quasi tout vient des lots du 8 au 16/11, règles corrigées depuis | sonde : fills et instantanés de vaults déjà récupérés (100 %) ; **trades CopyVault « futurs » : 84 % absents du coffre** |
+| `tools/reparer_quarantaine.py` : recertifie, vérifie l'identité au coffre, verse une fois, quarantaine intacte | fait, 2 tests (3 gardes rouges sous injection) |
+| plan réel (6 512 367 lignes lues) | 436 380 doublons internes ; 598 encore refusées (vraies erreurs) ; **~4,65 M lignes valides paraissent absentes du coffre** (BBO 3,86 M, micro-BBO 514 k, trades 127 k, explorer 61 k, micro-trades 36 k, L2 20 k…) — contre-épreuve à clé lâche (tid ; coin+heure+bid+ask) : **mêmes chiffres** que l'identité stricte (trades 279/1 560, BBO 510/2 451 présents) → l'absence est RÉELLE ; **réparation réelle lancée** (la preuve des sessions attendra qu'elle soit scellée : sinon les deux outils verseraient la même ligne) |
+| `tools/prouver_scellement.py` (preuve par identité des « à prouver ») | fait, 3 tests (2 gardes rouges) ; plan réel : beaucoup de lignes des sessions du 8–9/11 paraissent absentes (ex. 60 625 trades sur 60 685) — même réserve |
+| ⚠ **mon passage `--recensement` a redéposé 784 648 lignes BBO** (rotations sans preuve d'état scellées à l'aveugle) | consigné dans `runtime/coffre_certifie/DOUBLONS_CONNUS.json` (shards intacts) ; règle corrigée : rotation sans preuve = `A_PROUVER` |
+| ⚠ **défaut du certificateur (antérieur)** : 8 préfixes gardés par ruban → une rotation ancienne non reconnue se rescellait en entier (49 086 micro-BBO) | corrigé : 64 préfixes |
+| ⚠ **défaut du certificateur (antérieur)** : pour une archive `.gz`, les 5 préfixes les plus longs essayés à l'aveugle ; un préfixe trop long faisait planter le hash | corrigé : longueur lue sans décompresser (index ou ISIZE), essai par longueur ; 2 gardes rouges |
+| la campagne lance le certificateur avec `--recensement` | fait au registre (effectif au prochain lancement des collecteurs) |
+| couverture du projet | 99,52 % au départ du passage ; **le rapport écrit (96,74 %) est faux** : le processus avait chargé le recensement avant que la zone Hydromancer n'existe |
+| 72 Go en clair dans `runtime/reports/copy_vault_quant_lab/<passage>/workspace/runtime/data/` | ce sont des COPIES des rubans de collecte faites par chaque passage du labo (ex. 7,1 Go de `vault_fills_live.jsonl` le 18/11) ; données déjà au coffre et aux archives. **Non compressées** : la reprise du labo relit les passages précédents — vérifier ses lecteurs d'abord |
+| suite des tests liés (tous les fichiers qui touchent un module modifié) | **808 verts**, 0 échec |
+| push | retenu : Codex travaille dans le dépôt |
+
+## 🗜️ 23/11/2026, 14:13 (heure lue) — compression sans perte, recensement à 100 %, et un défaut du certificateur
+
+Demandes : « tout doit être compressé sans perte de données » ; « le certificateur doit savoir compresser
+intelligemment si besoin » ; « le certificateur n'oublie aucune donnée dans l'ensemble du dossier du projet ».
+
+**Mesuré (inventaire complet, 9,2 M fichiers, 87 241 dossiers, 7 min de balayage) : ~190 Go de données EN CLAIR.**
+`runtime/archive/session_*` ~80 Go (figées) ; `runtime/reports/copy_vault_quant_lab` 72 Go ; `runtime/labo_tranches_20261121`
+17,5 Go ; `market_ticks` 13 Go de shards de l'heure ; quarantaine 3 Go ; `runtime/history` 1,95 Go.
+
+| point | état |
+|---|---|
+| archive gzip **par blocs indexée** (`datasets/archive_gzip_blocs.py`) : `.gz` standard, sans perte, relue à l'offset en décompressant UN bloc | fait |
+| lecteur de preuves (`LecteurBorne`) et `scorer_vaults` lisent une session compressée | fait |
+| `sceller_coffre_local.py --compresser[-seulement]` : rubans figés des sessions, ≥ 256 Ko, ≥ 10 min, vérification intégrale (taille + SHA-256) avant retrait du clair | fait ; passage réel lancé à 13:13 UTC |
+| ⚠ **défaut du certificateur** : la lecture allait jusqu'à la taille, le préfixe scellé s'arrêtait au dernier retour → une dernière ligne sans retour **déposée deux fois** ; une ligne coupée mise en quarantaine pour rien | corrigé (lecture à la frontière ; archive figée scellée en entier) ; 2 gardes rouges sous injection |
+| recensement de **tout** le projet (`datasets/recensement_donnees.py`), indépendant de la découverte du certificateur ; magasins non parcourus (9,2 M → 26 013 fichiers de données, **2,2 s**) | fait |
+| `sceller_coffre_local.py --recensement` : scelle les données oubliées, écrit `COUVERTURE_PROJET.json` | fait |
+| couverture mesurée | **99,52 %** ; reste 5 shards BBO/micro-BBO à sceller (le passage par défaut ne lit pas les sous-dossiers), 1 journal, **119 fichiers de sessions antérieures au 11/11 12:20 « à prouver »** (10 Go) |
+| sessions APRÈS le 11/11 12:20 : scellées par construction (l'archiveur ne déplace qu'un contenu exactement certifié, commit 391efb93b1a3) | règle du recensement |
+| ⚠ ne pas compresser : rubans vivants (`runtime/data`, `runtime/history`), sorties du labo (lecteurs non vérifiés) | en attente (collecteurs/labo au repos) |
+| push | **retenu** : Codex travaille dans le dépôt en même temps (git diff, pytest) |
+
+## 📦 23/11/2026, 13:30 (heure lue) — données externes gratuites AU COFFRE, et deux défauts trouvés en chemin
+
+Demande : un `.cmd` racine qui récolte ces données et les fait certifier ; « si elles sont viables, fiables,
+backtestables et replayables, elles sont autorisées à aller dans le coffre-fort » ; « il faudra qu'elles soient
+utiles au labo ». Livré : `COFFRE_DONNEES_EXTERNES.cmd` → `tools/coffre_donnees_externes.py` (`--plan` = lecture
+seule). Règles complètes et seuils : `docs/audit/MATRICE_DONNEES_EXTERNES.md` § « Au coffre ».
+
+| point | état |
+|---|---|
+| récolte Ironflow + 1ers du mois Tardis, empreintes vérifiées, rien de payant | fait |
+| recoupement **dex par dex** sur seuils fixés d'avance ; dex sans paire commune refusé | fait |
+| versé seulement là où Alina n'a rien ; pré-certifié ; > 0,1 % de quarantaine = fichier refusé | fait |
+| index du coffre : `provenance` + `source_tag EXTERNE_*` ; pont du labo : `signaux_externes_par_famille` | fait |
+| carnet Tardis | **jamais au coffre** (pas d'heure de réception par Alina) |
+| ⚠ OI Ironflow daté 1 h trop tôt (mark = clôture de l'heure : 1,89 bps contre 46) | corrigé à t + 1 h (sens prudent) |
+| ⚠ **444 073 fundings d'Alina en double au coffre** ; `taux_du_coffre` les additionnait | corrigé : 1 par coin et par heure |
+| impact des doublons sur les PnL déjà publiés du labo | **non re-mesuré** (à faire au prochain passage du labo) |
+| gain du funding externe pour le portage | faible : 99,71 % des fills perp des leaders étaient déjà couverts |
+
+Gardes : `tests/test_coffre_donnees_externes.py` (16 tests ; injections rouges sur la priorité d'Alina, l'arrondi
+horaire, le remplacement, l'index, le pont, le rattrapage, les versions et la quarantaine). 665 tests des modules
+touchés verts. Lanceur déclaré aux quatre endroits (+ `CLAUDE.md`).
+
 ## 🎯 Mission 2 (22/11/2026) — chasse à l'alpha CopyVault : 15 essais, **aucun edge**
 
 *(« 14 essais » jusqu'au 15ᵉ, L2-fin, ajouté le même jour — ligne dédiée dans le tableau.)*

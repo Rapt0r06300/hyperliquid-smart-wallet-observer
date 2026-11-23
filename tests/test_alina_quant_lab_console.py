@@ -8,6 +8,7 @@ from pathlib import Path
 import tools.alina_quant_lab_console as lab
 from hl_observer.backtesting.copy_vault_v21_frozen import PROTOCOL, _verified_freeze
 from hl_observer.backtesting.copy_vault_protocol import MAX_GROSS_EXPOSURE_USD
+from hl_observer.contrat_paper import PAPER_EQUITY_USD
 from hl_observer.simulation.economic_freeze_registry import parameter_hash
 from tools.alina_quant_lab_console import (
     _pytest_counts,
@@ -17,6 +18,12 @@ from tools.alina_quant_lab_console import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_quant_lab_initial_capital_follows_the_paper_contract() -> None:
+    assert lab.PAPER_CAPITAL_USD == PAPER_EQUITY_USD == 100.0
+
+
 def _sample_physical_freeze() -> dict:
     """Synthetic, hash-bound paper freeze: no dependence on ignored runtime files."""
     params = {

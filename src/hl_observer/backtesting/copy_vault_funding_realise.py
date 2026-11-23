@@ -80,7 +80,14 @@ def taux_du_coffre(
     if not shards:
         return {}, {"status": "AUCUN_SHARD_DE_FUNDING", "shards": 0}
 
-    par_coin: dict[str, list[tuple[int, Decimal]]] = {}
+    from hl_observer.datasets.coffre_certifie import ORIGINE_EXTERNE
+
+    # 23/11/2026 -- UN SEUL RÈGLEMENT PAR COIN ET PAR HEURE. Le coffre dédoublonne ruban par ruban, pas entre
+    # sources : le même règlement, publié par Alina ET par une source externe (Ironflow), y figure deux fois,
+    # et les additionner doublerait le coût de portage sans que rien ne le dise. Alina est prioritaire ; un
+    # doublon est compté, et un doublon de VALEUR différente l'est à part (deux sources qui se contredisent).
+    par_heure: dict[str, dict[int, tuple[int, Decimal, bool]]] = {}
+    doublons = doublons_contradictoires = externes_gardes = 0
     lus = gardes = intervalle_inattendu = taux_illisible = 0
     for ligne in coffre_tranches.flux(
         racine, shards, famille=FAMILLE_FUNDING,
@@ -108,10 +115,21 @@ def taux_du_coffre(
         if isinstance(instant, bool) or not isinstance(instant, (int, float)):
             taux_illisible += 1
             continue
-        par_coin.setdefault(coin, []).append((int(instant), taux))
-        gardes += 1
-    for serie in par_coin.values():
-        serie.sort(key=lambda couple: couple[0])
+        externe = ligne.get("data_origin") == ORIGINE_EXTERNE
+        heure = (int(instant) + 1_800_000) // 3_600_000          # l'heure la plus proche : un règlement tombe à H + quelques ms
+        deja = par_heure.setdefault(coin, {}).get(heure)
+        if deja is not None:
+            doublons += 1
+            if deja[1] != taux:
+                doublons_contradictoires += 1
+            if not (deja[2] and not externe):
+                continue                                          # garde l'existant, sauf externe remplacé par Alina
+        par_heure[coin][heure] = (int(instant), taux, externe)
+    par_coin: dict[str, list[tuple[int, Decimal]]] = {}
+    for coin, heures in par_heure.items():
+        par_coin[coin] = sorted(((instant, taux) for instant, taux, _ in heures.values()), key=lambda c: c[0])
+        externes_gardes += sum(1 for *_, ext in heures.values() if ext)
+    gardes = sum(len(serie) for serie in par_coin.values())
     audit = {
         "status": "LU_DEPUIS_LE_COFFRE",
         "shards": len(shards),
@@ -120,6 +138,9 @@ def taux_du_coffre(
         "coins": len(par_coin),
         "ecartes_intervalle_inattendu": intervalle_inattendu,
         "ecartes_taux_illisible": taux_illisible,
+        "doublons_horaires_ecartes": doublons,
+        "doublons_de_valeur_differente": doublons_contradictoires,
+        "reglements_externes_gardes": externes_gardes,
         "provenance": PROVENANCE_RECONSTITUEE,
     }
     return par_coin, audit

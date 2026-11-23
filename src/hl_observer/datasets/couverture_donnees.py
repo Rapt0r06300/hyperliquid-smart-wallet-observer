@@ -188,6 +188,25 @@ FLUX: tuple[Flux, ...] = (
          "journal de décisions du moteur PAPER exploratoire", None, NON_CERTIFIE, "DERIVE"),
     Flux("discovery_probe_ledger.jsonl", DATA, "ui/cohorte_ledger_reader.py",
          "journal de décisions du moteur PAPER (découverte)", None, NON_CERTIFIE, "DERIVE"),
+    # 23/11/2026 -- DONNÉES EXTERNES GRATUITES (COFFRE_DONNEES_EXTERNES.cmd). Une archive par fichier source,
+    # `<nom>_<chiffres>.jsonl.gz`, versée seulement si son jeu est RECOUPÉ avec nos données, et seulement
+    # là où le coffre n'a rien d'Alina (heure manquante, avant notre première observation). Étiquetées
+    # `EXTERNE_*` dans l'index et `data_origin: EXTERNAL_HISTORICAL` ligne par ligne ; jamais causales.
+    Flux("externe_ironflow_funding_1h.jsonl", HISTORY, "tools/coffre_donnees_externes.py",
+         "funding horaire publié (Ironflow, CC BY 4.0), heures absentes de notre coffre", "funding_history",
+         CONSOMME, "backtesting/copy_vault_funding_realise.py:taux_du_coffre (portage ; Alina prioritaire à la même heure)"),
+    Flux("externe_ironflow_candles_1h.jsonl", HISTORY, "tools/coffre_donnees_externes.py",
+         "bougies 1 h (Ironflow), heures absentes de notre coffre", "candle", DISPONIBLE,
+         f"{LABO_PRINCIPAL} (signal de contexte compté À PART : signaux_externes_par_famille)"),
+    Flux("externe_ironflow_asset_ctx.jsonl", HISTORY, "tools/coffre_donnees_externes.py",
+         "open interest + mark/oracle (Ironflow), avant notre première observation", "asset_ctx", DISPONIBLE,
+         f"{LABO_PRINCIPAL} (signal de contexte compté À PART : signaux_externes_par_famille)"),
+    Flux("externe_ironflow_liquidations.jsonl", HISTORY, "tools/coffre_donnees_externes.py",
+         "liquidations de tout le marché, une par position (Ironflow, avec wallet)", "liquidation", DISPONIBLE,
+         f"{LABO_PRINCIPAL} (signal de contexte compté À PART : signaux_externes_par_famille)"),
+    Flux("externe_tardis_trades.jsonl", HISTORY, "tools/coffre_donnees_externes.py",
+         "trades publics des 1ers du mois gratuits (Tardis), avant notre première observation", "trades_marche",
+         DISPONIBLE, f"{LABO_PRINCIPAL} (signal de contexte compté À PART : signaux_externes_par_famille)"),
 )
 
 #: Magasin de ticks natifs : pas un ruban mais un arbre auto-manifesté, vérifié et référencé en place.

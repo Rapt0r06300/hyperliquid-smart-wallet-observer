@@ -32,6 +32,7 @@ from hl_observer.backtesting import copy_vault_fenetre_locale as FENETRE_LOCALE 
 from hl_observer.backtesting.copy_vault_protocol import (  # noqa: E402
     MAX_GROSS_EXPOSURE_USD as _LIMITE_EXPOSITION_USD,
 )
+from hl_observer.contrat_paper import PAPER_EQUITY_USD  # noqa: E402
 
 CORE_TESTS = (
     "tests/test_copy_vault_v21_frozen.py",
@@ -799,7 +800,7 @@ def run_lab(*, preflight_only: bool = False) -> int:
 
 # Legacy local research (Codex/Claude): isolated opt-in, never the default SAFE path.
 OBJECTIVE_USD_PER_DAY = 5.0  # dashboard placeholder; replaced from optional module on execution
-PAPER_CAPITAL_USD = 1000.0   # never a trading instruction
+PAPER_CAPITAL_USD = PAPER_EQUITY_USD  # fallback coherent with the canonical paper contract
 REASON_LABELS = {
     "TRAIN_NOT_EXECUTABLE": (
         "aucun trade exécutable sur la période d'entraînement : la recherche n'a pas été lancée "

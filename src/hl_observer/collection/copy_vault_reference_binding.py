@@ -32,6 +32,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import zlib
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -230,13 +231,22 @@ class LecteurBorne:
             try:
                 handle = chemin.open("rb")
             except OSError:
-                self._descripteurs[relpath] = None
-                return None
+                # 23/11/2026 — LE RUBAN A ÉTÉ COMPRESSÉ, PAS PERDU. Le certificateur compresse les rubans scellés
+                # figés en archive gzip PAR BLOCS indexée (`datasets.archive_gzip_blocs`) : l'offset noté à
+                # l'écriture désigne toujours le même octet du texte d'origine, relu en décompressant UN bloc.
+                gz = chemin.with_name(chemin.name + ".gz")
+                if not gz.is_file():
+                    self._descripteurs[relpath] = None
+                    return None
+                from hl_observer.datasets.archive_gzip_blocs import LecteurArchive
+                handle = LecteurArchive(gz)
             self._descripteurs[relpath] = handle
         try:
+            if hasattr(handle, "ligne_a"):
+                return handle.ligne_a(int(offset))
             handle.seek(int(offset))
             return handle.readline()
-        except (OSError, ValueError, OverflowError):
+        except (OSError, ValueError, OverflowError, EOFError, zlib.error):
             return None
 
     def alternatives(self, relpath: str, offset: int):
@@ -259,7 +269,7 @@ class LecteurBorne:
         for handle in self._descripteurs.values():
             if handle is not None:
                 try:
-                    handle.close()
+                    (handle.fermer if hasattr(handle, "fermer") else handle.close)()
                 except OSError as exc:
                     _noter_echec("collection/copy_vault_reference_binding.py:fermer_lecteur", exc)
         self._descripteurs.clear()

@@ -64,6 +64,46 @@ def trouver_ruban(racine) -> tuple[Path | None, list[str]]:
         if candidat.is_file():
             return candidat, cherches
     return None, cherches
+
+
+def trouver_sonde(racine: Path, sonde: str | None = None) -> Path | None:
+    """Retourne la sonde demandee, ou le rapport horloges le plus recent.
+
+    Le lanceur reste compatible avec ``--sonde`` pour rejouer un rapport précis. Sans
+    ce paramètre, un nom daté codé en dur finissait par figer l'ETA sur une mesure
+    ancienne ; le dernier rapport disponible est donc choisi à chaque rafraîchissement.
+    """
+    if sonde:
+        candidate = Path(sonde)
+        if not candidate.is_absolute():
+            candidate = racine / candidate
+        return candidate if candidate.is_file() else None
+    dossier = racine / "runtime" / "reports"
+    candidats = [p for p in dossier.glob("sonde_horloges_*.json") if p.is_file()]
+    if not candidats:
+        return None
+    return max(candidats, key=lambda p: (p.stat().st_mtime_ns, p.name))
+
+
+def lire_sonde_denses(racine: Path, sonde: str | None = None) -> tuple[int, str, float | None]:
+    """Lit le nombre de journées denses et l'âge du rapport courant."""
+    chemin = trouver_sonde(racine, sonde)
+    if chemin is None:
+        return 0, "AUCUNE (aucune sonde lue : le compte des journees est INCONNU)", None
+    charge = _charger_etat_de_fond(chemin)
+    age_h: float | None
+    try:
+        age_h = (time.time() - chemin.stat().st_mtime) / HEURE_S
+    except OSError:
+        age_h = None
+    appariement = charge.get("appariement") if isinstance(charge, dict) else None
+    brut = appariement.get("jours_DENSES") if isinstance(appariement, dict) else None
+    denses = brut if type(brut) is int and brut >= 0 else 0
+    try:
+        source = str(chemin.relative_to(racine))
+    except ValueError:
+        source = str(chemin)
+    return denses, source, age_h
 JOUR_MS = DS.JOUR_MS
 HEURE_S = 3600.0
 
@@ -201,7 +241,10 @@ class MesureDeDebit:
             self._dernier = None
             return {"debit_par_heure": None, "lignes_par_minute": None, "age_s": None,
                     "motif": "RUBAN_ILLISIBLE"}
-        maintenant = time.time()
+        # Une horloge murale peut avoir une résolution trop grossière sous Windows
+        # et rendre deux lectures immédiates indistinguables. Pour un débit, seule
+        # la durée écoulée compte : elle doit être monotone et haute résolution.
+        maintenant = time.monotonic()
         if self._dernier is None:
             self._dernier = (maintenant, taille)
             return {"debit_par_heure": None, "lignes_par_minute": None, "age_s": 0.0,
@@ -245,8 +288,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="secondes entre deux rafraichissements de l'ETA")
     p.add_argument("--tours", type=int, default=0,
                    help="nombre de rafraichissements (0 = sans fin, q pour quitter)")
-    p.add_argument("--sonde", default="runtime/reports/sonde_horloges_20261122.json",
-                   help="rapport de la sonde des horloges : source des journees DENSES")
+    p.add_argument("--sonde", default=None,
+                   help="rapport horloges explicite ; par défaut le plus récent est relu")
     p.add_argument("--requis", type=int, default=DS.MINIMUM_SIGNAL_UTC_DAYS)
     p.add_argument("--une-fois", action="store_true", help="une seule mesure, puis sortie")
     args = p.parse_args(argv)
@@ -260,23 +303,10 @@ def main(argv: list[str] | None = None) -> int:
 
     ruban, cherches = trouver_ruban(racine)
     debit = MesureDeDebit(ruban) if ruban else MesureDeDebit(racine / RUBANS_FILLS[0])
-    chemin_sonde = racine / args.sonde
-    sonde = _charger_etat_de_fond(chemin_sonde)
-    denses_acquis = 0
-    source_denses = "AUCUNE (aucune sonde lue : le compte des journees est INCONNU)"
-    age_sonde_h = None
-    if sonde:
-        appariement = sonde.get("appariement") or {}
-        denses_acquis = int(appariement.get("jours_DENSES") or 0)
-        try:
-            age_sonde_h = (time.time() - chemin_sonde.stat().st_mtime) / HEURE_S
-        except OSError:
-            age_sonde_h = None
-        source_denses = str(args.sonde)
-
     tours = 0
     while True:
         tours += 1
+        denses_acquis, source_denses, age_sonde_h = lire_sonde_denses(racine, args.sonde)
         mesure = debit.lire()
         secondes_restantes = _secondes_restantes_aujourdhui()
         eta = calculer_eta(

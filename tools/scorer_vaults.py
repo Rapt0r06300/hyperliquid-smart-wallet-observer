@@ -19,6 +19,7 @@ from pathlib import Path
 RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
 
+from hl_observer.datasets.archive_gzip_blocs import ouvrir_texte, version_presente  # noqa: E402
 from hl_observer.experimental import vault_scoring as VS  # noqa: E402
 
 SNAP = Path("runtime") / "data" / "vault_snapshots.jsonl"
@@ -49,8 +50,9 @@ def _rubans(root: Path, nom: str, *, depuis_j: float = HISTORIQUE_J, now: float 
             quand = datetime.datetime.strptime(dossier.name[len("session_"):], "%Y%m%d_%H%M%S")
         except ValueError:
             continue
-        if quand >= limite and (dossier / nom).is_file():
-            sessions.append((quand, dossier / nom))
+        present = version_presente(dossier / nom)       # en clair, ou archivé compressé par le certificateur
+        if quand >= limite and present is not None:
+            sessions.append((quand, present))
     return [chemin for _, chemin in sorted(sessions)] + [root / "runtime" / "data" / nom]
 
 
@@ -60,7 +62,8 @@ def _snaps_par_vault(root: Path, *, now: float | None = None) -> dict[str, list[
     vus: set[tuple[str, object]] = set()
     for chemin in _rubans(root, SNAP.name, now=now):
         try:
-            lignes = chemin.read_text(encoding="utf-8", errors="ignore").splitlines()
+            with ouvrir_texte(chemin) as flux:
+                lignes = flux.read().splitlines()
         except OSError:
             continue
         for l in lignes:
@@ -100,7 +103,8 @@ def coins_executables(root: Path, *, now: float | None = None) -> set[str]:
         if restant <= 0:
             break
         try:
-            lignes = chemin.read_text(encoding="utf-8", errors="ignore").splitlines()[-restant:]
+            with ouvrir_texte(chemin) as flux:
+                lignes = flux.read().splitlines()[-restant:]
         except OSError:
             continue
         restant -= len(lignes)
