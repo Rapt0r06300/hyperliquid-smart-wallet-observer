@@ -17,6 +17,7 @@ import argparse
 import asyncio
 import json
 import math
+import os
 import sys
 import time
 from pathlib import Path
@@ -40,9 +41,20 @@ DEXS_DEFAUT = "xyz"                     # dex HIP-3 portant la majorité du noti
 TWAP_OUT = Path("runtime") / "data" / "copy_vault_twap_lane.jsonl"
 #: ordres en attente des leaders (une ligne = le carnet d'ordres d'un compte à un instant observé)
 ORDRES_OUT = Path("runtime") / "data" / "copy_vault_orders_lane.jsonl"
+RESULT_OUT = Path("runtime") / "data" / "copy_vault_context_result.json"
 ORDRES_CHANGEMENT_MIN_MS = 30_000       # au plus un carnet d'ordres toutes les 30 s par compte et par dex
 DEFAULT_LEADERS_FILE = "config/copy_vault_leaders.json"
 USERS_PAR_CONNEXION = 5
+
+
+def _ecrire_resultat(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporaire = path.with_name(path.name + ".tmp")
+    temporaire.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    temporaire.replace(path)
 
 
 def _nb(v):
@@ -387,13 +399,29 @@ async def _battement(lane: "LaneContexte", deadline: float, intervalle_s: float 
 
 async def _boucle(args: argparse.Namespace) -> int:
     root = Path(args.root)
+    result_out = Path(getattr(args, "result_out", "") or (root / RESULT_OUT))
+    result_out = result_out if result_out.is_absolute() else root / result_out
+    started_at_ms = int(time.time() * 1000)
     tous, source_retenue, raison_source = choisir_les_leaders(
         root, source=getattr(args, "leaders_source", SOURCE_FICHIER), chemin=args.leaders_file)
     print(f"[contexte] leaders : {raison_source}", flush=True)
     lane_leaders = shard_leaders(tous, args.shard_count, args.shard_index)[: max(1, int(args.max_users))]
     if not lane_leaders:
         print("[contexte] aucun leader pour cette lane.", flush=True)
-        return 0
+        _ecrire_resultat(result_out, {
+            "schema": "hypersmart.collector_lane_result.v1",
+            "collector": "copy_vault_contexte",
+            "status": "EMPTY",
+            "reason": "no_leaders",
+            "code_sha": os.environ.get("GITHUB_SHA", ""),
+            "shard_index": int(args.shard_index),
+            "shard_count": int(args.shard_count),
+            "counts": {"positions": 0, "portfolios": 0, "twap": 0, "orders": 0},
+            "reconnects": 0,
+            "started_at_ms": started_at_ms,
+            "finished_at_ms": int(time.time() * 1000),
+        })
+        return 2
     pos_out = (root / POS_OUT) if not args.pos_out else Path(args.pos_out)
     twap_out = (root / TWAP_OUT) if not args.twap_out else Path(args.twap_out)
     pos_out = pos_out if pos_out.is_absolute() else root / pos_out
@@ -415,7 +443,28 @@ async def _boucle(args: argparse.Namespace) -> int:
     await asyncio.gather(*taches, return_exceptions=True)
     print(f"[contexte] fini : {lane.positions} positions + {lane.portefeuilles} portefeuilles complets + "
           f"{lane.twap} TWAP fills + {lane.ordres} carnets d'ordres, {lane.reconnects} reconnexions.", flush=True)
-    return 0
+    total_records = lane.positions + lane.portefeuilles + lane.twap + lane.ordres
+    status = "OK" if total_records > 0 else "EMPTY"
+    _ecrire_resultat(result_out, {
+        "schema": "hypersmart.collector_lane_result.v1",
+        "collector": "copy_vault_contexte",
+        "status": status,
+        "reason": "" if status == "OK" else "no_records",
+        "code_sha": os.environ.get("GITHUB_SHA", ""),
+        "shard_index": int(args.shard_index),
+        "shard_count": int(args.shard_count),
+        "leaders": len(lane_leaders),
+        "counts": {
+            "positions": lane.positions,
+            "portfolios": lane.portefeuilles,
+            "twap": lane.twap,
+            "orders": lane.ordres,
+        },
+        "reconnects": lane.reconnects,
+        "started_at_ms": started_at_ms,
+        "finished_at_ms": int(time.time() * 1000),
+    })
+    return 0 if status == "OK" else 2
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -436,6 +485,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--twap-out", default="")
     p.add_argument("--snap-out", default="", help="instantanés complets de portefeuille (positions + valeur du compte)")
     p.add_argument("--ordres-out", default="", help="ordres en attente des leaders (écrits sur changement)")
+    p.add_argument("--result-out", default="", help="manifeste JSON du résultat de la lane")
     p.add_argument("--dexs", default=DEXS_DEFAUT,
                    help="dex HIP-3 dont l'état du compte est aussi suivi (séparés par des virgules ; vide = aucun)")
     args = p.parse_args(argv)
