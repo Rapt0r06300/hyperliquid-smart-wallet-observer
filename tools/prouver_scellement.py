@@ -122,9 +122,11 @@ def prouver_un(root: Path, rel: str, famille: str, coffre: Coffre, now_ms: int, 
             absentes += 1
             vues.add(cle)
             if sortie is not None:
-                sortie.write(json.dumps({**rec, "prouve_absent_du_coffre": {"fichier": rel,
-                                         "outil": "tools/prouver_scellement.py"}},
-                                        ensure_ascii=False, separators=(",", ":")) + "\n")
+                from reparer_quarantaine import annoter   # même règle : jamais toucher un checksum
+
+                sortie.write(json.dumps(annoter(rec, "prouve_absent_du_coffre", {
+                    "fichier": rel, "outil": "tools/prouver_scellement.py"}),
+                    ensure_ascii=False, separators=(",", ":")) + "\n")
     st = chemin.stat()
     return {"fichier": rel, **bilan, "presentes": presentes, "absentes": absentes, "famille": famille,
             "taille": st.st_size, "mtime_ns": st.st_mtime_ns}
@@ -139,6 +141,7 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--racine", default=str(RACINE))
     p.add_argument("--plan", action="store_true")
+    p.add_argument("--vivants", action="store_true", help="prouve aussi les rotations des dossiers de collecte vivants")
     p.add_argument("--now-ms", type=int, default=0)
     a = p.parse_args(argv)
     root = Path(a.racine).resolve()
@@ -157,6 +160,10 @@ def main(argv: list[str] | None = None) -> int:
     rubans: list[str] = []
     resultats = []
     for x in sorted(a_prouver, key=lambda x: x["fichier"]):
+        if x["fichier"].startswith(("runtime/data/", "runtime/research_lab/data/")) and not a.vivants:
+            # 23/11 : une rotation VIVANTE est aussi scellée par la campagne, qui précharge désormais les identités ;
+            # la prouver ici ferait la course avec elle (148 526 micro-BBO doublés ce jour-là)
+            continue
         rel = x["fichier"]
         fam = (x.get("famille") or [None])[0]
         if fam is None:
@@ -168,6 +175,13 @@ def main(argv: list[str] | None = None) -> int:
             tronc = re.sub(r"_\d{10,}$", "", tronc)
             nom = f"{tronc}_{zlib.crc32(rel.encode()):010d}{int(time.time() * 1000) % 10**13:013d}.jsonl.gz"
             detecte = C.detecter_famille(nom)
+            if detecte is None or detecte[0] != fam:
+                # famille reconnue par son CONTENU (ex. vault_episodes = fills_backfill) : le ruban prend le nom connu de
+                # sa famille, la provenance reste dans l'étiquette de chaque ligne
+                canon = next((n[:-6] for n, (f, _s) in C._FICHIERS_CONNUS.items() if f == fam), None)
+                if canon:
+                    nom = f"{canon}_{zlib.crc32(rel.encode()):010d}{int(time.time() * 1000) % 10**13:013d}.jsonl.gz"
+                    detecte = C.detecter_famille(nom)
             if detecte is None or detecte[0] != fam:
                 print(f"  [!] {rel} : le ruban {nom} ne serait pas reconnu ({detecte}) : fichier laissé à prouver")
                 continue

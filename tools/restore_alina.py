@@ -36,11 +36,6 @@ from contextlib import suppress
 from pathlib import Path, PurePosixPath
 from typing import Any, TypeVar
 
-try:
-    from tools.partitioned_data_index import select_index_rows
-except ModuleNotFoundError:
-    from partitioned_data_index import select_index_rows
-
 DEFAULT_REPOSITORY = "Rapt0r06300/hyperliquid-smart-wallet-observer"
 USER_AGENT = "alina-smartflow-disaster-restore/1"
 SAFE_COMPONENT = re.compile(r"[^A-Za-z0-9._-]+")
@@ -67,6 +62,20 @@ _NESTED_ARCHIVE_SUFFIXES = (
 )
 _T = TypeVar("_T")
 _R = TypeVar("_R")
+
+
+def select_index_rows(*args: Any, **kwargs: Any) -> Any:
+    """Load the catalog selector only when a SAFE catalog is actually read.
+
+    Keeping this compatibility seam at module scope preserves the existing
+    monkeypatch/test contract while allowing the launcher ``--help`` path to
+    run in a tools-only sandbox.
+    """
+    try:
+        from tools.partitioned_data_index import select_index_rows as selector
+    except ModuleNotFoundError:
+        from partitioned_data_index import select_index_rows as selector
+    return selector(*args, **kwargs)
 
 
 class RestoreError(RuntimeError):

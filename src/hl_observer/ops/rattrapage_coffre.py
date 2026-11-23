@@ -23,6 +23,8 @@ from pathlib import Path
 from typing import Any
 from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
+
 #: Pas de chaque série, en millisecondes. Le funding est horaire.
 PAS_MS = {"5m": 300_000, "1h": 3_600_000, "4h": 14_400_000, "1d": 86_400_000, "funding": 3_600_000}
 #: Un curseur en avance de plus d'un pas et demi sur le coffre promet une donnée absente.

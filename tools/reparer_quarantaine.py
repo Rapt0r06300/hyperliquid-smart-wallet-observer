@@ -50,6 +50,14 @@ JOUR = 86_400_000
 CAUSALITE_MS = 5_000
 
 
+def annoter(rec: dict, cle: str, valeur: Any) -> dict:
+    """Ajoute la provenance, SAUF à un enregistrement qui porte son propre contrôle d'intégrité : le ``checksum`` des
+    flux de microstructure couvre TOUS ses champs (23/11 : 550 227 lignes réparées remises en quarantaine pour
+    ``checksum_invalide`` parce qu'une étiquette leur avait été ajoutée). Celui-là passe tel quel ; sa provenance est
+    dans le nom du ruban et dans le rapport."""
+    return dict(rec) if "checksum" in rec else {**rec, cle: valeur}
+
+
 def _empreinte(identite: tuple) -> bytes:
     return hashlib.blake2b(repr(identite).encode("utf-8"), digest_size=16).digest()
 
@@ -64,7 +72,9 @@ def lire_quarantaine(root: Path, familles: set[str] | None) -> Iterator[tuple[st
         famille, base = f.name.split("__", 1)
         if familles and famille not in familles:
             continue
-        tronc = S._tronc(base.split("__")[0] + ".jsonl")
+        # « bbo_tape_1793….jsonl » -> « bbo_tape » : le nom de quarantaine porte DÉJÀ « .jsonl » (23/11 : un
+        # « .jsonl » de trop gardait la rotation dans le nom, que le certificateur n'aurait pas reconnu)
+        tronc = S._tronc(base.split("__")[0])
         with f.open(encoding="utf-8", errors="replace") as h:
             for ligne in h:
                 try:
@@ -163,8 +173,8 @@ def verser(root: Path, par: dict, now_ms: int) -> list[str]:
                 sorties[g] = gzip.open(part, "wt", encoding="utf-8", newline="\n")
             if sorties[g] is None:
                 continue
-            sorties[g].write(json.dumps({**rec, "repare_depuis_quarantaine": {
-                "lot": lot, "raison_initiale": raison, "outil": "tools/reparer_quarantaine.py"}},
+            sorties[g].write(json.dumps(annoter(rec, "repare_depuis_quarantaine", {
+                "lot": lot, "raison_initiale": raison, "outil": "tools/reparer_quarantaine.py"}),
                 ensure_ascii=False, separators=(",", ":")) + "\n")
             comptes[g] += 1
     finally:

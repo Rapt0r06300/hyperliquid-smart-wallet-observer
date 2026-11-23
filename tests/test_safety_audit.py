@@ -92,3 +92,36 @@ def test_safety_audit_tolerates_refusal_guard_but_detects_runtime_exchange(tmp_p
     (src / "client.py").write_text("URL = '/exchange'\n", encoding="utf-8")
     operational = run_safety_audit(tmp_path)
     assert operational.checks["no_exchange_endpoint_in_runtime_source"] is False
+
+
+def test_safety_audit_covers_legacy_tools_scripts_and_workflows(tmp_path, monkeypatch):
+    for directory in ("src/hl_observer", "hyper_smart_observer", "tools"):
+        (tmp_path / directory).mkdir(parents=True)
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    (tmp_path / ".env.example").write_text(
+        "HL_ENABLE_MAINNET_EXECUTION=false\n", encoding="utf-8"
+    )
+    (tmp_path / "src" / "hl_observer" / "execution").mkdir(parents=True)
+    (tmp_path / "src" / "hl_observer" / "execution" / "live_executor_disabled.py").write_text(
+        "LOCKED = True\n", encoding="utf-8"
+    )
+    (tmp_path / "tests").mkdir()
+    for name in ("test_no_mainnet_execution.py", "test_safety_audit.py", "test_testnet_locked.py"):
+        (tmp_path / "tests" / name).write_text("# presence proof\n", encoding="utf-8")
+    (tmp_path / "tools" / "legacy.py").write_text("URL = '/exchange'\n", encoding="utf-8")
+    (tmp_path / "hyper_smart_observer" / "legacy.py").write_text(
+        "def place_mainnet_order():\n    pass\n", encoding="utf-8"
+    )
+    (tmp_path / ".github" / "workflows" / "unsafe.yml").write_text(
+        "jobs:\n  x:\n    runs-on: self-hosted\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        "hl_observer.security.safety_audit.auditer_l_environnement",
+        lambda: type("Audit", (), {"ok": True, "alerte": ""})(),
+    )
+
+    result = run_safety_audit(tmp_path)
+
+    assert result.checks["no_forbidden_mainnet_order_method"] is False
+    assert result.checks["no_exchange_endpoint_in_runtime_source"] is False
+    assert result.checks["no_self_hosted_workflows"] is False

@@ -85,6 +85,34 @@ def test_repare_une_fois_ce_qui_manque_et_ne_touche_ni_au_coffre_ni_a_la_quarant
     assert bilan["deja_au_coffre:trades_marche"] == 1 and bilan["doublon_dans_la_quarantaine"] == 1
 
 
+def test_un_enregistrement_a_checksum_est_repare_sans_etre_modifie_et_une_rotation_garde_son_nom(tmp_path):
+    """23/11/2026, deux défauts vus en réel : (1) une étiquette ajoutée cassait le checksum des flux de microstructure
+    (550 227 lignes remises en quarantaine) ; (2) une source déjà tournée (``bbo_tape_<chiffres>``) donnait un ruban
+    au nom que le certificateur ne reconnaissait pas (3,86 M lignes BBO non versées)."""
+    import hashlib as H
+
+    micro = {"flux": "bbo", "coin": "ETH", "ts_ex": NOW - 50_000, "bid": 2016.3, "bid_sz": 3.5, "bid_n": 4,
+             "ask": 2016.4, "ask_sz": 2.9, "ask_n": 5, "ts_wall_ms": NOW - 49_900, "ts_mono_ns": 1, "seq": 1,
+             "gap": None, "schema_version": 2, "source": "hl_ws_public", "read_only": True, "real_execution": False}
+    micro["checksum"] = H.sha256(json.dumps(micro, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:12]
+    bbo = {"venue": "HL", "coin": "BTC", "mid": 76049.5, "bid": 76049.0, "ask": 76050.0, "bid_sz": 4.9, "ask_sz": 4.2,
+           "ts_wall_ms": NOW - 40_000, "recv_wall_ts_ms": NOW - 40_000, "connection_id": "hl-1", "sequence": 1,
+           "event_id": "e1", "recu_ns": 1}
+    q = tmp_path / RQ.QUARANTAINE / "20261108T000000Z_a"
+    q.mkdir(parents=True)
+    (q / "micro_bbo__micro_bbo.jsonl").write_text(json.dumps({"raison": "timestamp_futur", "record": micro}) + "\n",
+                                                  encoding="utf-8")
+    (q / "bbo__bbo_tape_1793153839884838400.jsonl").write_text(
+        json.dumps({"raison": "px_invalide", "record": bbo}) + "\n", encoding="utf-8")
+    _coffre(tmp_path, [])
+    assert RQ.main(["--racine", str(tmp_path), "--now-ms", str(NOW)]) == 0
+    deposes = _deposes(tmp_path)
+    micros = [x for x in deposes if x.get("flux") == "bbo"]
+    assert len(micros) == 1 and micros[0]["checksum"] == micro["checksum"]         # entré, checksum intact
+    assert "repare_depuis_quarantaine" not in micros[0]
+    assert any(x.get("venue") == "HL" and x.get("repare_depuis_quarantaine") for x in deposes)  # la rotation aussi
+
+
 def test_un_second_passage_ne_repare_plus_rien(tmp_path):
     _quarantaine(tmp_path, "20261113T000000Z_a", [{"raison": "timestamp_futur", "record": _trade(2, NOW - 50_000)}])
     _coffre(tmp_path, [])

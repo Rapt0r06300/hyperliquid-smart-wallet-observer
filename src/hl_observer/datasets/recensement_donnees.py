@@ -25,7 +25,7 @@ import os
 import time
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterator
+from typing import Any
 
 from hl_observer.datasets.coffre_certifie import detecter_famille, motif_non_certifie, sniffer_famille
 from hl_observer.ops.echec_silencieux import noter as _noter_echec
@@ -75,6 +75,7 @@ ZONES: tuple[Zone, ...] = (
     Zone("runtime/research_lab", "DERIVE", "registres et sorties du labo de recherche"),
     Zone("runtime/roadmap", "DERIVE", "feuille de route et ses sauvegardes"),
     Zone("runtime/models", "DERIVE", "modèles entraînés"),
+    Zone("runtime/auto_amelioration", "DERIVE", "apprentissage du moteur : résultats calculés par fill"),
     Zone("runtime/ml", "DERIVE", "apprentissage"),
     Zone("runtime/learning", "DERIVE", "apprentissage"),
     Zone("runtime/cvprobe*", "DERIVE", "sondes ponctuelles"),
@@ -272,6 +273,7 @@ def recenser(root: Path, *, verifier_sha: bool = False, max_listes: int = 200) -
     listes: dict[str, list[dict[str, Any]]] = {"INCONNU": [], "A_SCELLER": [], "A_PROUVER": [],
                                                "EXTERNE_NON_MANIFESTE": []}
     a_sceller: list[dict[str, Any]] = []
+    a_prouver_gz: list[dict[str, Any]] = []
     non_parcourus: dict[str, str] = {}
     fichiers_vus = dossiers_vus = 0
 
@@ -287,6 +289,9 @@ def recenser(root: Path, *, verifier_sha: bool = False, max_listes: int = 200) -
             listes[verdict].append({"fichier": rel, "octets": taille, "detail": detail, "famille": famille})
         if verdict == "A_SCELLER" and famille:
             a_sceller.append({"fichier": rel, "famille": famille[0], "source": famille[1]})
+        if verdict == "A_PROUVER" and famille and rel.endswith(".gz"):
+            # le certificateur sait prouver une archive .gz lui-même (identités du coffre préchargées sur sa période)
+            a_prouver_gz.append({"fichier": rel, "famille": famille[0], "source": famille[1]})
 
     pile = [""]
     while pile:
@@ -363,7 +368,7 @@ def recenser(root: Path, *, verifier_sha: bool = False, max_listes: int = 200) -
         "cent_pour_cent": bloquants == 0,
         "totaux": {k: {"fichiers": v[0], "octets": v[1]} for k, v in sorted(totaux.items())},
         "zones": dict(sorted(zones_vues.items(), key=lambda kv: -kv[1]["octets"])),
-        "non_parcourus": non_parcourus, "listes": listes, "a_sceller": a_sceller,
+        "non_parcourus": non_parcourus, "listes": listes, "a_sceller": a_sceller, "a_prouver_gz": a_prouver_gz,
     }
 
 

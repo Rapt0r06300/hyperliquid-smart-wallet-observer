@@ -60,7 +60,7 @@ def test_les_zones_de_l_inventaire_reel_ont_chacune_leur_regle():
 def test_chaque_fichier_de_donnees_recoit_un_verdict_exact(tmp_path):
     root = tmp_path
     scelle = _ecrire(root / "runtime/data/asset_ctx_tape.jsonl")
-    vivant = _ecrire(root / "runtime/data/bbo_tape.jsonl", 5)
+    _ecrire(root / "runtime/data/bbo_tape.jsonl", 5)
     _ecrire(root / "runtime/data/liquidations_confirmees.jsonl")                        # aucune trace
     (root / "runtime/data/vide.jsonl").write_bytes(b"")
     _ecrire(root / "runtime/data/poll_cadence_plan.ndjson")
@@ -113,7 +113,9 @@ def test_une_rotation_d_un_ruban_deja_scelle_se_prouve_et_ne_se_scelle_jamais_a_
     _etat(tmp_path, {"runtime\\data\\bbo_tape.jsonl": {"taille": 10, "prefixe_octets": 10, "prefixe_sha256": "x"}})
     r = R.recenser(tmp_path)
     assert r["totaux"] == {"A_PROUVER": {"fichiers": 1, "octets": rotation.stat().st_size}}
-    assert r["a_sceller"] == []                                      # le certificateur ne la reçoit pas
+    assert r["a_sceller"] == []                                      # jamais « à sceller » à l'aveugle…
+    assert [x["fichier"] for x in r["a_prouver_gz"]] == [             # …mais le certificateur la PROUVE (identités
+        "runtime/data/bbo_shards_archive/bbo_tape_1794923250698696700.jsonl.gz"]   # préchargées sur sa période)
 
 
 def test_une_session_recente_compressee_reste_scellee_par_l_archiveur(tmp_path):

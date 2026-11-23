@@ -190,6 +190,29 @@ def test_bridge_uses_real_safe_envelopes_and_reports_provenance(tmp_path: Path) 
     assert build_safe_copy_workspace(tmp_path)["workspace"] == str(workspace)
 
 
+def test_bridge_streams_seal_only_archives_without_claiming_physical_unpack(
+    tmp_path: Path,
+) -> None:
+    recovery = _corpus(tmp_path, [_envelope("copy_vault_fills"), _envelope("copy_vault_l2")])
+    report_path = recovery / "UNPACK_REPORT.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report.update({
+        "status": "SAFE_SEAL_CERTIFICATION_COMPLETE",
+        "mode": "SEAL_ONLY",
+        "physical_jsonl_available": False,
+        "streamable_gzip_available": True,
+        "replay_read_mode": "GZIP_STREAM",
+    })
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    for plain in (recovery / "usable" / "unpacked" / "test-release").glob("*.jsonl"):
+        plain.unlink()
+
+    result = build_safe_copy_workspace(tmp_path)
+
+    assert result["status"] == "SAFE_COPY_WORKSPACE_READY"
+    assert result["source_read_mode"] == "GZIP_STREAM"
+
+
 def test_bridge_can_bind_an_explicit_current_recovery_and_catalog(
     tmp_path: Path,
 ) -> None:

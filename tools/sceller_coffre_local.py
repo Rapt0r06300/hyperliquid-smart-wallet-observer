@@ -433,6 +433,65 @@ def _reprise_append_only(source: Path, fin: int | None, etat: dict[str, Any], *,
     return 0
 
 
+def _horodatage_large(record: dict[str, Any], famille: str) -> int | None:
+    t = _ts_primaire(record, famille)
+    for champ in ("ts_ex", "ts_wall_ms", "ts_ms", "exchange_ts_ms", "recv_wall_ts_ms", "received_at_ms"):
+        if isinstance(t, (int, float)) and not isinstance(t, bool):
+            break
+        t = record.get(champ)
+    return int(t) if isinstance(t, (int, float)) and not isinstance(t, bool) else None
+
+
+def _precharger_identites_fenetre(coffre: Path, source: Path, famille: str, deja_vus, faits: set) -> int | None:
+    """Identités du coffre (famille) sur la période RÉELLE d'une archive : la plus ancienne et la plus récente de ses lignes.
+
+    23/11/2026 : la première version supposait « première ligne -> horodatage de rotation du nom, sinon + 6 h ». Une
+    archive de session sans horodatage dans son nom (``vault_episodes.jsonl.gz``) couvre des MOIS : 16 093 lignes
+    déjà au coffre ont été redéposées. La période se LIT sur toutes les lignes (une lecture de plus), jamais supposée."""
+    debut_ms = fin_ms = None
+    maintenant = int(time.time() * 1000)
+    for brut in _lire_lignes(source):
+        try:
+            rec = json.loads(brut)
+            t = _horodatage_large(rec, famille)
+            if t is None:
+                # l'horloge BRUTE peut porter un autre nom (``time`` des fills Hyperliquid) : c'est celle de la ligne
+                # CERTIFIÉE qui date les shards de l'index
+                norm, _d, _m = certifier_record(rec, famille=famille, source=str(rec.get("source") or famille),
+                                                now_ms=maintenant)
+                t = _horodatage_large(norm, famille) if isinstance(norm, dict) else None
+        except (ValueError, TypeError, AttributeError, KeyError):
+            continue
+        if t is None:
+            continue
+        while t > 10 ** 13:                                   # µs / ns -> ms, comme l'index
+            t //= 1000
+        debut_ms = t if debut_ms is None else min(debut_ms, t)
+        fin_ms = t if fin_ms is None else max(fin_ms, t)
+    if debut_ms is None:
+        return None     # période illisible : l'appelant NE DÉPOSE RIEN (échec fermé), le fichier reste à prouver
+    index = _lire_json(coffre / "LOCAL_INDEX.json") or {}
+    n = 0
+    for s in index.get("shards", []):
+        if not isinstance(s, dict) or s.get("famille") != famille or s.get("shard") in faits:
+            continue
+        a, b = s.get("ts_min_ms"), s.get("ts_max_ms")
+        if isinstance(a, int) and isinstance(b, int) and (b < debut_ms - 3_600_000 or a > fin_ms + 3_600_000):
+            continue
+        faits.add(s.get("shard"))
+        try:
+            with gzip.open(coffre.parents[1] / s["shard"], "rt", encoding="utf-8") as g:
+                for ligne in g:
+                    try:
+                        deja_vus.add(identite(json.loads(ligne), famille))
+                        n += 1
+                    except (ValueError, TypeError):
+                        continue
+        except OSError:
+            continue
+    return n
+
+
 def _longueur_claire(source: Path) -> tuple[int | None, bool]:
     """(longueur decompressee, exacte ?) d'une archive ``.gz``, sans la decompresser."""
     idx = source.with_name(source.name + ".idx.json")
@@ -1080,6 +1139,7 @@ def main(argv: list[str] | None = None) -> int:
     # Mesure : 323,2 octets/entree contre 16,4, soit x19,6. Meme reponse a `in` et `add`.
     deja_vus = EnsembleDIdentites()
     rubans_precharges: set = set()
+    shards_fenetre: set = set()
     entrees_manifeste: list[dict[str, Any]] = []
     total = StatsCertif()
     scelles_pour_reset: list[Path] = []
@@ -1121,6 +1181,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.nom:
             fichiers = [f for f in fichiers if f[0].name in set(args.nom)]
         recensement_avant = None
+        a_prouver_gz: set = set()
         if args.recensement:
             # 23/11/2026 -- AUCUNE DONNEE OUBLIEE. Le recensement parcourt TOUT le projet avec ses propres regles
             # (pas cette decouverte-ci, sinon la couverture serait de 100 % par construction) ; ce qu'il trouve en
@@ -1130,7 +1191,10 @@ def main(argv: list[str] | None = None) -> int:
             recensement_avant = RD.recenser(root)
             deja = {_cle_fichier(f[0]) for f in fichiers}
             ajoutes = 0
-            for a in recensement_avant["a_sceller"]:
+            # 23/11 : les archives .gz « à prouver » aussi -- ce passage précharge les identités du coffre sur leur
+            # période (_precharger_identites_fenetre) : seules leurs lignes absentes entrent, jamais un doublon
+            a_prouver_gz = {_cle_fichier(root / a["fichier"]) for a in recensement_avant.get("a_prouver_gz", [])}
+            for a in recensement_avant["a_sceller"] + recensement_avant.get("a_prouver_gz", []):
                 chemin = root / a["fichier"]
                 if _cle_fichier(chemin) not in deja and (not args.famille or a["famille"] == args.famille):
                     fichiers.append((chemin, a["famille"], a["source"]))
@@ -1258,6 +1322,24 @@ def main(argv: list[str] | None = None) -> int:
                         rattrapage = True
                         _log(log, f"        rattrapage (regle v{version}) : seules les lignes rejetees "
                                   f"a tort par l'ancienne regle sont deposees.")
+                # 23/11/2026 (soir) -- RUBAN REECRIT. `tools/backfill_vault_fills.py` reecrit vault_episodes.jsonl EN
+                # ENTIER a chaque collecte (write_text) : son debut ne correspond jamais au prefixe scelle, et chaque
+                # passage le rescellait en entier -- 60 % des lignes fills_backfill du coffre etaient en double (mesure :
+                # tools/auditer_doublons_coffre.py). Un ruban en clair qui n'est PAS remis a zero apres scellement
+                # (hors FLUX_VIVANTS) et dont le prefixe n'est plus reconnu est traite comme une rotation.
+                if (not debut and not rattrapage and (source.suffix == ".gz" or source.name not in FLUX_VIVANTS)
+                        and (_cle_fichier(source) in a_prouver_gz or _prefixes_connus(source, etat, version))):
+                    # 23/11/2026 -- ROTATION D'UN RUBAN SCELLE AU FIL DE L'EAU, PREFIXE NON RECONNU. Sans cela,
+                    # elle se rescellait EN ENTIER (vu le 23/11 : 148 526 micro-BBO et 784 648 BBO redeposes). Les
+                    # identites du coffre sur SA periode sont prechargees : seules les lignes absentes entrent.
+                    connues = _precharger_identites_fenetre(coffre, source, famille, deja_vus, shards_fenetre)
+                    if connues is None:
+                        _log(log, "        [!] archive a prouver sans aucun horodatage lisible : je ne depose RIEN "
+                                  "(sinon elle entrerait en entier) ; elle reste a prouver.")
+                        faits_octets += taille
+                        continue
+                    _log(log, f"        rotation d'un ruban deja scelle, prefixe non reconnu : {connues:,} identite(s) "
+                              f"du coffre prechargee(s) sur sa periode ; seules les lignes absentes sont deposees.")
                 if debut:
                     _log(log, f"        ruban deja certifie jusqu'a {debut / 1048576:.1f} Mo : "
                               f"je ne scelle que la suite.")

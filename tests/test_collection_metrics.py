@@ -1,8 +1,51 @@
 from __future__ import annotations
 
+import hashlib
 import json
 
 from tools import build_collection_metrics as metrics
+
+
+def test_collection_metrics_binds_index_and_rejects_stale_derived_view(
+    tmp_path, monkeypatch
+):
+    catalog = tmp_path / "catalog"
+    campaigns = catalog / "campaigns"
+    campaigns.mkdir(parents=True)
+    index = catalog / "DATA_INDEX.json"
+    index.write_text(json.dumps({"shard_count": 2}), encoding="utf-8")
+    data_metrics = catalog / "DATA_METRICS.json"
+    data_metrics.write_text(
+        json.dumps({
+            "source_index_sha256": hashlib.sha256(index.read_bytes()).hexdigest(),
+            "totals": {
+                "TOTAL_TRADES_COLLECTED": 0,
+                "TOTAL_TRADES_REPLAYABLE": 0,
+                "TOTAL_TRADES_SAFE": 0,
+                "TOTAL_UNIQUE_TRADES_GLOBAL": None,
+                "GLOBAL_UNIQUE_TRADES_COVERAGE_COMPLETE": False,
+                "TOTAL_SHARDS": 2,
+            },
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(metrics, "CAMPAIGNS", campaigns)
+    monkeypatch.setattr(metrics, "INDEX", index)
+    monkeypatch.setattr(metrics, "DATA_METRICS", data_metrics)
+    monkeypatch.setattr(metrics, "OUTPUT", catalog / "COLLECTION_METRICS.json")
+
+    out = metrics.build()
+
+    assert out["source_index_sha256"] == hashlib.sha256(index.read_bytes()).hexdigest()
+    assert out["indexed_dataset"]["indexed_shards"] == 2
+
+    index.write_text(json.dumps({"shard_count": 3}), encoding="utf-8")
+    try:
+        metrics.build()
+    except ValueError as exc:
+        assert str(exc) == "COLLECTION_METRICS_STALE_INDEX_SHA"
+    else:  # pragma: no cover - protects the fail-closed contract
+        raise AssertionError("stale DATA_METRICS was accepted")
 
 
 def test_instant_collection_metrics_counts_durable_copy_vault_fills(tmp_path, monkeypatch):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -17,7 +18,13 @@ class SafetyAuditResult:
     secret_findings: list[SecretFinding] = field(default_factory=list)
 
 
-TEXT_SUFFIXES = {".py", ".toml", ".yaml", ".yml", ".env", ".example", ".txt"}
+TEXT_SUFFIXES = {
+    ".py", ".toml", ".yaml", ".yml", ".env", ".example", ".txt",
+    ".cmd", ".bat", ".ps1", ".sh", ".js", ".mjs", ".cjs", ".ts",
+}
+OPERATIONAL_SUFFIXES = {
+    ".py", ".cmd", ".bat", ".ps1", ".sh", ".js", ".mjs", ".cjs", ".ts",
+}
 EXCLUDED_DIRS = {
     ".git",
     ".venv",
@@ -47,8 +54,15 @@ EXCLUDED_RELATIVE_PREFIXES = {
     ("tools", "python"),
 }
 NON_OPERATIONAL_POLICY_FILES = {
+    "audit_report.py",
+    "cloturer_291.py",
+    "etat_112_145.py",
     "mainnet_guard.py",
     "safety_audit.py",
+    "securite_18h.py",
+    "trier_h46_h89.py",
+    "trier_h90_h180.py",
+    "valider_chaine_bout_en_bout.py",
     "validation_portable.py",
 }
 
@@ -94,6 +108,47 @@ def _is_git_repo(root: Path) -> bool:
     return (root / ".git").exists()
 
 
+def _iter_operational_files(root: Path) -> list[Path]:
+    """Enumerate executable/source surfaces without descending into payloads."""
+    root = Path(root).resolve()
+    files: list[Path] = []
+    for relative_root in ("src", "hyper_smart_observer", "tools"):
+        base = root / relative_root
+        if not base.is_dir():
+            continue
+        for dirpath, dirnames, filenames in os.walk(base, topdown=True):
+            current = Path(dirpath)
+            dirnames[:] = [
+                name
+                for name in dirnames
+                if name not in EXCLUDED_DIRS
+                and not name.startswith(EXCLUDED_DIR_PREFIXES)
+                and not _is_excluded_project_path(root, current / name)
+            ]
+            for name in filenames:
+                path = current / name
+                if path.suffix in OPERATIONAL_SUFFIXES:
+                    files.append(path)
+    return files
+
+
+def _active_self_hosted_workflows(root: Path) -> list[Path]:
+    """Return workflows that can actually select a self-hosted runner."""
+    workflows = root / ".github" / "workflows"
+    if not workflows.is_dir():
+        return []
+    findings: list[Path] = []
+    for path in sorted((*workflows.glob("*.yml"), *workflows.glob("*.yaml"))):
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            findings.append(path)
+            continue
+        if re.search(r"(?mi)^\s*runs-on\s*:\s*.*\bself-hosted\b", text):
+            findings.append(path)
+    return findings
+
+
 def _git_tracks_env(root: Path) -> bool:
     if not _is_git_repo(root):
         return False
@@ -128,7 +183,7 @@ def run_safety_audit(root: str | Path = ".") -> SafetyAuditResult:
 
     source_files = [
         path
-        for path in (project_root / "src").rglob("*.py")
+        for path in _iter_operational_files(project_root)
         if path.name not in NON_OPERATIONAL_POLICY_FILES
     ]
     source_text = "\n".join(path.read_text(encoding="utf-8", errors="ignore") for path in source_files)
@@ -139,6 +194,13 @@ def run_safety_audit(root: str | Path = ".") -> SafetyAuditResult:
         f'"{forbidden_exchange_path}"' not in source_text
         and f"'{forbidden_exchange_path}'" not in source_text
     )
+    self_hosted = _active_self_hosted_workflows(project_root)
+    checks["no_self_hosted_workflows"] = not self_hosted
+    if self_hosted:
+        findings.append(
+            "active workflow selects self-hosted runner: "
+            + ", ".join(str(path.relative_to(project_root)) for path in self_hosted)
+        )
 
     checks["live_executor_disabled_exists"] = (
         project_root / "src" / "hl_observer" / "execution" / "live_executor_disabled.py"

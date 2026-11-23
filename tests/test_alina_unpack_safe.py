@@ -68,8 +68,10 @@ def test_sans_place_on_bascule_en_SCEAU_SEUL_au_lieu_de_refuser(tmp_path, monkey
 
     rapport = _expand(tmp_path)
 
-    assert rapport["status"] == "SAFE_UNPACK_COMPLETE"
+    assert rapport["status"] == "SAFE_SEAL_CERTIFICATION_COMPLETE"
     assert rapport["mode"] == "SEAL_ONLY"
+    assert rapport["physical_jsonl_available"] is False
+    assert rapport["streamable_gzip_available"] is True
     assert "ALINA_UNPACK_SEAL_ONLY_FALLBACK" in capsys.readouterr().err
 
 
@@ -105,11 +107,12 @@ def test_la_reprise_en_sceau_seul_ne_met_PAS_le_sceau_en_quarantaine(tmp_path, m
     _disque_insuffisant(monkeypatch)
     _expand(tmp_path)
     rapport = _expand(tmp_path)   # second passage : il doit REUTILISER
-    assert rapport["status"] == "SAFE_UNPACK_COMPLETE"
+    assert rapport["status"] == "SAFE_SEAL_CERTIFICATION_COMPLETE"
     quarantaine = tmp_path / "quarantine"
     orphelins = [f for f in quarantaine.rglob("*") if f.is_file()] if quarantaine.exists() else []
     assert not orphelins, f"le sceau a ete mis en quarantaine : {orphelins}"
     assert rapport["reused_verified"] >= 1, "le second passage doit REUTILISER le sceau"
+    assert rapport["physical_jsonl_available"] is False
     assert rapport["quarantined_unsealed_outputs"] == 0
     assert rapport["certified_shards"] >= 1
 

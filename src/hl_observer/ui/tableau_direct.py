@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any
 from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
+
 RACINE = Path(__file__).resolve().parents[3]
 _CACHE: dict[str, Any] = {"t": 0.0, "etat": None}
 CACHE_S = 2.5

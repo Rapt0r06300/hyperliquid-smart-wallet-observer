@@ -186,6 +186,132 @@ def test_une_rotation_ancienne_est_reconnue_meme_apres_douze_rotations(tmp_path)
     assert _deposes(tmp_path) == avant                                    # reconnue : rien de redéposé
 
 
+def test_une_rotation_au_prefixe_non_reconnu_ne_redepose_que_ses_lignes_absentes(tmp_path):
+    """23/11/2026 : une rotation dont le préfixe n'était plus reconnu se rescellait EN ENTIER (148 526 micro-BBO,
+    784 648 BBO redéposés). Ses identités sont désormais cherchées au coffre sur SA période."""
+    import sceller_coffre_local as S
+
+    vivant = tmp_path / "runtime" / "data" / "asset_ctx_tape.jsonl"
+    lignes = [{"coin": "ETH", "ts_ms": NOW - 10_000 + i, "mark": 2000.0 + i} for i in range(40)]
+    vivant.parent.mkdir(parents=True)
+    vivant.write_text("".join(json.dumps(x) + "\n" for x in lignes), encoding="utf-8")
+    assert S.main(["--root", str(tmp_path), "--now-ms", str(NOW), "--nom", "asset_ctx_tape.jsonl"]) == 0
+    assert _deposes(tmp_path) == 40
+    nouvelles = [{"coin": "ETH", "ts_ms": NOW - 500 + i, "mark": 3000.0 + i} for i in range(5)]
+    rotation = vivant.with_name(f"asset_ctx_tape_{NOW}000000.jsonl.gz")             # horodatage de rotation (ns)
+    with gzip.open(rotation, "wt", encoding="utf-8") as g:                            # mêmes enregistrements, AUTRES
+        g.writelines(json.dumps(x, indent=None, separators=(", ", ":  ")) + "\n"       # octets : préfixe non reconnu
+                     for x in lignes + nouvelles)
+    assert S.main(["--root", str(tmp_path), "--now-ms", str(NOW), "--nom", rotation.name]) == 0
+    assert _deposes(tmp_path) == 45                                                   # 5 nouvelles, aucun doublon
+
+
+def test_une_archive_sans_horodatage_qui_couvre_des_mois_ne_redepose_rien(tmp_path):
+    """23/11/2026 : « première ligne + 6 h » comme période supposée a laissé hors du préchargement des épisodes
+    étalés sur des mois (16 093 doublons). La période se lit sur TOUTES les lignes."""
+    import sceller_coffre_local as S
+
+    vivant = tmp_path / "runtime" / "data" / "asset_ctx_tape.jsonl"
+    jour = 86_400_000
+    lignes = [{"coin": "ETH", "ts_ms": NOW - 60 * jour + i * jour, "mark": 2000.0 + i} for i in range(60)]  # 2 mois
+    vivant.parent.mkdir(parents=True)
+    for i in range(0, 60, 10):                                          # scellées en 6 lots (6 shards, 6 périodes)
+        vivant.write_text("".join(json.dumps(x) + "\n" for x in lignes[i:i + 10]), encoding="utf-8")
+        assert S.main(["--root", str(tmp_path), "--now-ms", str(NOW), "--nom", "asset_ctx_tape.jsonl"]) == 0
+    assert _deposes(tmp_path) == 60
+    session = tmp_path / "runtime" / "archive" / "session_20261109_100000" / "asset_ctx_tape.jsonl.gz"
+    session.parent.mkdir(parents=True)
+    with gzip.open(session, "wt", encoding="utf-8") as g:              # même contenu, autres octets, sans horodatage
+        g.writelines(json.dumps(x, separators=(", ", ":  ")) + "\n" for x in lignes)
+    assert S.main(["--root", str(tmp_path), "--now-ms", str(NOW), "--archives", "--nom", session.name]) == 0
+    assert _deposes(tmp_path) == 60                                     # rien de redéposé
+
+
+def _fills_bruts(debut: int, n: int, decalage: int = 0) -> list[dict]:
+    return [{"vault": "0x" + "1" * 40, "coin": "ETH", "px": 2000.0 + i, "sz": 1.0, "side": "B", "dir": "Open Long",
+             "time": NOW - 10_000 + debut + i, "tid": decalage + debut + i, "hash": f"0x{decalage + debut + i:064x}",
+             "oid": decalage + debut + i, "startPosition": "0.0"} for i in range(n)]
+
+
+def _rotation_reecrite(vivant: Path, lignes: list[dict]) -> Path:
+    rotation = vivant.with_name(f"{vivant.name[:-6]}_{NOW}000000.jsonl.gz")
+    with gzip.open(rotation, "wt", encoding="utf-8") as g:                 # mêmes enregistrements, AUTRES octets
+        g.writelines(json.dumps(x, separators=(", ", ":  ")) + "\n" for x in lignes)
+    return rotation
+
+
+def test_une_rotation_datee_par_le_champ_brut_time_se_prouve_quand_meme(tmp_path):
+    """23/11/2026 : l'horloge BRUTE des fills Hyperliquid s'appelle ``time`` ; le préchargement lisait les seuls noms
+    normalisés, trouvait « aucune période » et redéposait tout. Il date désormais la ligne CERTIFIÉE."""
+    import sceller_coffre_local as S
+
+    vivant = tmp_path / "runtime" / "data" / "vault_fills.jsonl"
+    vivant.parent.mkdir(parents=True)
+    anciennes = _fills_bruts(0, 40)
+    vivant.write_text("".join(json.dumps(x) + "\n" for x in anciennes), encoding="utf-8")
+    assert S.main(["--root", str(tmp_path), "--now-ms", str(NOW), "--nom", vivant.name]) == 0
+    assert _deposes(tmp_path) == 40
+    rotation = _rotation_reecrite(vivant, anciennes + _fills_bruts(40, 5))
+    assert S.main(["--root", str(tmp_path), "--now-ms", str(NOW), "--nom", rotation.name]) == 0
+    assert _deposes(tmp_path) == 45                                         # 5 nouvelles, aucun doublon
+
+
+def test_une_archive_a_prouver_sans_horloge_lisible_ne_depose_rien(tmp_path, monkeypatch):
+    """Échec FERMÉ : sans période lisible, rien n'est préchargé ; déposer ferait entrer l'archive EN ENTIER."""
+    import sceller_coffre_local as S
+
+    vivant = tmp_path / "runtime" / "data" / "vault_fills.jsonl"
+    vivant.parent.mkdir(parents=True)
+    anciennes = _fills_bruts(0, 40)
+    vivant.write_text("".join(json.dumps(x) + "\n" for x in anciennes), encoding="utf-8")
+    assert S.main(["--root", str(tmp_path), "--now-ms", str(NOW), "--nom", vivant.name]) == 0
+    rotation = _rotation_reecrite(vivant, anciennes + _fills_bruts(40, 5))
+    monkeypatch.setattr(S, "_horodatage_large", lambda rec, famille: None)
+    assert S.main(["--root", str(tmp_path), "--now-ms", str(NOW), "--nom", rotation.name]) == 0
+    assert _deposes(tmp_path) == 40                                         # rien de déposé : reste à prouver
+    etat = json.loads((tmp_path / "runtime/coffre_certifie/SOURCES_TRAITEES.json").read_text(encoding="utf-8"))
+    assert not [k for k in etat if rotation.name in k]                      # jamais marquée traitée
+
+
+def test_une_archive_a_prouver_sans_historique_de_prefixe_est_prouvee_pas_rescellee(tmp_path):
+    """L'état du certificateur a perdu la trace du ruban (aucun préfixe connu) : une session antérieure à la règle de
+    l'archiveur, que le recensement donne « à prouver », ne doit pas entrer EN ENTIER sous ``--recensement``."""
+    import sceller_coffre_local as S
+
+    vivant = tmp_path / "runtime" / "data" / "asset_ctx_tape.jsonl"
+    vivant.parent.mkdir(parents=True)
+    lignes = [{"coin": "ETH", "ts_ms": NOW - 10_000 + i, "mark": 2000.0 + i} for i in range(60)]
+    vivant.write_text("".join(json.dumps(x) + "\n" for x in lignes), encoding="utf-8")
+    assert S.main(["--root", str(tmp_path), "--now-ms", str(NOW), "--nom", vivant.name]) == 0
+    assert _deposes(tmp_path) == 60
+    vivant.unlink()                                                         # le ruban a tourné
+    (tmp_path / "runtime/coffre_certifie/SOURCES_TRAITEES.json").write_text("{}", encoding="utf-8")   # trace perdue
+    session = tmp_path / "runtime" / "archive" / "session_20261109_100000" / "asset_ctx_tape.jsonl.gz"
+    session.parent.mkdir(parents=True)
+    with gzip.open(session, "wt", encoding="utf-8") as g:
+        g.writelines(json.dumps(x, separators=(", ", ":  ")) + "\n" for x in lignes + [
+            {"coin": "ETH", "ts_ms": NOW - 100, "mark": 9.0}])
+    assert S.main(["--root", str(tmp_path), "--now-ms", str(NOW), "--recensement"]) == 0
+    assert _deposes(tmp_path) == 61                                         # la seule ligne absente
+
+
+def test_un_ruban_reecrit_en_entier_ne_redepose_que_ses_lignes_nouvelles(tmp_path):
+    """23/11/2026 (soir) : tools/backfill_vault_fills.py REECRIT vault_episodes.jsonl a chaque collecte ; chaque
+    passage le rescellait en entier (60 % des fills_backfill du coffre en double)."""
+    import sceller_coffre_local as S
+
+    vivant = tmp_path / "runtime" / "data" / "vault_fills.jsonl"
+    vivant.parent.mkdir(parents=True)
+    anciennes = _fills_bruts(0, 40)
+    vivant.write_text("".join(json.dumps(x) + "\n" for x in anciennes), encoding="utf-8")
+    assert S.main(["--root", str(tmp_path), "--now-ms", str(NOW), "--nom", vivant.name]) == 0
+    assert _deposes(tmp_path) == 40
+    reecrit = _fills_bruts(40, 5) + list(reversed(anciennes))            # autre ordre : le prefixe ne colle plus
+    vivant.write_text("".join(json.dumps(x) + "\n" for x in reecrit), encoding="utf-8")
+    assert S.main(["--root", str(tmp_path), "--now-ms", str(NOW), "--nom", vivant.name]) == 0
+    assert _deposes(tmp_path) == 45                                       # 5 nouvelles, aucun doublon
+
+
 def test_un_ruban_modifie_recemment_ou_trop_petit_reste_en_clair(tmp_path):
     import sceller_coffre_local as S
 

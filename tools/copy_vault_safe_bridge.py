@@ -378,19 +378,34 @@ def _book(record: dict[str, Any]) -> dict[str, Any]:
 
 def _safe_registry_rows(
     recovery: Path, catalog_path: Path,
-) -> tuple[str, list[tuple[str, int, str, tuple[int, int, int, int]]]]:
+) -> tuple[str, list[tuple[str, int, str, tuple[int, int, int, int]]], str]:
     restore = _read_json(recovery / "RESTORE_REPORT.json")
     unpack = _read_json(recovery / "UNPACK_REPORT.json")
     binding = restore.get("catalog_verification")
     classification = restore.get("classification")
     catalog = binding.get("source_index_sha256") if isinstance(binding, dict) else None
+    unpack_mode = str(unpack.get("mode") or "FULL_JSONL")
+    if unpack_mode == "FULL_JSONL":
+        unpack_contract_ok = unpack.get("status") == "SAFE_UNPACK_COMPLETE"
+        source_read_mode = "JSONL"
+    elif unpack_mode == "SEAL_ONLY":
+        unpack_contract_ok = (
+            unpack.get("status") == "SAFE_SEAL_CERTIFICATION_COMPLETE"
+            and unpack.get("physical_jsonl_available") is False
+            and unpack.get("streamable_gzip_available") is True
+            and unpack.get("replay_read_mode") == "GZIP_STREAM"
+        )
+        source_read_mode = "GZIP_STREAM"
+    else:
+        unpack_contract_ok = False
+        source_read_mode = "UNKNOWN"
     if (
         restore.get("repository") != "Rapt0r06300/hyperliquid-smart-wallet-observer"
         or restore.get("status") != "REPLAY_READY_COMPLETE"
         or not isinstance(classification, dict)
         or classification.get("materialization_complete") is not True
         or classification.get("failures") not in (None, [])
-        or unpack.get("status") != "SAFE_UNPACK_COMPLETE"
+        or not unpack_contract_ok
         or unpack.get("catalog_index_sha256") != catalog
         or not isinstance(catalog, str) or len(catalog) != 64
     ):
@@ -451,7 +466,7 @@ def _safe_registry_rows(
     return catalog, [
         (str(row[0]), int(row[1]), str(row[2]), tuple(int(v) for v in row[3:]))
         for row in raw
-    ]
+    ], source_read_mode
 
 
 def build_safe_copy_workspace(
@@ -472,7 +487,9 @@ def build_safe_copy_workspace(
         if catalog_path is not None
         else root / "catalog" / "DATA_INDEX.json"
     )
-    catalog, registry = _safe_registry_rows(recovery, active_catalog_path)
+    catalog, registry, source_read_mode = _safe_registry_rows(
+        recovery, active_catalog_path
+    )
     parent = root / "runtime" / "research_lab" / "copy_vault_safe"
     if parent.is_symlink():
         raise SafeBridgeError("unsafe Copy-Vault workspace parent")
@@ -687,7 +704,12 @@ def build_safe_copy_workspace(
         provenance = {
             "schema": bridge_schema,
             "git_sha": git_head_sha,
-            "source_kind": "alina-sync-safe-unpacked",
+            "source_kind": (
+                "alina-sync-safe-unpacked"
+                if source_read_mode == "JSONL"
+                else "alina-sync-safe-seals"
+            ),
+            "source_read_mode": source_read_mode,
             "source_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
             "catalog_sha256": catalog,
             "selection_digest": digest,
@@ -695,6 +717,7 @@ def build_safe_copy_workspace(
             "verified_safe_input_shards": len(inputs),
             "selected_raw_bytes": sum(row["admitted_jsonl_bytes"] for row in admitted_inputs),
             "verified_unpacked_bytes": sum(int(row["jsonl_bytes"]) for row in inputs),
+            "verified_streamed_bytes": sum(int(row["jsonl_bytes"]) for row in inputs),
             "safe_input_shards": inputs,
             "input_decisions": decisions,
             "outputs": outputs,
@@ -704,6 +727,7 @@ def build_safe_copy_workspace(
             "snapshot_fills_train_only": True,
             "snapshot_fills_excluded_from_forward": True,
             "economic_proof": False,
+            "source_read_mode": source_read_mode,
         }
         provenance_path = proof_dir / "SELECTION_PROVENANCE.json"
         provenance_path.write_text(
@@ -726,6 +750,7 @@ def build_safe_copy_workspace(
             "status": "SAFE_COPY_WORKSPACE_READY", "workspace": str(final),
             "catalog_sha256": catalog, "selected_shards": len(admitted_inputs),
             "counts": counts, "outputs": outputs, "input_decisions": decisions,
+            "source_read_mode": source_read_mode,
             "economic_proof": False,
         }
     except Exception as exc:

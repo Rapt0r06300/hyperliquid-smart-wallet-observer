@@ -1,4 +1,7 @@
 """Static launcher contract: a Windows fresh clone must support built-in recovery."""
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 
@@ -30,3 +33,21 @@ def test_alina_restore_alias_preserves_arguments_and_exit_status():
     assert 'call "%ALINA_PROJECT_ROOT%\\tools\\launchers\\RESTORE_ALINA.cmd" %*' in alias
     assert "exit /b %ERRORLEVEL%" in alias
     assert "tools\\restore_alina.py" not in alias
+
+
+def test_restore_help_does_not_require_catalog_runtime(tmp_path: Path):
+    """The minimal Windows launcher sandbox must support ``--help`` offline."""
+    source = Path(__file__).resolve().parents[1] / "tools" / "restore_alina.py"
+    target = tmp_path / "restore_alina.py"
+    shutil.copy2(source, target)
+
+    result = subprocess.run(
+        [sys.executable, str(target), "--help"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "usage:" in result.stdout.lower()

@@ -262,6 +262,8 @@ def expand_safe_corpus(
         selected_targets.add(target)
         if target.is_symlink() or seal.is_symlink():
             raise SafeUnpackError(f"symlinked unpack target: {target}")
+        existing_seal_verified = False
+        existing_seal_only = False
         # MODE SCEAU SEUL : le sceau existe SANS son JSONL, et c est normal -- c est tout
         # l interet. Les controles ci-dessous supposent les deux ensemble ; appliques tels
         # quels, ils mettraient le sceau en QUARANTAINE, donc detruiraient la preuve.
@@ -283,9 +285,15 @@ def expand_safe_corpus(
             if (preuve.get("schema") != "alina.safe_jsonl_proof.v1"
                     or preuve.get("compressed_sha256") != compressed_sha):
                 raise SafeUnpackError(f"stale extracted proof: {seal}")
-            reused += 1
-            continue
-        if target.exists() != seal.exists():
+            if sceaux_seuls:
+                reused += 1
+                continue
+            # A previous seal-only run is not a physical extraction. Keep the
+            # seal as an independent certificate and rebuild the JSONL now
+            # that the caller explicitly requests/has room for materialization.
+            existing_seal_verified = True
+            existing_seal_only = True
+        if target.exists() != seal.exists() and not existing_seal_verified:
             # Interrupted crashes can occur between renaming a JSONL and
             # publishing its independent hash receipt. Never trust or delete
             # this unsealed output: preserve it and rebuild from the SHA-bound
@@ -307,25 +315,32 @@ def expand_safe_corpus(
             found.replace(quarantine_path)
             quarantined_unsealed += 1
         if target.exists() or seal.exists():
-            if not target.is_file() or not seal.is_file():
+            if existing_seal_only:
+                # A valid seal without a JSONL is the normal result of a
+                # seal-only run.  Keep it planned: if there is room we will
+                # materialize the JSONL; if not, the post-plan fallback will
+                # count it as a verified reuse instead of quarantining it.
+                pass
+            elif not target.is_file() or not seal.is_file():
                 raise SafeUnpackError(f"unsealed previously extracted file: {target}")
-            try:
-                proof = json.loads(seal.read_text(encoding="utf-8"))
-            except (OSError, UnicodeError, ValueError) as exc:
-                raise SafeUnpackError(f"unreadable extracted proof: {target}") from exc
-            if (proof.get("compressed_sha256") != compressed_sha
-                    or proof.get("jsonl_sha256") != _hash(target)
-                    or proof.get("jsonl_bytes") != target.stat().st_size):
-                raise SafeUnpackError(f"previous extracted file changed: {target}")
-            reused += 1
-            continue
+            else:
+                try:
+                    proof = json.loads(seal.read_text(encoding="utf-8"))
+                except (OSError, UnicodeError, ValueError) as exc:
+                    raise SafeUnpackError(f"unreadable extracted proof: {target}") from exc
+                if (proof.get("compressed_sha256") != compressed_sha
+                        or proof.get("jsonl_sha256") != _hash(target)
+                        or proof.get("jsonl_bytes") != target.stat().st_size):
+                    raise SafeUnpackError(f"previous extracted file changed: {target}")
+                reused += 1
+                continue
         with source.open("rb") as stream:
             stream.seek(-4, 2)
             announced_bytes = int.from_bytes(stream.read(4), "little")
         if announced_bytes == 0:
             raise SafeUnpackError(f"invalid or ambiguous gzip ISIZE: {source}")
         required_bytes += announced_bytes
-        planned.append((source, target, seal, announced_bytes, compressed_sha))
+        planned.append((source, target, seal, announced_bytes, compressed_sha, existing_seal_only))
     # Old previously-expanded SAFE files must never pollute a changed working
     # set. Quarantine only sealed byte-identical outputs; never destroy them.
     stale_outputs = 0
@@ -374,13 +389,18 @@ def expand_safe_corpus(
             "raison=place_insuffisante_preuves_conservees",
             file=sys.stderr, flush=True,
         )
+    if sceaux_seuls:
+        # Valid seal-only outputs are already certified.  Do not re-read and
+        # rewrite their archives merely to produce the same seal again.
+        reused += sum(1 for item in planned if item[5])
+        planned = [item for item in planned if not item[5]]
     print(
         f"ALINA_UNPACK_START files={len(planned)} reused={reused} bytes={required_bytes}",
         file=sys.stderr, flush=True,
     )
     created = 0
     written_bytes = 0
-    for source, target, seal, announced_bytes, compressed_sha in planned:
+    for source, target, seal, announced_bytes, compressed_sha, _existing_seal_only in planned:
         target.parent.mkdir(parents=True, exist_ok=True)
         tmp = target.with_suffix(".jsonl.partial")
         if tmp.is_symlink():
@@ -436,10 +456,18 @@ def expand_safe_corpus(
                 f"ALINA_UNPACK_PROGRESS={created}/{len(planned)} bytes={written_bytes}",
                 file=sys.stderr, flush=True,
             )
+    physical_jsonl_available = not sceaux_seuls
     result = {
         "schema": "alina.safe_unpack_report.v1",
-        "status": "SAFE_UNPACK_COMPLETE",
+        "status": (
+            "SAFE_SEAL_CERTIFICATION_COMPLETE"
+            if sceaux_seuls
+            else "SAFE_UNPACK_COMPLETE"
+        ),
         "mode": "SEAL_ONLY" if sceaux_seuls else "FULL_JSONL",
+        "physical_jsonl_available": physical_jsonl_available,
+        "streamable_gzip_available": True,
+        "replay_read_mode": "GZIP_STREAM" if sceaux_seuls else "JSONL",
         "catalog_index_sha256": catalog_sha256,
         "selection_scope": selection_scope,
         "selection_families": catalog_families,
