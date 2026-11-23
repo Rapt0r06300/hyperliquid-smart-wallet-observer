@@ -21,6 +21,7 @@ import os
 import time
 from pathlib import Path
 from typing import Any
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 #: Pas de chaque série, en millisecondes. Le funding est horaire.
 PAS_MS = {"5m": 300_000, "1h": 3_600_000, "4h": 14_400_000, "1d": 86_400_000, "funding": 3_600_000}
@@ -104,8 +105,8 @@ def couverture_du_coffre(root: Path, *, cache: bool = True) -> dict[str, dict[st
             tmp.write_text(json.dumps({"_schema": SCHEMA_CACHE, "maj_ms": int(time.time() * 1000), "shards": neuf}),
                            encoding="utf-8")
             os.replace(tmp, chemin)
-        except OSError:
-            pass
+        except OSError as exc:
+            _noter_echec("ops/rattrapage_coffre.py:cache", exc)
     return total
 
 

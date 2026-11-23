@@ -28,6 +28,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Iterator
 
 from hl_observer.datasets.coffre_certifie import detecter_famille, motif_non_certifie, sniffer_famille
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 EXTENSIONS_DONNEES = (".jsonl", ".jsonl.gz", ".ndjson", ".csv", ".csv.gz", ".parquet", ".lz4", ".zst", ".npz",
                       ".feather", ".arrow", ".sqlite", ".db")
@@ -184,8 +185,8 @@ def verdict_scellement(chemin: Path, rel: str, taille: int, coffre: Coffre, *, v
                 d = json.loads(idx.read_text(encoding="utf-8"))
                 if (int(d["taille_clair"]), str(d["sha256_clair"])) in coffre.prefixes.get(_tronc(nom), set()):
                     return "SCELLE", "archive compressée : son contenu est un préfixe scellé"
-            except (OSError, ValueError, KeyError):
-                pass
+            except (OSError, ValueError, KeyError) as exc:
+                _noter_echec("datasets/recensement_donnees.py:coffre_prefix", exc)
         if e and int(e.get("taille", -1)) == taille:
             return "SCELLE", "archive scellée telle quelle"
         if e:

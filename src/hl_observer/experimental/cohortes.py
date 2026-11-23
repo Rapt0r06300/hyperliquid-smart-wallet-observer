@@ -42,6 +42,7 @@ from hl_observer.experimental.signaux import (
     _snapshots_bbo,
     _vaults_retenus,
 )
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 FENETRE_AGG_MS = 5_000.0          # on agrège les OPEN/ADD d'un (vault,coin) sur 5 s
 NOTIONAL_MIN_USD = 8.0
@@ -321,8 +322,8 @@ def _cfg_defaut(coh: Cohorte, root: Path | None = None) -> dict:
         try:
             if auto.get("edge_source") == "FANTOME_LCB" and float(auto.get("edge_brut_bps")) > 0:
                 cfg["edge_brut_bps"] = float(auto["edge_brut_bps"])
-        except (TypeError, ValueError):
-            pass
+        except (TypeError, ValueError) as exc:
+            _noter_echec("experimental/cohortes.py:cfg_defaut.edge_brut_bps", exc)
     return cfg
 
 

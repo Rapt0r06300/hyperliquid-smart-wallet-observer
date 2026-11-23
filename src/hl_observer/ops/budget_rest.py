@@ -20,6 +20,7 @@ import threading
 import time
 from collections import deque
 from pathlib import Path
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 RACINE = Path(__file__).resolve().parents[3]
 FICHIER = Path("runtime") / "data" / "rest_budget.json"
@@ -98,5 +99,5 @@ def publier(root: Path, source: str, poids_derniere_minute: int) -> None:
         tmp = chemin.with_name(f"{chemin.name}.{os.getpid()}.tmp")
         tmp.write_text(json.dumps(cur, ensure_ascii=False, indent=2), encoding="utf-8")
         os.replace(tmp, chemin)
-    except OSError:
-        pass
+    except OSError as exc:
+        _noter_echec("ops/budget_rest.py:publier", exc)

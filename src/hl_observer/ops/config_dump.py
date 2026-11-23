@@ -48,7 +48,6 @@ def dump_config(root: str | Path | None = None) -> dict:
     out_path = out_dir / "config_dump.json"
     try:
         out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-        logger.info("Config dump: %d HYPERSMART_ vars -> %s", len(config), out_path)
     except OSError as exc:
         logger.warning("Config dump failed: %s", exc)
 

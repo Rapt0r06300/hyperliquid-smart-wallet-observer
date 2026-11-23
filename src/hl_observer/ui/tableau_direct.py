@@ -13,6 +13,7 @@ import json
 import time
 from pathlib import Path
 from typing import Any
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 RACINE = Path(__file__).resolve().parents[3]
 _CACHE: dict[str, Any] = {"t": 0.0, "etat": None}
@@ -100,8 +101,8 @@ def signaux(root: Path, n: int = 12) -> dict:
         rec["d"][x.get("cohorte")] = x.get("decision")
         try:
             rec["usd"] += abs(float(x.get("sz") or 0)) * float(x.get("px") or 0) / 3.0   # 3 lignes par fill (une par compte)
-        except (TypeError, ValueError):
-            pass
+        except (TypeError, ValueError) as exc:
+            _noter_echec("ui/tableau_direct.py:signaux.notional", exc)
     motifs = collections.Counter(str(v["d"].get("RAW_PROBE")) for v in par_ordre.values()
                                  if str(v["x"].get("dir", "")).startswith("Open"))
     derniers = []
@@ -194,8 +195,8 @@ def ameliorations(root: Path) -> list[dict]:
     for f in ("economic-native-venues.log", "economic-bbo-collector.log", "economic-copy-vault-checkpoints.log"):
         try:
             vies += (root / "runtime" / "logs" / f).read_text(encoding="utf-8", errors="ignore").count("[vie]")
-        except OSError:
-            pass
+        except OSError as exc:
+            _noter_echec("ui/tableau_direct.py:ameliorations.vies", exc)
 
     def item(titre, detail, ok, preuve):
         return {"titre": titre, "detail": detail, "actif": ok, "preuve": preuve}
