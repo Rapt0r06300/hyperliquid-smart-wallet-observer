@@ -29,6 +29,7 @@ def test_faisabilite_nulle_donne_une_priorite_nulle_et_classement_stable() -> No
 
 def test_chaque_mecanisme_reel_a_une_fiche_complete_et_un_payeur() -> None:
     for s in P.classement():
-        assert "NON_RENSEIGNE" not in (s["capacite_100_usd"], s["fill_utile"], s["test_de_refutation"]), s["code"]
+        assert "NON_RENSEIGNE" not in (s["capacite_100_usd"], s["fill_utile"], s["test_de_refutation"],
+                                       s["brut_mesure"], s["seuil_bps"], s["temoin_mesure"]), s["code"]
         assert "->" in s["transfert"], s["code"]
 

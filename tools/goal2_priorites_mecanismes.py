@@ -57,7 +57,7 @@ FICHE: dict[str, tuple[str, str, str]] = {
     "M13": ("dépôt <= capital ; verrou 4 j de HLP", "aucun fill : dépôt en vault", "rendement 28 j <= 0 en prospectif (17/12)"),
     "M14": (COPIE, "—", "trop rare pour un test (0,19 % des fills)"),
     "M15": ("dépôt <= capital ; frais de performance du gérant", "aucun fill : dépôt en vault", "rendement < HLP après correction de survie (V : -436 bps/28 j)"),
-    "M16": (COPIE, TAKER, "excès des gros fills <= 0 (L8 : +4,65 brut à 4 h, sous le coût)"),
+    "M16": (COPIE, TAKER, "excès des gros fills <= 0 (L8 >= 40 % : -9,12 brut à 4 h)"),
     "M17": (REPLICATION, "taker au mid + demi-écart, réalignement périodique", "net <= 0 ou quasi-inactivité à 100 USD (rejeu 23/11)"),
 }
 
@@ -80,8 +80,32 @@ MECANISMES = (
     Mecanisme("M15 sélection de vaults gagnants", "déposant tardif -> gérant (frais, survie)", "V-allocation bornés, 28 j (journal l. 443)", -436.0, (-823.0, -61.0), 0.6, "REJECTED"),
     Mecanisme("M17 réplication lente du portefeuille", "suiveur -> porteur de risque observé",
               "rejeu 23/11 à 100 USD, 127 leaders", -1.05, (-17.4, 11.4), 0.6, "REJECTED"),
-    Mecanisme("M16 taille du fill du leader", "contrepartie d'un gros ordre -> son auteur", "L8, excès 4 h brut 4,65 - coût 15", -10.35, (-19.78, -0.72), 0.6, "REJECTED"),
+    # 23/11 : corrigé -- la 1re version prenait la tranche des PLUS PETITS ordres (0-1 % du volume, +4,65) ;
+    # l'hypothèse « gros ordre informé » se lit sur la tranche >= 40 % : brut 4 h -9,12 [-36,46 ; 21,64] - coût 15.
+    Mecanisme("M16 taille du fill du leader", "contrepartie d'un gros ordre -> son auteur", "L8 tranche >= 40 %, excès 4 h - coût 15", -24.12, (-51.46, 6.64), 0.6, "REJECTED"),
 )
+
+
+#: Chiffres MESURÉS par mécanisme (registre ESSAIS.ndjson et journal) : brut, seuil de rentabilité (bps), témoin.
+MESURES: dict[str, tuple[str, str, str]] = {
+    "M1": ("tiers sup. +23,7 (excès 24 h)", "écart > 0 et net > 15", "tous les leaders +20,2 ; 200 tirages : rang 57 %"),
+    "M2": ("+5,16 à 60 s ; +0,07 à 120 s", "12 (taker aller-retour + écart)", "tous fills : copie -26,4 [-43,2 ; -3,3]"),
+    "M3": ("+9,2 [0,5 ; 17,9] à 1 h", "15", "clôture en perte PASSIVE : -7,7 [-23,6 ; 7,9]"),
+    "M4": ("-41,9 [-115,3 ; 20,7] à 24 h", "15", "jumeau : excès -59,4 ; hors vague : -23,3"),
+    "M5": ("-1,0 [-84,1 ; 74,6] à 24 h", "15 et >= vague seule", "vague seule : +72,9 [0,6 ; 149,0]"),
+    "M6": ("non encore mesuré (gel 22/11)", "gain du refus > 0", "copies non filtrées, mêmes jours"),
+    "M7": ("non encore mesuré (gel 22/11)", "gain du refus > 0", "copies non filtrées, mêmes jours"),
+    "M8": ("prix -88,4 + funding +4,5", "15", "côté payeur : net +19,1 [-67,9 ; 112,2]"),
+    "M9": ("prix -41,2 + funding +3,1", "15", "jumeau : excès -20,7 [-89,8 ; 43,6]"),
+    "M10": ("+11,8 [-0,1 ; 20,2]", "~9,5 (sortie miroir)", "jumeau : excès +14,5 [6,3 ; 20,4]"),
+    "M11": ("+4,3 [-54,8 ; 64,9] à 24 h", "15", "jumeau : excès -14,2 [-64,0 ; 38,2]"),
+    "M12": ("+13,3 [-46,3 ; 74,6] à 24 h", "15", "jumeau +26,0 : excès -12,6 [-76,7 ; 50,8]"),
+    "M13": ("+230 bps / 28 j", "0 (dépôt, pas de frais de transaction)", "vaults d'utilisateurs : -436 [-823 ; -61]"),
+    "M14": ("0,19 % des fills", "—", "—"),
+    "M15": ("-436 [-823 ; -61] bps / 28 j", "> HLP", "HLP : +230"),
+    "M16": ("-9,12 [-36,5 ; 21,6] à 4 h (>= 40 %)", "15", "tranche 0-1 % : +4,65 [-4,8 ; 14,3]"),
+    "M17": ("-1,05 bps/j du capital [-17,4 ; 11,4]", "0 (vs NO-TRADE)", "même rejeu à 350 USD : -2,58 bps/j"),
+}
 
 
 def score(m: Mecanisme) -> dict:
@@ -94,7 +118,8 @@ def score(m: Mecanisme) -> dict:
         raise ValueError(f"{m.code} : ni effet mesuré ni statut explicite")
     v = 4 * p * (1 - p)
     capacite, fill, refutation = FICHE.get(m.code.split()[0], ("NON_RENSEIGNE",) * 3)
-    return {"capacite_100_usd": capacite, "fill_utile": fill, "test_de_refutation": refutation, "code": m.code, "transfert": m.transfert, "preuve": m.preuve, "statut": m.statut,
+    brut, seuil, temoin = MESURES.get(m.code.split()[0], ("NON_RENSEIGNE",) * 3)
+    return {"brut_mesure": brut, "seuil_bps": seuil, "temoin_mesure": temoin, "capacite_100_usd": capacite, "fill_utile": fill, "test_de_refutation": refutation, "code": m.code, "transfert": m.transfert, "preuve": m.preuve, "statut": m.statut,
             "p_net_positif": round(p, 3), "valeur_info": round(v, 3), "faisabilite": m.faisabilite,
             "priorite": round(m.faisabilite * (p + v) / 2, 3)}
 
@@ -116,7 +141,8 @@ def main() -> int:
               f" {s['faisabilite']:>4.1f} {s['priorite']:>8.3f}  {s['statut']}")
     print()
     for s in classement():
-        print(f"  {s['code'].split()[0]:<4} capacité : {s['capacite_100_usd']} | fill : {s['fill_utile']} | réfutation : {s['test_de_refutation']}")
+        print(f"  {s['code'].split()[0]:<4} brut : {s['brut_mesure']} | seuil : {s['seuil_bps']} | témoin : {s['temoin_mesure']}")
+        print(f"       capacité : {s['capacite_100_usd']} | fill : {s['fill_utile']} | réfutation : {s['test_de_refutation']}")
     return 0
 
 

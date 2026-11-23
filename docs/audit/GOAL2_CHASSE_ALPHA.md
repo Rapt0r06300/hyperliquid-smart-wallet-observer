@@ -1230,3 +1230,37 @@ que de l'inactivité (≈ NO-TRADE). Correction de la carte : nouveau mécanisme
 EST contraignante à 100 USD ; elle ne l'est pas pour les copies par événement en lignes de 20 USD (M1-M12, M16).
 (Une 1re version l'attribuait par erreur à M9/M10, qui sont des copies par événement : corrigé.) Durée : 781 s.
 
+### H22 — copier en MAKER à 60 s, avec un remplissage honnête (pré-enregistrée le 23/11 à 02:17 heure de Paris)
+
+**Pourquoi.** H20 : l'avantage des ouvertures culmine vers 60 s (+5,16 bps) et meurt à 120 s ; en taker (12 bps) il est
+inaccessible. Seule voie théorique : entrer en maker (1,5 bps) plus tôt. **Ce qui la tue a priori** : la sélection
+adverse — un ordre passif est surtout rempli quand le prix va CONTRE lui.
+- Données : Tardis (carnet top-niveaux ~0,54 s + trades avec sens), 01/05, 01/06, 01/07, 01/08/2026 ; BTC, ETH, HYPE ;
+  ouvertures des leaders (291).
+- Règle : à t + 60 s, ordre limite au meilleur prix de NOTRE côté (achat au meilleur bid). **Rempli seulement si**,
+  dans les 60 s suivantes, le volume des trades agresseurs du côté opposé à notre prix ou à travers dépasse la taille
+  affichée à ce niveau au moment de poster (file d'attente devant nous). Sinon : PAS de trade (NO-TRADE).
+- Sortie : taker au mid 1 h après l'entrée ; coût = 1,5 (maker) + 4,5 (taker) + demi-écart à la sortie.
+- Mesures : taux de remplissage ; net des remplis ; markout des remplis contre celui des non-remplis (sélection
+  adverse) ; **PnL total par signal** (rempli = net, non rempli = 0) contre le taker à 120 s (H20 : −9,43).
+- **Critère (figé)** : `CANDIDAT_PROSPECTIF` si PnL total par signal IC95 > 0 ; sinon `REJECTED`.
+
+### Essai 37 — H22 mesurée : `REJECTED` au critère, et `FREEZE_EXPLORATORY`
+
+245 ouvertures mesurables, **remplissage 84,5 %** (file affichée respectée). Brut des remplis **+14,89** [−20,3 ; 41,5],
+des non-remplis −3,22 : PAS de sélection adverse visible (plutôt l'inverse). Net des remplis +8,76 ; **PnL total par
+signal +7,40 [−24,7 ; 29,1]** contre −9,43 en taker à 120 s (H20) : +17 bps en estimation centrale, mais l'IC contient 0
+(4 jours, tenue 1 h très bruitée). Gel exploratoire : `runtime/reports/copy_vault_quant_lab/goal2/FREEZE_H22.json`
+(code SHA 9d809bf4a3d7, 24 fichiers Tardis, coûts et règle figés). Aucune
+promotion. Suite : la confronter UNE fois à des données neuves (carnet et trades de nos collecteurs après le gel, ou
+jours Tardis gratuits suivants : 01/12/2026), règle inchangée.
+
+### AlinaSync : restauration, où passent les 21 minutes (mesuré le 23/11, 1 792 577 shards)
+
+Par shard, la restauration appelait `is_symlink()`, `is_file()` puis `stat()` : TROIS appels système. Mesures sur des
+shards réels : SQL ligne à ligne 35 µs (1,0 min au total ; chargement en bloc 3,6 s) ; `stat` séquentiel 272 µs (8,1 min) ;
+`stat` sur 16 fils 58 µs (1,7 min). Correction appliquée (`tools/restore_alina.py`, `_stat_identity`) : un seul `os.lstat`,
+même sémantique (lien ou non-fichier -> None). Avant/après sur 25 000 shards : **180 -> 84 µs** puis 156 -> 87 µs
+(~5,4 -> ~2,5 min pour 1,79 M), identités identiques sur 2 000 contrôles. 316 tests de restauration verts. Le
+parallélisme (encore x4,7 sur NVMe) n'est PAS appliqué : il demanderait de figer l'identité avant usage, à concevoir.
+
