@@ -5,8 +5,10 @@ effet n'est mesurable. Trois critères, tous chiffrés :
 
 * net plausible      p = Phi(moyenne / erreur_type), erreur_type = largeur de l'IC95 / (2 x 1,96) ;
 * valeur d'info      V = 4 p (1 - p)  (maximale quand l'issue est la plus incertaine) ;
-* faisabilité        F = 1 (données en main), 0,6 (données à date connue), 0,3 (collecte ou infrastructure neuve),
-                     0 (aucune source) ;
+* faisabilité        F = 1 (données VIERGES en main), 0,6 (flux prospectif automatique ou publication à date connue),
+                     0,3 (collecte ou infrastructure neuve), 0 (aucune source). 23/11 : AUCUN segment historique
+                     vierge ne reste (validation consommée par H15b) : re-tester un mécanisme sur des données déjà
+                     consultées ne vaut pas F = 1 -- la première version de cet outil le faisait, corrigé ;
 * priorité           F x (p + V) / 2.
 
 Un effet non mesuré n'est jamais favorable : p = 0,5 SEULEMENT si le statut est MORE_DATA (issue réellement
@@ -35,16 +37,16 @@ class Mecanisme:
 MECANISMES = (
     Mecanisme("M1 wallets informés", "non-informés -> informés", "H15b validation, excès 24 h", -28.7, (-77.4, 16.4), 0.3, "REJECTED"),
     Mecanisme("M2 décroissance / latence", "copieur lent -> preneur rapide", "H20 Tardis, copie à 120 s", -9.43, (-28.59, 20.64), 0.3, "REJECTED"),
-    Mecanisme("M3 pression temporaire", "impatients -> patients", "L2 rebond 1 h, brut 9,2 - coût 15", -5.8, (-14.49, 2.92), 1.0, "REJECTED"),
-    Mecanisme("M4 absorber les ventes forcées", "liquidés -> absorbeurs", "H17, excès 24 h", -59.4, (-137.0, 5.8), 1.0, "REJECTED"),
-    Mecanisme("M5 suivre la cascade", "retardataires -> suiveurs", "H19, net 24 h", -16.0, (-99.1, 59.6), 1.0, "REJECTED"),
+    Mecanisme("M3 pression temporaire", "impatients -> patients", "L2 rebond 1 h, brut 9,2 - coût 15", -5.8, (-14.49, 2.92), 0.6, "REJECTED"),
+    Mecanisme("M4 absorber les ventes forcées", "liquidés -> absorbeurs", "H17, excès 24 h", -59.4, (-137.0, 5.8), 0.6, "REJECTED"),
+    Mecanisme("M5 suivre la cascade", "retardataires -> suiveurs", "H19, net 24 h", -16.0, (-99.1, 59.6), 0.6, "REJECTED"),
     Mecanisme("M6 éviter la vague (NO-TRADE)", "copieur naïf -> copieur filtré", "H18 figée", None, None, 0.6, "MORE_DATA", 0.5),
     Mecanisme("M7 refus absorbé/tard/petit", "copieur naïf -> copieur filtré", "H16 figée", None, None, 0.6, "MORE_DATA", 0.5),
     Mecanisme("M8 prime de funding (receveur)", "côté surpeuplé -> receveur", "H21, net 24 h", -98.9, (-202.2, -0.1), 0.6, "REJECTED"),
-    Mecanisme("M9 portage du leader", "payeur de funding -> porteur", "L11, net 24 h", -53.07, (-115.8, 4.04), 1.0, "REJECTED"),
-    Mecanisme("M10 sortie / gestion", "sortie tardive -> sortie miroir", "L12c, brut 11,8 - coût 9,5", 2.3, (-9.6, 10.7), 0.3, "REJECTED"),
-    Mecanisme("M11 réallocation", "gérant -> suiveur", "H14, net 24 h", -10.66, (-69.78, 49.91), 1.0, "REJECTED"),
-    Mecanisme("M12 consensus indépendant", "foule -> consensus", "L9, excès 24 h", -12.62, (-76.71, 50.78), 1.0, "REJECTED"),
+    Mecanisme("M9 portage du leader", "payeur de funding -> porteur", "L11, net 24 h", -53.07, (-115.8, 4.04), 0.6, "REJECTED"),
+    Mecanisme("M10 sortie / gestion", "sortie tardive -> sortie miroir", "L12c, brut 11,8 - coût 9,5", 2.3, (-9.6, 10.7), 0.6, "REJECTED"),
+    Mecanisme("M11 réallocation", "gérant -> suiveur", "H14, net 24 h", -10.66, (-69.78, 49.91), 0.6, "REJECTED"),
+    Mecanisme("M12 consensus indépendant", "foule -> consensus", "L9, excès 24 h", -12.62, (-76.71, 50.78), 0.6, "REJECTED"),
     Mecanisme("M13 fourniture de liquidité (HLP)", "preneurs -> teneurs de marché", "V5 validé, +230 bps/28 j", 230.0, None, 0.6, "PROMISING", 0.8),
     Mecanisme("M14 flux résiduel des métaordres", "métaordre visible -> anticipateur", "0,19 % des fills", None, None, 0.0, "UNMEASURABLE", 0.5),
 )
