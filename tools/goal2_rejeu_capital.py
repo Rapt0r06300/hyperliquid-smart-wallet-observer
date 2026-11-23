@@ -1,7 +1,7 @@
 """Avant/après capital : la même réplication paper (mêmes données), capital 350 puis 100 USD. Aucune écriture."""
 import sys, time, json, dataclasses
 from pathlib import Path
-R = Path(r"C:/Users/flo/Desktop/Projet invest")
+R = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(R / "tools"), str(R / "src")]
 import etude_copiabilite as E
 from hl_observer.backtesting import copy_vault_replication_paper as replication
