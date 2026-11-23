@@ -270,13 +270,17 @@ def _charger_tier_local(
     shards_non_lus = 0
     memoire_attendue_s, memoire_incidents, memoire_detail = 0.0, 0, None
     for index_shard, entree in enumerate(shards):
-        if arret_chargement is not None:
-            shards_non_lus += 1
-            continue
         if not isinstance(entree, dict):
             continue
         famille = str(entree.get("famille") or "")
         est_signal = famille in _COFFRE_FAMILLES_SIGNAUX
+        # Les familles de contexte sont lues en streaming quand garder_signaux=False :
+        # elles ne consomment pas la RAM de matérialisation et doivent donc continuer
+        # après l'arrêt volontaire des gros fills/carnets. Sinon un plafond mémoire
+        # transformait silencieusement les dernières familles du coffre en données jamais lues.
+        if arret_chargement is not None and not (est_signal and not garder_signaux):
+            shards_non_lus += 1
+            continue
         # 23/11/2026 -- DONNÉE EXTERNE (Ironflow, Tardis ; l'index le dit). Elle reste à la disposition de la
         # recherche, sous sa propre clé, et ne grossit JAMAIS le compte des observations d'Alina.
         cle_signal = (f"{famille}{SUFFIXE_SIGNAL_EXTERNE}" if entree.get("provenance") == ORIGINE_EXTERNE
@@ -301,12 +305,14 @@ def _charger_tier_local(
                 continue
         # GARDE 2 — PLAFOND DE LIGNES. Une troncature silencieuse ferait mesurer sur un
         # echantillon inconnu : on s'arrete et on le DIT.
-        if comptes_replay["fills"] + comptes_replay["carnets"] + comptes_replay["bbo"] >= int(max_lignes):
+        if (not est_signal
+                and comptes_replay["fills"] + comptes_replay["carnets"] + comptes_replay["bbo"]
+                >= int(max_lignes)):
             arret_chargement = "PLAFOND_LIGNES"
             shards_non_lus += 1
             continue
         # GARDE 3 — MEMOIRE. « On ralentit ou on retrecit, on ne crashe JAMAIS. »
-        if index_shard % SHARDS_ENTRE_CONTROLES_RAM == 0:
+        if (not est_signal or garder_signaux) and index_shard % SHARDS_ENTRE_CONTROLES_RAM == 0:
             # 17/11/2026 : a la premiere alerte le pont abandonnait TOUT le reste (60 shards lus,
             # 6 349 non lus) alors que la memoire revenait au vert trente secondes plus tard. On
             # attend si la pression vient d'ailleurs ; on ne s'arrete que si elle persiste, ou si
