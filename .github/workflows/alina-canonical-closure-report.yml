@@ -8,6 +8,7 @@ on:
     paths:
       - ".github/workflows/alina-canonical-closure-report.yml"
       - "tools/build_closure_report.py"
+      - "tools/measured_catalog_patches.py"
       - "tools/enrich_closure_data_exploitability.py"
       - "tools/generate_gate_registry.py"
       - "tools/validate_closure_receipt.py"
@@ -21,6 +22,8 @@ on:
       - "catalog/TRADE_UNIQUE_COUNT_PATCH.json"
       - "catalog/RECORD_COUNT_PATCH.json"
       - "catalog/UNCOMPRESSED_SIZE_PATCH.json"
+      - "catalog/uncompressed-size-parts/**"
+      - "catalog/record-count-parts/**"
       - "catalog/CAMPAIGN_RESILIENCE_RECEIPT.json"
       - "catalog/RESUME_SMOKE_RECEIPT.json"
       - "catalog/COLLECT_RESUME_SMOKE_RECEIPT.json"

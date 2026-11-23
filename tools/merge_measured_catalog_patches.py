@@ -15,8 +15,10 @@ from pathlib import Path
 from typing import Any, Mapping
 
 try:
+    from tools.measured_catalog_patches import load_patch, write_patch
     from tools.partitioned_data_index import read_index
 except ModuleNotFoundError:
+    from measured_catalog_patches import load_patch, write_patch
     from partitioned_data_index import read_index
 
 TABLES = (
@@ -174,28 +176,23 @@ def merge_directory(measured_root: Path, repo_root: Path) -> dict[str, Any]:
     pending: list[tuple[Path, str]] = []
     for file_name, kind, schema in TABLES:
         target = repo_root / "catalog" / file_name
-        measured = _load(measured_root / file_name)
+        measured = load_patch(measured_root / file_name, kind)
         if not measured:
             raise ValueError(f"missing freshly measured patch: {file_name}")
         updated = merge_patch(
-            _load(target), measured, index_rows=rows, kind=kind, schema=schema
+            load_patch(target, kind), measured, index_rows=rows, kind=kind, schema=schema
         )
-        # Legacy indented JSON exceeded GitHub's 100 MB blob limit.
-        # Compact serialization preserves all exact SHA-bound measurements.
-        payload = json.dumps(updated, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n"
-        if len(payload.encode("utf-8")) >= MAX_PATCH_BYTES:
-            raise ValueError(f"CATALOG_PATCH_NEEDS_PARTITION: {file_name} exceeds 95 MB")
-        # Validate BOTH complete products before replacing EITHER patch. An
-        # oversize record table must never leave an unrelated size-table
-        # update on disk from the same failed merge attempt.
-        pending.append((target, payload))
+        # Validate BOTH complete products before replacing EITHER patch. The
+        # writer partitions oversized exact evidence into bounded SHA-verified
+        # parts and publishes the root last.
+        pending.append((target, updated, kind))
         out[kind] = {
             "exact": updated["exact_assets"],
             "remaining": updated["remaining_assets"],
             "unavailable": updated["unavailable_assets"],
         }
-    for target, payload in pending:
-        _atomic_write_utf8(target, payload)
+    for target, updated, kind in pending:
+        write_patch(target, updated, kind)
     return out
 
 

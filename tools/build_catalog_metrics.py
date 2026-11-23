@@ -8,8 +8,10 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from tools.measured_catalog_patches import load_patch
     from tools.partitioned_data_index import SCHEMA, iter_index_rows, read_index
 except ModuleNotFoundError:
+    from measured_catalog_patches import load_patch
     from partitioned_data_index import SCHEMA, iter_index_rows, read_index
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -104,7 +106,7 @@ def build() -> dict[str, Any]:
         shards = iter(legacy_rows)
     size_doc = {}
     try:
-        size_doc = json.loads(UNCOMPRESSED_PATCH.read_text(encoding="utf-8"))
+        size_doc = load_patch(UNCOMPRESSED_PATCH, "sizes")
     except (OSError, ValueError, TypeError):
         size_doc = {}
     size_rows = size_doc.get("sizes") if isinstance(size_doc, dict) else {}
@@ -112,7 +114,7 @@ def build() -> dict[str, Any]:
         size_rows = {}
     record_doc = {}
     try:
-        record_doc = json.loads(RECORD_PATCH.read_text(encoding="utf-8"))
+        record_doc = load_patch(RECORD_PATCH, "records")
     except (OSError, ValueError, TypeError):
         record_doc = {}
     record_rows = record_doc.get("records") if isinstance(record_doc, dict) else {}
