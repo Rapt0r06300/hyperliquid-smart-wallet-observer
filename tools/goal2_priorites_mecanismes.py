@@ -35,8 +35,11 @@ class Mecanisme:
 
 
 #: Champs complets par mécanisme : capacité à 100 USD, fill utile, test de réfutation (déjà pré-enregistré).
-#: Capacité commune de la copie : 5 lignes de 20 USD, ordre minimal 10 USD -> jamais contraignante ; c'est le coût.
-COPIE = "5 x 20 USD >= ordre min. 10 USD : non contraignant"
+#: Capacité MESURÉE le 23/11 (`tools/goal2_rejeu_capital.py`, même réplication, mêmes données, 127 leaders) :
+#: une copie en lignes de 20 USD passe l'ordre minimal (10 USD), mais une RÉPLICATION de portefeuille à 100 USD voit
+#: 96,5 % de ses ordres refusés par l'ordre minimal (68,5 % à 350 USD) : elle ne trade presque pas.
+COPIE = "lignes de 20 USD >= ordre min. 10 USD : OK"
+REPLICATION = "MESURÉ : 96,5 % des ordres refusés par l'ordre min. à 100 USD (68,5 % à 350)"
 TAKER = "taker au meilleur prix + écart, après 120 s"
 FICHE: dict[str, tuple[str, str, str]] = {
     "M1": (COPIE, TAKER, "excès top-tiers <= 0 sur segment vierge (H15b : -28,7)"),
@@ -55,6 +58,7 @@ FICHE: dict[str, tuple[str, str, str]] = {
     "M14": (COPIE, "—", "trop rare pour un test (0,19 % des fills)"),
     "M15": ("dépôt <= capital ; frais de performance du gérant", "aucun fill : dépôt en vault", "rendement < HLP après correction de survie (V : -436 bps/28 j)"),
     "M16": (COPIE, TAKER, "excès des gros fills <= 0 (L8 : +4,65 brut à 4 h, sous le coût)"),
+    "M17": (REPLICATION, "taker au mid + demi-écart, réalignement périodique", "net <= 0 ou quasi-inactivité à 100 USD (rejeu 23/11)"),
 }
 
 
@@ -74,6 +78,8 @@ MECANISMES = (
     Mecanisme("M13 fourniture de liquidité (HLP)", "preneurs -> teneurs de marché", "V5 validé, +230 bps/28 j", 230.0, None, 0.6, "PROMISING", 0.8),
     Mecanisme("M14 flux résiduel des métaordres", "métaordre visible -> anticipateur", "0,19 % des fills", None, None, 0.0, "UNMEASURABLE", 0.5),
     Mecanisme("M15 sélection de vaults gagnants", "déposant tardif -> gérant (frais, survie)", "V-allocation bornés, 28 j (journal l. 443)", -436.0, (-823.0, -61.0), 0.6, "REJECTED"),
+    Mecanisme("M17 réplication lente du portefeuille", "suiveur -> porteur de risque observé",
+              "rejeu 23/11 à 100 USD, 127 leaders", -1.05, (-17.4, 11.4), 0.6, "REJECTED"),
     Mecanisme("M16 taille du fill du leader", "contrepartie d'un gros ordre -> son auteur", "L8, excès 4 h brut 4,65 - coût 15", -10.35, (-19.78, -0.72), 0.6, "REJECTED"),
 )
 

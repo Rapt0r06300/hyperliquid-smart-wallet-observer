@@ -1220,3 +1220,13 @@ foule (M12), preneurs (M13), métaordre visible (M14), déposant tardif (M15), c
   M14  capacité : 5 x 20 USD >= ordre min. 10 USD : non contraignant | fill : — | réfutation : trop rare pour un test (0,19 % des fills)
 ```
 
+### Rejeu avant/après du modèle de capital (23/11, `tools/goal2_rejeu_capital.py`, aucune écriture au registre)
+
+Même réplication paper (`copy_vault_replication_paper`), mêmes shards, mêmes 127 leaders, prix allMids observés ; seul
+le capital change. **350 USD** : net −0,090 USD/j [−0,90 ; 0,62] = −2,58 bps/j du capital, 68,5 % des ordres refusés par
+l'ordre minimal. **100 USD** : net −0,0105 USD/j [−0,17 ; 0,11] = −1,05 bps/j, **96,5 %** des ordres refusés
+(85 793 sur 88 879). À 100 USD la réplication de portefeuille ne trade presque plus : sa « perte plus faible » n'est
+que de l'inactivité (≈ NO-TRADE). Correction de la carte : nouveau mécanisme M17 (réplication lente du portefeuille), dont la capacité
+EST contraignante à 100 USD ; elle ne l'est pas pour les copies par événement en lignes de 20 USD (M1-M12, M16).
+(Une 1re version l'attribuait par erreur à M9/M10, qui sont des copies par événement : corrigé.) Durée : 781 s.
+
