@@ -53,6 +53,36 @@ def test_checkpoint_gap_health_is_separate_from_collector_liveness(tmp_path: Pat
     )["status"] == "HEARTBEAT_UNVERIFIED"
 
 
+def test_un_recu_non_mesurable_ne_devient_pas_zero_gap(tmp_path: Path) -> None:
+    heartbeat_path = tmp_path / "runtime/research_lab/heartbeats/copy-vault-checkpoints.json"
+    heartbeat_path.parent.mkdir(parents=True)
+    heartbeat_path.write_text(json.dumps({
+        "pid": 123,
+        "ts_ms": 1_000_000,
+        "protocol": WATCH.CHECKPOINT_COLLECTOR_PROTOCOL,
+        "metriques": {"coverage_receipt_status": "UNMEASURABLE"},
+    }), encoding="utf-8")
+
+    assert WATCH._checkpoint_evidence_health(
+        tmp_path, {"copy-vault-checkpoints": 123}, now_ms=1_000_001,
+    ) == {"status": "EVIDENCE_UNMEASURABLE", "reported_gaps": None}
+
+
+def test_heartbeat_proven_avec_gap_non_nul_est_rejete(tmp_path: Path) -> None:
+    heartbeat_path = tmp_path / "runtime/research_lab/heartbeats/copy-vault-checkpoints.json"
+    heartbeat_path.parent.mkdir(parents=True)
+    heartbeat_path.write_text(json.dumps({
+        "pid": 123,
+        "ts_ms": 1_000_000,
+        "protocol": WATCH.CHECKPOINT_COLLECTOR_PROTOCOL,
+        "metriques": {"coverage_receipt_status": "PROVEN", "gaps_critiques": 1},
+    }), encoding="utf-8")
+
+    assert WATCH._checkpoint_evidence_health(
+        tmp_path, {"copy-vault-checkpoints": 123}, now_ms=1_000_001,
+    ) == {"status": "HEARTBEAT_INCONSISTENT", "reported_gaps": None}
+
+
 def test_watchdog_repairs_and_logs_without_stopping_after_one_pass(
     tmp_path: Path, monkeypatch,
 ) -> None:

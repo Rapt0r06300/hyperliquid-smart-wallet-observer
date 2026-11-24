@@ -124,8 +124,18 @@ def _checkpoint_evidence_health(
         return {"status": "HEARTBEAT_UNVERIFIED", "reported_gaps": None}
     metrics = heartbeat.get("metriques")
     gaps = metrics.get("gaps_critiques") if isinstance(metrics, Mapping) else None
+    coverage_status = (
+        metrics.get("coverage_receipt_status") if isinstance(metrics, Mapping) else None
+    )
+    if coverage_status is not None and coverage_status not in {"PROVEN", "UNMEASURABLE"}:
+        return {"status": "HEARTBEAT_INVALID", "reported_gaps": None}
     if type(gaps) is not int or gaps < 0:
-        return {"status": "GAP_COUNT_UNVERIFIED", "reported_gaps": None}
+        status = "EVIDENCE_UNMEASURABLE" if coverage_status == "UNMEASURABLE" else "GAP_COUNT_UNVERIFIED"
+        return {"status": status, "reported_gaps": None}
+    if coverage_status == "PROVEN" and gaps != 0:
+        return {"status": "HEARTBEAT_INCONSISTENT", "reported_gaps": None}
+    if coverage_status == "UNMEASURABLE" and gaps == 0:
+        return {"status": "EVIDENCE_UNMEASURABLE", "reported_gaps": None}
     return {
         "status": "GAPS_REPORTED" if gaps else "NO_REPORTED_GAP",
         "reported_gaps": gaps,
@@ -143,17 +153,28 @@ def detail_des_trous(root: Path) -> dict[str, Any] | None:
         return None
     if not isinstance(metrics, Mapping):
         return None
-    return {clef: metrics.get(clef) for clef in
-            ("checkpoint_expirations", "checkpoint_queue_rejections", "input_rotations", "stale")}
+    cles_detail = (
+        "checkpoint_expirations",
+        "checkpoint_queue_rejections",
+        "input_rotations",
+        "reconnect_backfill_blocked",
+        "invalid_rejected",
+        "writer_outages",
+        "coverage_receipt_status",
+        "stale",
+    )
+    return {clef: metrics[clef] for clef in cles_detail if clef in metrics}
 
 
 _TROUS_AU_DEPART: dict[str, int] = {}
 
 
 def trous_depuis_le_depart(bail: str, trous: Any) -> int | None:
-    """Trous causaux apparus DEPUIS le debut de cette campagne. Le compteur du battement est
-    CUMULE et survit aux redemarrages : le 22/11/2026 il affichait 875 des la premiere seconde
-    d'une campagne neuve, puis 877 un quart d'heure plus tard -- 2 trous reels, lus comme 877.
+    """Trous causaux apparus depuis le premier relevé du watchdog pour ce bail.
+
+    Le compteur du battement est CUMULE et survit aux redemarrages : il ne permet donc pas
+    d'affirmer un delta depuis le début de la campagne. Le delta mémorisé ici commence au
+    démarrage de ce processus de suivi (ou à sa première lecture du bail).
     Compteur illisible -> None ; un compteur qui RECULE (remise a zero) repart de sa nouvelle base."""
     if type(trous) is not int or trous < 0:
         return None

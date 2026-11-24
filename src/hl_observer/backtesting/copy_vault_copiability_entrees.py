@@ -222,6 +222,16 @@ class PricePanel:
         out[~known | ((t - self.ts[idx]) > self.stale_ms)] = np.nan
         return out
 
+    def at_one(self, t: int, col: int) -> float:
+        """Version scalaire de ``at`` sans allocations temporaires, pour les boucles de replay."""
+        instant = int(t)
+        if len(self.ts) == 0:
+            return float("nan")
+        index = int(np.searchsorted(self.ts, instant, side="right")) - 1
+        if index < 0 or instant - int(self.ts[index]) > self.stale_ms:
+            return float("nan")
+        return float(self.px[index, col])
+
     def valid_intervals(self) -> np.ndarray:
         """Intervalles ``[i, i+1]`` dont la durée respecte la fraîcheur (sinon PnL inconnu)."""
 

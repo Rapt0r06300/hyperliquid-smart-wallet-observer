@@ -125,3 +125,73 @@ def test_safety_audit_covers_legacy_tools_scripts_and_workflows(tmp_path, monkey
     assert result.checks["no_forbidden_mainnet_order_method"] is False
     assert result.checks["no_exchange_endpoint_in_runtime_source"] is False
     assert result.checks["no_self_hosted_workflows"] is False
+
+
+def test_safety_audit_includes_root_launchers_and_workflow_commands(tmp_path, monkeypatch):
+    from hl_observer.security.safety_audit import _iter_operational_files
+
+    src = tmp_path / "src" / "hl_observer" / "execution"
+    tests = tmp_path / "tests"
+    workflows = tmp_path / ".github" / "workflows"
+    src.mkdir(parents=True)
+    tests.mkdir()
+    workflows.mkdir(parents=True)
+    (tmp_path / ".env.example").write_text(
+        "HL_ENABLE_MAINNET_EXECUTION=false\n", encoding="utf-8"
+    )
+    (src / "live_executor_disabled.py").write_text("LOCKED = True\n", encoding="utf-8")
+    for name in ("test_no_mainnet_execution.py", "test_safety_audit.py", "test_testnet_locked.py"):
+        (tests / name).write_text("# presence proof\n", encoding="utf-8")
+    launcher = tmp_path / "LANCER.cmd"
+    launcher.write_text('@echo off\necho "/exchange"\n', encoding="utf-8")
+    workflow = workflows / "unsafe-command.yml"
+    workflow.write_text(
+        'jobs:\n  audit:\n    runs-on: ubuntu-latest\n    steps:\n'
+        '      - run: echo "/exchange"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "hl_observer.security.safety_audit.auditer_l_environnement",
+        lambda: type("Audit", (), {"ok": True, "alerte": ""})(),
+    )
+
+    operational_files = set(_iter_operational_files(tmp_path))
+    assert launcher in operational_files
+    assert workflow in operational_files
+
+    result = run_safety_audit(tmp_path)
+    assert result.checks["no_exchange_endpoint_in_runtime_source"] is False
+
+
+def test_safety_audit_reads_operational_source_once(tmp_path, monkeypatch):
+    src = tmp_path / "src" / "hl_observer" / "execution"
+    tests = tmp_path / "tests"
+    src.mkdir(parents=True)
+    tests.mkdir()
+    (tmp_path / ".env.example").write_text(
+        "HL_ENABLE_MAINNET_EXECUTION=false\n", encoding="utf-8"
+    )
+    source = src / "paper_only.py"
+    source.write_text("PAPER_ONLY = True\n", encoding="utf-8")
+    (src / "live_executor_disabled.py").write_text("LOCKED = True\n", encoding="utf-8")
+    for name in ("test_no_mainnet_execution.py", "test_safety_audit.py", "test_testnet_locked.py"):
+        (tests / name).write_text("# presence proof\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "hl_observer.security.safety_audit.auditer_l_environnement",
+        lambda: type("Audit", (), {"ok": True, "alerte": ""})(),
+    )
+    original_read_text = Path.read_text
+    reads = 0
+
+    def counted_read_text(path, *args, **kwargs):
+        nonlocal reads
+        if path == source:
+            reads += 1
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", counted_read_text)
+
+    result = run_safety_audit(tmp_path)
+
+    assert result.ok, result.findings
+    assert reads == 1

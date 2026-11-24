@@ -111,10 +111,14 @@ def _ordres(record: Mapping[str, Any]) -> Preuve | None:
 EXTRACTEURS: dict[str, Callable[[Mapping[str, Any]], Preuve | None]] = {
     "copy_vault_leader_skill_persistence": _persistance,
     "copy_vault_leader_selection_model": _modele,
-    "copy_vault_slow_replication_350usd": _replication,
+    "copy_vault_slow_replication_paper": _replication,
+    "copy_vault_slow_replication_350usd": _replication,  # reçus historiques
     "copy_vault_aggressive_open_drift": _ouvertures,
     "copy_vault_aggressive_open_selected_leaders": _selection,
     "copy_vault_leader_order_intent": _ordres,
+}
+HYPOTHESE_CANONIQUE = {
+    "copy_vault_slow_replication_350usd": "copy_vault_slow_replication_paper",
 }
 ACTIONS = {
     "REJECTED": "abandonner : ne plus y consacrer de calcul ; garder le résultat comme connaissance acquise",
@@ -153,7 +157,8 @@ def build_plan(records: Iterable[Mapping[str, Any]], *, capital_usd: float = PAP
     essais: dict[str, int] = {}
     for record in records:
         for verdict in record.get("verdicts") or ():
-            hypothese = str(verdict.get("hypothesis") or "")
+            hypothese_source = str(verdict.get("hypothesis") or "")
+            hypothese = HYPOTHESE_CANONIQUE.get(hypothese_source, hypothese_source)
             if hypothese:
                 derniers[hypothese] = (record, verdict)
                 essais[hypothese] = essais.get(hypothese, 0) + 1

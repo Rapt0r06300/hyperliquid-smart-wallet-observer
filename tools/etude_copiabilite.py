@@ -448,6 +448,22 @@ def experiment_identity(root: Path, shards: dict[str, list[dict[str, Any]]], con
     }
 
 
+def inclure_sources_dans_identite(identity: dict[str, Any], sources: dict[str, str]) -> dict[str, Any]:
+    """Étend l'identité de calcul avec les moteurs spécialisés qui produisent l'expérience."""
+    source_sha256 = dict(identity.get("source_sha256") or {})
+    for chemin, digest in sources.items():
+        if (not isinstance(chemin, str) or not chemin or not isinstance(digest, str)
+                or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest.lower())):
+            raise ValueError(f"empreinte source invalide : {chemin!r}")
+        source_sha256[chemin] = digest.lower()
+    updated = {**identity, "source_sha256": source_sha256}
+    material = [source_sha256, updated["corpus_sha256"], updated["config_sha256"], updated["price_source"]]
+    updated["experiment_id"] = hashlib.sha256(
+        json.dumps(material, sort_keys=True).encode("utf-8")
+    ).hexdigest()[:24]
+    return updated
+
+
 def append_ledger(path: Path, record: dict[str, Any]) -> str:
     """Ajoute une ligne au registre chaîné ; n'écrase ni ne réordonne jamais l'existant."""
 
@@ -464,6 +480,14 @@ def append_ledger(path: Path, record: dict[str, Any]) -> str:
     with path.open("a", encoding="utf-8", newline="\n") as handle:
         handle.write(json.dumps(body, sort_keys=True, ensure_ascii=False) + "\n")
     return body["record_sha256"]
+
+
+def filtrer_observations_entre_bornes(frame: pd.DataFrame, masque: pd.Series) -> pd.DataFrame:
+    """Évite la copie si toutes les lignes sont admissibles; les timestamps inconnus sont exclus."""
+    masque_sans_inconnu = masque.fillna(False)
+    if not bool(masque.isna().any()) and bool(masque_sans_inconnu.all()):
+        return frame
+    return frame.loc[masque_sans_inconnu]
 
 
 def verify_ledger(path: Path) -> dict[str, Any]:
@@ -594,8 +618,7 @@ def run(root: Path, *, price: str, workers: int, config: cop.CopiabilityConfig, 
         panel, aliases = cop.alias_legacy_symbols(panel, raw["coin"].unique())
         if len(panel.ts):
             dans = (raw["time"] >= int(panel.ts[0])) & (raw["time"] <= int(panel.ts[-1]))
-            if not bool(dans.all()):          # toutes dedans : pas de copie de 22 M lignes pour rien (24/11/2026)
-                raw = raw[dans]
+            raw = filtrer_observations_entre_bornes(raw, dans)
         fills, prepared_rejects = cop.prepare_fills(raw, config)
     else:
         fills, prepared_rejects = cop.prepare_fills(raw, config)
@@ -942,7 +965,9 @@ def run_positions(root: Path, *, price: str, write: bool = True) -> dict[str, An
     return result
 
 
-EVIDENCE_TIER_REPLICATION = "LOCAL_OBSERVED_PORTFOLIOS_PAPER_350_EXPLORATORY"
+EVIDENCE_TIER_REPLICATION = (
+    f"LOCAL_OBSERVED_PORTFOLIOS_PAPER_{replication.ReplicationConfig().capital_usd:g}_EXPLORATORY"
+)
 EVIDENCE_TIER_EVENEMENTS = "LOCAL_EVENT_STUDY_RETROSPECTIVE_PRICES_EXPLORATORY"
 
 
@@ -980,7 +1005,8 @@ def run_ouvertures(root: Path, *, lag_s: float, workers: int, write: bool = True
     prepares = []
     for famille, retard in (("fills_forward", None), ("fills_backfill", lag_ms)):
         raw, rejets_famille = load_fills(shards[famille], root / CACHE_DIR, workers, assumed_lag_ms=retard)
-        raw = raw[(raw["time"] >= debut_prix) & (raw["time"] <= fin_prix)]
+        dans = (raw["time"] >= debut_prix) & (raw["time"] <= fin_prix)
+        raw = filtrer_observations_entre_bornes(raw, dans)
         prepare, rejets_preparation = cop.prepare_fills(raw, cop.CopiabilityConfig())
         del raw
         prepares.append(prepare)
@@ -1190,13 +1216,14 @@ def render_ouvertures_report(report: dict[str, Any], identity: dict[str, Any]) -
                       f"trades : {num(capital['net_usd_par_jour'], 3)} USD/jour, repli maximal "
                       f"{num(capital['repli_max_usd'], 2)} USD · {capital['refus_sans_place']} décisions sans place libre.")
     else:
-        lignes.append(f"- Compte PAPER de 350 USD : non mesurable — {capital.get('reason')}.")
+        lignes.append(f"- Compte PAPER de {capital.get('capital_usd', replication.ReplicationConfig().capital_usd):.0f} "
+                      f"USD : non mesurable — {capital.get('reason')}.")
     regle = report["selection"]["regle"]
     lignes += ["", "## Sélection des leaders en marche avant", "",
                f"Un leader n'est suivi qu'après {regle['historique_minimal']} décisions dénouées, et seulement si leur "
                "net moyen (ramené vers zéro) est positif. La note ne lit jamais une issue future.", "",
                "| prix | population | retenues : décisions · leaders · jours | net retenues (bps) | net éligibles (bps) | "
-               "net écartées (bps) | retenues − éligibles (bps) | espérance 350 USD (USD/j) |",
+               "net écartées (bps) | retenues − éligibles (bps) | espérance PAPER (USD/j) |",
                "|---|---|---|---:|---:|---:|---:|---:|"]
     for c in report["selection"]["cellules"]:
         retenus, eligibles, ecartes = c["retenus"], c["eligibles"], c["ecartes"]
@@ -1409,9 +1436,9 @@ def resumer_la_capacite(par_leader: Mapping[str, Mapping[str, Any]],
     }
 
 
-def run_replication_350(root: Path, *, price: str, write: bool = True, min_snapshots: int = 50,
-                        placebos: bool = True) -> dict[str, Any]:
-    """Un compte PAPER de 350 USD qui tient le portefeuille observé d'un leader : frais, écart, funding,
+def run_replication_paper(root: Path, *, price: str, write: bool = True, min_snapshots: int = 50,
+                          placebos: bool = True) -> dict[str, Any]:
+    """Un compte PAPER au capital canonique qui tient le portefeuille observé d'un leader : frais, écart, funding,
     ordre minimal de 10 USD, délai — et ce que chaque friction coûte."""
 
     started = time.time()
@@ -1422,8 +1449,9 @@ def run_replication_350(root: Path, *, price: str, write: bool = True, min_snaps
     if not shards["snapshot"]:
         return {"status": "UNMEASURABLE", "reason": "aucun instantané de portefeuille au coffre : lancez le Certificateur"}
     identity = experiment_identity(root, {k: shards[k] for k in ("snapshot", "book_l2")}, config,
-                                   f"replication350|{price}")
-    identity["source_sha256"]["copy_vault_replication_paper.py"] = _sha256_file(Path(replication.__file__))
+                                   f"replication_paper_{config.capital_usd:g}|{price}")
+    identity = inclure_sources_dans_identite(
+        identity, {"copy_vault_replication_paper.py": _sha256_file(Path(replication.__file__))})
     identity["corpus_tier"] = EVIDENCE_TIER_REPLICATION
     portefeuilles, rejets = replication.portefeuilles_depuis_instantanes(load_snapshots(shards["snapshot"]))
     panel, tier_prix, refus = _panneau_de_prix(root, shards, price=price, stale_ms=120_000,
@@ -1445,7 +1473,7 @@ def run_replication_350(root: Path, *, price: str, write: bool = True, min_snaps
     if par_leader and len(panel.ts) > 1:
         capacite = capacite_de_la_fenetre(root, debut_ms=int(panel.ts[0]), fin_ms=int(panel.ts[-1]))
         capacite_resume = _jsonable(resumer_la_capacite(par_leader, capacite))
-        print(f"[replication-350] capacite : {capacite_resume['part_volume_coins_etroits']} du volume "
+        print(f"[replication-paper] capacite : {capacite_resume['part_volume_coins_etroits']} du volume "
               f"sur des coins etroits, {capacite_resume['part_volume_capacite_inconnue']} sur des "
               f"coins de capacite inconnue", flush=True)
     nets_reels = [r["full"].get("net_usd_per_day") for r in par_leader.values()
@@ -1453,7 +1481,7 @@ def run_replication_350(root: Path, *, price: str, write: bool = True, min_snaps
                   and not isinstance(r["full"].get("net_usd_per_day"), bool)]
     selection = None
     if placebos and nets_reels:
-        print(f"[replication-350] placebos : {len(PLACEBO_DECALAGES_H)} decalages x "
+        print(f"[replication-paper] placebos : {len(PLACEBO_DECALAGES_H)} decalages x "
               f"{len(par_leader)} leaders — correctif d'essais multiples", flush=True)
         intervalle = synthese.get("interval_95")
         marge = 0.0
@@ -1469,9 +1497,9 @@ def run_replication_350(root: Path, *, price: str, write: bool = True, min_snaps
             panel, half_spreads, config, funding=funding, min_snapshots=min_snapshots,
             max_reel=max(nets_reels), n_scenarios=len(nets_reels), marge_usd=marge)
         v = selection["verdict"]
-        print(f"[replication-350] meilleur REEL {v['max_reel']:+.3f} USD/j vs "
+        print(f"[replication-paper] meilleur REEL {v['max_reel']:+.3f} USD/j vs "
               f"p95 du hasard {v['max_hasard_p95']:+.3f} -> {v['verdict']}", flush=True)
-    print(f"[replication-350] {len(portefeuilles)} comptes · {len(par_leader)} simulés · "
+    print(f"[replication-paper {config.capital_usd:.0f} USD] {len(portefeuilles)} comptes · {len(par_leader)} simulés · "
           f"{synthese['leader_days']} journées-leader sur {synthese['distinct_days']} jour(s) · {tier_prix}", flush=True)
     lignes_leaders = sorted(
         ({"compte": compte, **{k: r["full"].get(k) for k in (
@@ -1480,7 +1508,7 @@ def run_replication_350(root: Path, *, price: str, write: bool = True, min_snaps
           "untradable": len(r["full"].get("untradable_coins") or {}),
           "cost_usd_per_day": r["cost_usd_per_day"]} for compte, r in par_leader.items()),
         key=lambda ligne: (ligne["net_usd_per_day"] is None, -(ligne["net_usd_per_day"] or 0.0)))
-    run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ") + "-replication350"
+    run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ") + f"-replication-paper-{config.capital_usd:g}"
     report = {"config": config.as_dict(), "summary": synthese, "leaders": _jsonable(lignes_leaders),
               "selection_vs_hasard": _jsonable(selection),
               "capacite": capacite_resume,
@@ -1512,8 +1540,12 @@ def run_replication_350(root: Path, *, price: str, write: bool = True, min_snaps
                   "result_path": str((REPORT_DIR / run_id / "resultat.json").as_posix()),
                   "paper_read_only": True, "real_execution": False, "economically_proven": False}
         result["ledger_record_sha256"] = append_ledger(root / REPORT_DIR / "EXPERIENCES.ndjson", ledger)
-        print(f"[replication-350] rapport : {out_dir / 'RAPPORT.md'}", flush=True)
+        print(f"[replication-paper] rapport : {out_dir / 'RAPPORT.md'}", flush=True)
     return result
+
+
+# Ancien nom conservé comme alias Python ; les nouveaux résultats portent le capital réel du contrat.
+run_replication_350 = run_replication_paper
 
 
 def render_replication_report(report: dict[str, Any], identity: dict[str, Any]) -> str:
@@ -1523,7 +1555,7 @@ def render_replication_report(report: dict[str, Any], identity: dict[str, Any]) 
     s, entrees, config = report["summary"], report["inputs"], report["config"]
     intervalle = s.get("interval_95")
     lignes = [
-        "# Réplication PAPER de portefeuille — compte de 350 USD, contraintes réelles", "",
+        f"# Réplication PAPER de portefeuille — compte de {config['capital_usd']:.0f} USD, contraintes réelles", "",
         f"- Statut des preuves : **{EVIDENCE_TIER_REPLICATION}** — exploratoire.",
         f"- Expérience `{identity['experiment_id']}` · corpus `{identity['corpus_sha256'][:16]}` · "
         f"code `{(identity.get('code_head') or 'inconnu')[:12]}`.",
@@ -1779,9 +1811,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--positions", action="store_true",
                         help="réplication lente des portefeuilles OBSERVÉS des vaults (instantanés du coffre) ; "
                              "prix : bougies 5 min, ou allMids observés avec --prix mids")
-    parser.add_argument("--replication-350", action="store_true", dest="replication_350",
-                        help="compte PAPER de 350 USD qui tient le portefeuille observé d'un leader "
-                             "(frais, écart, funding, ordre minimal de 10 USD) ; prix : bougies, ou --prix mids")
+    parser.add_argument("--replication-paper", "--replication-350", action="store_true", dest="replication_paper",
+                        help="réplication PAPER au capital canonique (actuellement 100 USD) ; "
+                             "--replication-350 reste un alias historique")
     parser.add_argument("--ouvertures", action="store_true",
                         help="étude d'événements : les ouvertures agressives des leaders gardent-elles une valeur "
                              "après observation ? (fills observés et de backfill, bougies 5 min et 1 h)")
@@ -1814,14 +1846,15 @@ def main(argv: list[str] | None = None) -> int:
     if not (root / "runtime" / "coffre_certifie" / "LOCAL_INDEX.json").is_file():
         print("[NO_GO] coffre LOCAL absent : lancez d'abord « Certificateur Coffre Fort.cmd ».")
         return 2
-    if args.replication_350:
-        result = run_replication_350(root, price=args.prix, write=not args.sans_ecriture,
-                                     placebos=not args.sans_placebo)
+    if args.replication_paper:
+        result = run_replication_paper(root, price=args.prix, write=not args.sans_ecriture,
+                                       placebos=not args.sans_placebo)
         if "report" not in result:
             print(f"[{result['status']}] {result['reason']}")
             return 2
         for verdict in result["report"]["verdicts"]:
-            print(f"[verdict réplication 350 USD] {verdict['hypothesis']}: {verdict['status']} — {verdict.get('reason')}")
+            print(f"[verdict réplication {result['report']['config']['capital_usd']:.0f} USD] "
+                  f"{verdict['hypothesis']}: {verdict['status']} — {verdict.get('reason')}")
         print("[FIN] simulation PAPER exploratoire ; aucune rentabilité n'est prouvée.")
         return 0
     if args.plan:

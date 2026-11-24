@@ -455,8 +455,17 @@ def test_incomplete_restore_never_advertises_replayable_registry_rows(tmp_path):
     module = _module()
     report = tmp_path / "RESTORE_REPORT.json"
     report.write_text(json.dumps({
+        "status": "REPLAY_READY_COMPLETE",
+        "repository": module.REPOSITORY,
+        "source_inventory_sha256": "c" * 64,
+        "catalog_verification": {
+            "source_index_sha256": "a" * 64, "safe_catalog_shards": 9,
+        },
         "classification": {
+            "expected_usable_shards": 99,
             "usable_shards": 99,
+            "expected_usable_bytes": 990,
+            "usable_bytes": 990,
             "materialization_complete": False,
             "failures": [{"error": "MISSING_SHARD"}],
             "safe_shard_database": str(tmp_path / "SAFE_SHARDS.sqlite3"),
@@ -475,21 +484,84 @@ def test_safe_summary_does_not_present_generic_safe_as_l2_continuity(tmp_path):
     module = _module()
     report = tmp_path / "RESTORE_REPORT.json"
     report.write_text(json.dumps({
-        "catalog_verification": {"source_index_sha256": "a" * 64},
+        "status": "REPLAY_READY_COMPLETE",
+        "repository": module.REPOSITORY,
+        "source_inventory_sha256": "c" * 64,
+        "catalog_verification": {
+            "source_index_sha256": "a" * 64, "safe_catalog_shards": 9,
+        },
         "classification": {
-            "usable_shards": 9, "materialization_complete": True,
+            "expected_usable_shards": 9, "usable_shards": 9,
+            "expected_usable_bytes": 90, "usable_bytes": 90,
+            "materialization_complete": True,
             "failures": [],
             "safe_shard_database": str(tmp_path / "SAFE_SHARDS.sqlite3"),
         },
     }), encoding="utf-8")
 
-    summary = module._read_safe_shard_summary(report)
+    summary = module._read_safe_shard_summary(
+        report, expected_catalog_sha256="a" * 64,
+    )
 
     assert summary["safe_replayable_shards"] == 9
     assert summary["l2_certification_status"] == "NOT_AVAILABLE"
     assert summary["l2_snapshot_backtestable_shards"] == 0
     assert summary["l2_continuous_replayable_shards"] == 0
     assert summary["l2_reanchored_segment_assets"] == 0
+
+
+def test_safe_summary_rejects_restore_receipt_for_previous_catalog(tmp_path):
+    module = _module()
+    report = tmp_path / "RESTORE_REPORT.json"
+    report.write_text(json.dumps({
+        "status": "REPLAY_READY_COMPLETE",
+        "repository": module.REPOSITORY,
+        "source_inventory_sha256": "c" * 64,
+        "catalog_verification": {
+            "source_index_sha256": "a" * 64, "safe_catalog_shards": 9,
+        },
+        "classification": {
+            "expected_usable_shards": 9,
+            "usable_shards": 9,
+            "expected_usable_bytes": 90,
+            "usable_bytes": 90,
+            "materialization_complete": True,
+            "failures": [],
+        },
+    }), encoding="utf-8")
+
+    summary = module._read_safe_shard_summary(
+        report, expected_catalog_sha256="b" * 64,
+    )
+
+    assert summary["safe_replayable_shards"] == 0
+    assert summary["safe_backtestable_shards"] == 0
+    assert summary["safe_shard_database"] is None
+
+
+def test_safe_summary_requires_a_complete_canonical_restore_receipt(tmp_path):
+    module = _module()
+    report = tmp_path / "RESTORE_REPORT.json"
+    report.write_text(json.dumps({
+        "status": "RESTORE_INCOMPLETE",
+        "repository": module.REPOSITORY,
+        "catalog_verification": {"source_index_sha256": "a" * 64},
+        "classification": {
+            "expected_usable_shards": 9,
+            "usable_shards": 9,
+            "expected_usable_bytes": 90,
+            "usable_bytes": 90,
+            "materialization_complete": True,
+            "failures": [],
+        },
+    }), encoding="utf-8")
+
+    summary = module._read_safe_shard_summary(
+        report, expected_catalog_sha256="a" * 64,
+    )
+
+    assert summary["safe_replayable_shards"] == 0
+    assert summary["safe_backtestable_shards"] == 0
 
 
 def test_safe_summary_reads_only_complete_catalog_bound_l2_admission(tmp_path):
@@ -529,14 +601,23 @@ def test_safe_summary_reads_only_complete_catalog_bound_l2_admission(tmp_path):
         )
     report = tmp_path / "RESTORE_REPORT.json"
     report.write_text(json.dumps({
-        "catalog_verification": {"source_index_sha256": digest},
+        "status": "REPLAY_READY_COMPLETE",
+        "repository": module.REPOSITORY,
+        "source_inventory_sha256": "c" * 64,
+        "catalog_verification": {
+            "source_index_sha256": digest, "safe_catalog_shards": 3,
+        },
         "classification": {
-            "usable_shards": 3, "materialization_complete": True,
+            "expected_usable_shards": 3, "usable_shards": 3,
+            "expected_usable_bytes": 30, "usable_bytes": 30,
+            "materialization_complete": True,
             "failures": [], "safe_shard_database": str(database),
         },
     }), encoding="utf-8")
 
-    summary = module._read_safe_shard_summary(report)
+    summary = module._read_safe_shard_summary(
+        report, expected_catalog_sha256=digest,
+    )
 
     assert summary["l2_certification_status"] == "COMPLETE"
     assert summary["l2_snapshot_backtestable_shards"] == 2

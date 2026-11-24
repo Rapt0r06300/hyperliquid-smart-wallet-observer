@@ -25,7 +25,34 @@ def run(root: Path, *, interval_s: float = 0.5) -> int:
     while True:
         result = engine.poll_once()
         counters = result["counters"]
-        gap_count = int(result.get("collector_gap_count") or 0)
+        gap_count = result.get("collector_gap_count")
+        raw_coverage_status = result.get("coverage_receipt_status")
+        coverage_status = (
+            raw_coverage_status
+            if raw_coverage_status in {"PROVEN", "UNMEASURABLE"}
+            else "UNMEASURABLE"
+        )
+        metriques = {
+            "coverage_receipt_status": coverage_status,
+            "stale": False,
+        }
+        for metric, counter in (
+            ("checkpoint_expirations", "checkpoints_expired"),
+            ("checkpoint_queue_rejections", "pending_overflow_rejected"),
+            ("input_rotations", "input_rotations"),
+            ("reconnect_backfill_blocked", "reconnect_backfill_blocked"),
+            ("invalid_rejected", "invalid_rejected"),
+            ("writer_outages", "writer_outages"),
+        ):
+            value = counters.get(counter, 0)
+            if type(value) is int and value >= 0:
+                metriques[metric] = value
+            else:
+                metriques["coverage_receipt_status"] = "UNMEASURABLE"
+        if type(gap_count) is int and gap_count >= 0:
+            metriques["gaps_critiques"] = gap_count
+        else:
+            metriques["coverage_receipt_status"] = "UNMEASURABLE"
         battre(
             root,
             "copy-vault-checkpoints",
@@ -42,15 +69,7 @@ def run(root: Path, *, interval_s: float = 0.5) -> int:
             ),
             pid=wrapper_pid,
             protocol=COMPANION_PROTOCOL,
-            metriques={
-                "gaps_critiques": gap_count,
-                "checkpoint_expirations": int(counters.get("checkpoints_expired") or 0),
-                "checkpoint_queue_rejections": int(
-                    counters.get("pending_overflow_rejected") or 0
-                ),
-                "input_rotations": int(counters.get("input_rotations") or 0),
-                "stale": False,
-            },
+            metriques=metriques,
         )
         time.sleep(max(0.1, float(interval_s)))
 

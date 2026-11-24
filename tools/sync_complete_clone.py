@@ -667,7 +667,9 @@ def _read_restore_status(
     return status, inventory_sha, None
 
 
-def _read_safe_shard_summary(report_path: Path) -> dict[str, object]:
+def _read_safe_shard_summary(
+    report_path: Path, *, expected_catalog_sha256: str | None = None,
+) -> dict[str, object]:
     """Expose only the AlinaSync-owned SAFE registry counters in SYNC_REPORT."""
     empty: dict[str, object] = {
         "safe_shard_database": None,
@@ -683,8 +685,15 @@ def _read_safe_shard_summary(report_path: Path) -> dict[str, object]:
         "l2_blocked_shards": 0,
     }
     try:
+        if report_path.is_symlink() or not report_path.is_file():
+            return empty
         payload = json.loads(report_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return empty
+    status, _inventory_sha, report_error = _read_restore_status(
+        report_path, expected_catalog_sha256=expected_catalog_sha256,
+    )
+    if status != "REPLAY_READY_COMPLETE" or report_error is not None:
         return empty
     classification = payload.get("classification")
     if not isinstance(classification, dict):
@@ -694,8 +703,16 @@ def _read_safe_shard_summary(report_path: Path) -> dict[str, object]:
         or classification.get("failures") not in ([], None)
     ):
         return empty
+    expected_usable = classification.get("expected_usable_shards")
     usable = classification.get("usable_shards")
-    if type(usable) is not int or usable < 0:
+    expected_bytes = classification.get("expected_usable_bytes")
+    usable_bytes = classification.get("usable_bytes")
+    if (
+        type(expected_usable) is not int or expected_usable < 0
+        or type(usable) is not int or usable != expected_usable
+        or type(expected_bytes) is not int or expected_bytes < 0
+        or type(usable_bytes) is not int or usable_bytes != expected_bytes
+    ):
         return empty
     database = classification.get("safe_shard_database")
     database_name = Path(database).name if isinstance(database, str) else None
@@ -969,7 +986,10 @@ def main(argv: list[str] | None = None) -> int:
             report_dir / report_name,
             expected_catalog_sha256=catalog_sha256 if not effective_preflight else None,
         )
-        safe_shard_summary = _read_safe_shard_summary(report_dir / report_name)
+        safe_shard_summary = _read_safe_shard_summary(
+            report_dir / report_name,
+            expected_catalog_sha256=catalog_sha256 if not effective_preflight else None,
+        )
         current_report = report_dir / report_name
         if current_report.is_symlink() or not current_report.is_file():
             restore_status, report_error = "RESTORE_INCOMPLETE", "missing or unsafe restore report"

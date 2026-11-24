@@ -3,7 +3,7 @@
 La copie des fills est réfutée ; la seule formulation encore ouverte est de tenir, lentement, le
 portefeuille observé d'un leader. Les études précédentes la mesuraient en points de base par unité
 d'exposition. Ce simulateur répond à la question concrète : qu'aurait fait un compte PAPER de
-350 USD, avec ce qu'une plateforme impose réellement ?
+100 USD, capital du contrat courant, avec ce qu'une plateforme impose réellement ?
 
 * ordre minimal de la plateforme (10 USD) : une ligne du portefeuille du leader qui pèse moins ne
   peut PAS être reproduite — c'est une erreur de suivi, pas un détail ;
@@ -35,6 +35,8 @@ from hl_observer.backtesting.copy_vault_protocol import PAPER_EQUITY_USD
 from hl_observer.fees.hyperliquid_fees import MIN_ORDER_VALUE_USD, TAKER_PERP_BPS
 
 DAY_MS = 86_400_000
+H_REPLICATION_PAPER = "copy_vault_slow_replication_paper"
+# Compatibilité des consommateurs qui importent encore l'ancien identifiant.
 H_REPLICATION_350 = "copy_vault_slow_replication_350usd"
 Portefeuille = Sequence[tuple[int, float | None, Mapping[str, float]]]
 
@@ -128,15 +130,21 @@ def run_replication(
     grille = [int(t) for t in np.arange(premier, fin + 1, config.rebalance_ms, dtype=np.int64)]
     if len(grille) < 2:
         return {**vide, "reason": "fenêtre commune portefeuilles / prix trop courte"}
+    grille_np = np.asarray(grille, dtype=np.int64)
+    funding_indices = np.searchsorted(panel.ts, grille_np, side="right") - 1
+    cible_indices = np.searchsorted(instants, grille_np - config.reaction_ms, side="right") - 1
 
+    colonnes_prix: dict[str, int | None] = {}
+    at_one = getattr(panel, "at_one", None)
     def prix_a(coin: str, t: int) -> float:
-        colonne = panel.column(coin)
-        return float("nan") if colonne is None else float(panel.at(np.array([t]), colonne)[0])
-
-    def taux_funding(coin: str, t: int) -> float:
-        serie = funding_rates.get(coin)
-        index = int(np.searchsorted(panel.ts, t, side="right")) - 1
-        return float("nan") if serie is None or index < 0 else float(serie[index])
+        if coin not in colonnes_prix:
+            colonnes_prix[coin] = panel.column(coin)
+        colonne = colonnes_prix[coin]
+        if colonne is None:
+            return float("nan")
+        if callable(at_one):
+            return float(at_one(t, colonne))
+        return float(panel.at(np.asarray([t], dtype=np.int64), colonne)[0])
 
     compte = _Compte(float(config.capital_usd))
     prix: dict[str, float] = {}                     # dernier prix SÛR de chaque coin détenu
@@ -158,7 +166,9 @@ def run_replication(
         for coin, quantite in compte.positions.items():
             px = prix_a(coin, t)
             if k > 0 and config.apply_funding:
-                taux = taux_funding(coin, grille[k - 1])
+                serie = funding_rates.get(coin)
+                funding_index = int(funding_indices[k - 1])
+                taux = float("nan") if serie is None or funding_index < 0 else float(serie[funding_index])
                 notionnel = abs(quantite) * prix[coin]
                 if np.isnan(taux):
                     n["funding_inconnu"] += notionnel * heures          # jamais supposé nul : compté à part
@@ -174,7 +184,12 @@ def run_replication(
         valeur = compte.valeur(prix)
         points.append((t, valeur, sur))
         expositions.append(compte.notionnel(prix) / valeur if valeur > 0 else 0.0)
-        cible = _cible(portfolio, instants, t, config)
+        cible_index = int(cible_indices[k])
+        cible = None
+        if cible_index >= 0:
+            cible_ts, cible_nav, cible_tailles = portfolio[cible_index]
+            if t - int(cible_ts) <= config.max_snapshot_age_ms and cible_nav is not None and cible_nav > 0:
+                cible = (float(cible_nav), cible_tailles)
         cible_connue[t] = cible is not None
         if cible is None:
             n["cible_inconnue"] += 1
@@ -390,7 +405,7 @@ def instantanes_complets(snapshots: Any) -> tuple[list[dict[str, Any]], dict[str
 
 def synthese_replication(par_leader: Mapping[str, Mapping[str, Any]], config: ReplicationConfig | None = None, *,
                          min_days: int = 20, bootstrap_samples: int = 2_000, seed: int = 20_261_111) -> dict[str, Any]:
-    """Résultat d'ensemble : un compte de 350 USD confié à UN leader, moyenne sur les leaders.
+    """Résultat d'ensemble : le capital PAPER canonique confié à UN leader, moyenne sur les leaders.
 
     L'incertitude est tirée par JOURNÉE (toutes les répliques d'un même jour bougent ensemble : les
     compter comme indépendantes gonflerait la précision). Règles fixées avant la mesure : moins de
@@ -403,7 +418,7 @@ def synthese_replication(par_leader: Mapping[str, Mapping[str, Any]], config: Re
         complet = resultat["full"]
         for jour, net in zip(complet.get("days_utc") or (), complet.get("daily_net_usd") or (), strict=True):
             par_jour.setdefault(int(jour), []).append(float(net))
-    base = {"hypothesis": H_REPLICATION_350, "economically_proven": False, "leaders": len(par_leader),
+    base = {"hypothesis": H_REPLICATION_PAPER, "economically_proven": False, "leaders": len(par_leader),
             "leaders_measured": sum(1 for r in par_leader.values() if r["full"].get("complete_days")),
             "distinct_days": len(par_jour), "leader_days": sum(len(v) for v in par_jour.values())}
     if not par_jour:
@@ -437,6 +452,6 @@ def synthese_replication(par_leader: Mapping[str, Mapping[str, Any]], config: Re
             "reason": "intervalle à cheval sur zéro, ou funding insuffisamment couvert pour conclure"}
 
 
-__all__ = ["FRAICHEUR_ETAT_DEX_MS", "H_REPLICATION_350", "ReplicationConfig", "decomposer_les_pertes",
+__all__ = ["FRAICHEUR_ETAT_DEX_MS", "H_REPLICATION_350", "H_REPLICATION_PAPER", "ReplicationConfig", "decomposer_les_pertes",
            "instantanes_complets", "portefeuilles_depuis_instantanes",
            "run_replication", "synthese_replication"]

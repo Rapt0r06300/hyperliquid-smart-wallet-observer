@@ -33,6 +33,14 @@ def _minutes(heures: int) -> int:
     return heures * 60 + 1
 
 
+def test_scalar_price_lookup_matches_causal_vector_lookup_at_boundaries():
+    panel = _panel({"BTC": [100.0, 101.0, 102.0]}, pas_ms=1_000, stale_ms=1_500)
+    for instant in (T0 - 1, T0, T0 + 999, T0 + 1_000, T0 + 2_500, T0 + 2_501):
+        vector = float(panel.at(np.asarray([instant], dtype=np.int64), 0)[0])
+        scalar = panel.at_one(instant, 0)
+        assert scalar == vector or (np.isnan(scalar) and np.isnan(vector))
+
+
 def _portefeuille(tailles: dict[str, float], nav: float, heures: int, *, pas_ms: int = 300_000):
     return [(T0 + k * pas_ms, nav, dict(tailles)) for k in range(heures * HEURE // pas_ms + 1)]
 

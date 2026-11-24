@@ -200,7 +200,8 @@ LOIS: tuple[Loi, ...] = (
                                  "marge de bruit, sur ≥ 20 jours indépendants",
         mots_cles=("meilleur leader", "top leader", "leader du tableau",
                    "classement des leaders", "meilleurs leaders"),
-        ou_verifier="tools/etude_copiabilite.py --replication-350 (borne_du_hasard_replication) "
+        ou_verifier="tools/etude_copiabilite.py --replication-paper (alias historique --replication-350; "
+                    "borne_du_hasard_replication) "
                     "+ backtesting/overfit_selection.py"),
 
     Loi(cle="famille_overshoot_comme_entree",

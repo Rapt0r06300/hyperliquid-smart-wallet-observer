@@ -18,6 +18,7 @@ debit nul -> `INFINI` ; debit non mesurable -> `INCONNU` ; jamais une duree inve
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
@@ -32,6 +33,40 @@ for dossier in ("tools", "src"):
 import eta_donnees_labo as ETA  # noqa: E402
 
 HEURE_S = 3600.0
+
+
+def _ecrire_restore_courant(
+    racine: Path, *, shards: int = 12, octets: int = 4096,
+    release_assets: int | None = None,
+    repository: str = "Rapt0r06300/hyperliquid-smart-wallet-observer",
+) -> tuple[str, Path]:
+    index = racine / "catalog" / "DATA_INDEX.json"
+    index.parent.mkdir(parents=True, exist_ok=True)
+    index.write_text('{"schema":"alina.index.v1","shards":[]}', encoding="utf-8")
+    digest = hashlib.sha256(index.read_bytes()).hexdigest()
+    recovery = racine / "runtime" / "recovery" / "full"
+    recovery.mkdir(parents=True, exist_ok=True)
+    (recovery / "RESTORE_REPORT.json").write_text(json.dumps({
+        "status": "REPLAY_READY_COMPLETE",
+        "repository": repository,
+        "source_inventory_sha256": "c" * 64,
+        "selection_scope": "ALL_SAFE_REPLAYABLE",
+        "classification": {
+            "expected_usable_shards": shards,
+            "usable_shards": shards,
+            "expected_usable_bytes": octets,
+            "usable_bytes": octets,
+            "materialization_complete": True,
+            "failures": [],
+        },
+        "catalog_verification": {
+            "safe_catalog_shards": shards,
+            "required_release_assets": shards if release_assets is None else release_assets,
+            "source_index_sha256": digest,
+            "selection_families": ["copy_vault_fills"],
+        },
+    }), encoding="utf-8")
+    return digest, recovery
 
 
 def _cas(**ecarts):
@@ -160,21 +195,16 @@ def test_tous_les_besoins_live_sont_visibles_et_ne_cachent_pas_l_inconnu():
 
 
 def test_l_eta_lit_separement_alinasync_github_et_coffre(tmp_path):
-    recovery = tmp_path / "runtime" / "recovery" / "full"
-    recovery.mkdir(parents=True)
-    (recovery / "RESTORE_REPORT.json").write_text(json.dumps({
-        "status": "REPLAY_READY_COMPLETE",
-        "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
-        "selection_scope": "ALL_SAFE_REPLAYABLE",
-        "classification": {"usable_shards": 12, "usable_bytes": 4096},
-        "catalog_verification": {
-            "required_release_assets": 3,
-            "source_index_sha256": "a" * 64,
-            "selection_families": ["copy_vault_fills", "copy_vault_l2"],
-        },
-    }), encoding="utf-8")
+    catalog_sha, recovery = _ecrire_restore_courant(tmp_path, release_assets=3)
     (recovery / "UNPACK_REPORT.json").write_text(json.dumps({
-        "status": "SAFE_UNPACK_COMPLETE", "unpacked_shards": 2,
+        "status": "SAFE_UNPACK_COMPLETE",
+        "mode": "FULL_JSONL",
+        "physical_jsonl_available": True,
+        "streamable_gzip_available": True,
+        "replay_read_mode": "JSONL",
+        "catalog_index_sha256": catalog_sha,
+        "certified_shards": 12,
+        "unpacked_shards": 2,
     }), encoding="utf-8")
     (recovery / "SYNC_REPORT.json").write_text(json.dumps({
         "status": "REPLAY_READY_COMPLETE",
@@ -182,6 +212,7 @@ def test_l_eta_lit_separement_alinasync_github_et_coffre(tmp_path):
     coffre = tmp_path / "runtime" / "coffre_certifie"
     coffre.mkdir(parents=True)
     (coffre / "COUVERTURE_PROJET.json").write_text(json.dumps({
+        "genere_ms": 123_456,
         "complet": True, "cent_pour_cent": False,
         "couverture_pct": 92.5, "fichiers_de_donnees": 40,
     }), encoding="utf-8")
@@ -192,17 +223,235 @@ def test_l_eta_lit_separement_alinasync_github_et_coffre(tmp_path):
     assert sources["safe_shards"] == 12
     assert sources["unpacked_shards"] == 2
     assert sources["github_release_bound"] is True
+    assert sources["coffre_genere_ms"] == 123_456
     assert "3 assets" in lignes
     assert "PARTIEL / À COMPLÉTER" in lignes
     assert "92.500 %" in lignes
     assert "ne deviennent des jours denses" in lignes
 
 
+def test_un_rapport_seal_only_ne_compte_pas_comme_jsonl_deballe(tmp_path):
+    catalog_sha, recovery = _ecrire_restore_courant(tmp_path)
+    (recovery / "UNPACK_REPORT.json").write_text(json.dumps({
+        # Ancien producteur : statut trompeur malgré le mode seal-only.
+        "status": "SAFE_UNPACK_COMPLETE",
+        "mode": "SEAL_ONLY",
+        "physical_jsonl_available": False,
+        "streamable_gzip_available": True,
+        "replay_read_mode": "GZIP_STREAM",
+        "catalog_index_sha256": catalog_sha,
+        "certified_shards": 12,
+        "unpacked_shards": 12,
+    }), encoding="utf-8")
+
+    sources = ETA.lire_sources_alinasync(tmp_path)
+    texte = "\n".join(ETA.lignes_sources_live(sources))
+
+    assert sources["unpack_verified"] is False
+    assert sources["unpack_certified"] is False
+    assert sources["unpacked_shards"] is None
+    assert "JSONL non décompressés" in texte or "INCONNU" in texte
+
+
+def test_un_recu_seal_only_courant_est_compte_comme_certifie_en_flux(tmp_path):
+    catalog_sha, recovery = _ecrire_restore_courant(tmp_path)
+    (recovery / "UNPACK_REPORT.json").write_text(json.dumps({
+        "status": "SAFE_SEAL_CERTIFICATION_COMPLETE",
+        "mode": "SEAL_ONLY",
+        "physical_jsonl_available": False,
+        "streamable_gzip_available": True,
+        "replay_read_mode": "GZIP_STREAM",
+        "catalog_index_sha256": catalog_sha,
+        "certified_shards": 12,
+        "unpacked_shards": 12,
+    }), encoding="utf-8")
+
+    sources = ETA.lire_sources_alinasync(tmp_path)
+    texte = "\n".join(ETA.lignes_sources_live(sources))
+
+    assert sources["unpack_certified"] is True
+    assert sources["unpack_verified"] is False
+    assert sources["unpacked_shards"] is None
+    assert sources["certified_shards"] == 12
+    assert "12 shards certifiés en flux" in texte
+    assert "JSONL non décompressés" in texte
+
+
+def test_un_deballage_d_un_autre_catalogue_est_refuse_par_eta(tmp_path):
+    catalog_sha, recovery = _ecrire_restore_courant(tmp_path)
+    (recovery / "UNPACK_REPORT.json").write_text(json.dumps({
+        "status": "SAFE_UNPACK_COMPLETE",
+        "mode": "FULL_JSONL",
+        "physical_jsonl_available": True,
+        "streamable_gzip_available": True,
+        "replay_read_mode": "JSONL",
+        "catalog_index_sha256": "d" * 64,
+        "certified_shards": 12,
+        "unpacked_shards": 12,
+    }), encoding="utf-8")
+
+    sources = ETA.lire_sources_alinasync(tmp_path)
+    texte = "\n".join(ETA.lignes_sources_live(sources))
+
+    assert sources["unpack_verified"] is False
+    assert sources["unpacked_shards"] is None
+    assert sources["unpack_issue"] == "CATALOG_SHA_MISMATCH"
+    assert "rapport de déballage lié à un autre catalogue" in texte
+
+
+def test_restore_et_unpack_d_un_catalogue_ancien_sont_refuses_par_eta(tmp_path):
+    catalog = tmp_path / "catalog" / "DATA_INDEX.json"
+    catalog.parent.mkdir(parents=True)
+    catalog.write_text('{"schema":"alina.index.v1","shards":[]}', encoding="utf-8")
+    current_sha = hashlib.sha256(catalog.read_bytes()).hexdigest()
+    stale_sha = "f" * 64
+    recovery = tmp_path / "runtime" / "recovery" / "full"
+    recovery.mkdir(parents=True)
+    (recovery / "RESTORE_REPORT.json").write_text(json.dumps({
+        "status": "REPLAY_READY_COMPLETE",
+        "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "source_inventory_sha256": "c" * 64,
+        "classification": {
+            "expected_usable_shards": 1, "usable_shards": 1,
+            "expected_usable_bytes": 100, "usable_bytes": 100,
+            "materialization_complete": True, "failures": [],
+        },
+        "catalog_verification": {
+            "safe_catalog_shards": 1,
+            "required_release_assets": 1,
+            "source_index_sha256": stale_sha,
+            "selection_families": ["copy_vault_fills"],
+        },
+    }), encoding="utf-8")
+    (recovery / "UNPACK_REPORT.json").write_text(json.dumps({
+        "status": "SAFE_UNPACK_COMPLETE", "mode": "FULL_JSONL",
+        "physical_jsonl_available": True, "replay_read_mode": "JSONL",
+        "catalog_index_sha256": stale_sha,
+        "certified_shards": 1, "unpacked_shards": 1,
+    }), encoding="utf-8")
+
+    sources = ETA.lire_sources_alinasync(tmp_path)
+
+    assert sources["current_catalog_sha256"] == current_sha
+    assert sources["restore_verified"] is False
+    assert sources["safe_shards"] is None
+    assert sources["unpack_certified"] is False
+    assert sources["unpack_verified"] is False
+    assert sources["unpack_issue"] == "CATALOG_SHA_MISMATCH"
+    dashboard = "\n".join(ETA.lignes_dashboard_simple(
+        tours=1,
+        mesure={"motif": "PREMIERE_MESURE", "active_sources": 0, "source_count": 0},
+        etat={"code": "INCONNU"},
+        denses_acquis=0,
+        requis=6,
+        age_sonde_h=None,
+        eta={"statut": "INCONNU", "heures": None},
+        besoins=[],
+        sources=sources,
+        intervalle_s=2.0,
+    ))
+    assert "ancien catalogue" in dashboard
+
+
+def test_dashboard_court_separe_safe_extraction_et_github_sans_ligne_trop_longue():
+    lignes = ETA.lignes_dashboard_simple(
+        tours=1,
+        mesure={"motif": "PREMIERE_MESURE", "active_sources": 0, "source_count": 8},
+        etat={"code": "EN_ATTENTE"},
+        denses_acquis=2,
+        requis=6,
+        age_sonde_h=0.1,
+        eta={"statut": "INCONNU", "heures": None},
+        besoins=[],
+        sources={
+            "restore_verified": True,
+            "safe_shards": 1_792_577,
+            "safe_bytes": 142_923_240_926,
+            "unpack_verified": False,
+            "reported_unpacked_shards": 15_456,
+            "unpack_issue": "UNPACK_CONTRACT_INCONSISTENT",
+            "github_release_bound": True,
+            "release_assets": 21_400,
+            "coffre_couverture_pct": 90.75,
+            "coffre_status": "PARTIEL / À COMPLÉTER",
+            "coffre_fichiers": 31_601,
+        },
+        intervalle_s=2.0,
+    )
+    texte = "\n".join(lignes)
+
+    assert any("SAFE RESTAURÉ" in ligne and "1,792,577" in ligne for ligne in lignes)
+    assert any("EXTRACTION" in ligne and "15,456" in ligne and "NON VÉRIFIÉS" in ligne for ligne in lignes)
+    assert any("GITHUB" in ligne and "21,400" in ligne for ligne in lignes)
+    assert any("COFFRE" in ligne and "31,601 fichiers" in ligne for ligne in lignes)
+    assert max(map(len, lignes)) <= 100
+    assert "ne devient pas une journée dense avant replay" in texte
+
+
+def test_un_ancien_recu_incomplet_montre_son_compte_sans_le_certifier(tmp_path):
+    catalog_sha, recovery = _ecrire_restore_courant(
+        tmp_path, shards=1_792_577, octets=142_923_240_926,
+        release_assets=21_400,
+    )
+    # Reproduit le reçu local : mode et compte présents, champs physiques absents.
+    (recovery / "UNPACK_REPORT.json").write_text(json.dumps({
+        "status": "SAFE_UNPACK_COMPLETE",
+        "mode": "FULL_JSONL",
+        "catalog_index_sha256": catalog_sha,
+        "certified_shards": 1_792_577,
+        "unpacked_shards": 15_456,
+    }), encoding="utf-8")
+
+    sources = ETA.lire_sources_alinasync(tmp_path)
+    texte = "\n".join(ETA.lignes_sources_live(sources))
+
+    assert sources["unpack_verified"] is False
+    assert sources["unpacked_shards"] is None
+    assert sources["reported_unpacked_shards"] == 15_456
+    assert "15,456 annoncés par le reçu, non vérifiés et non comptés" in texte
+    assert "1,792,577 shards / 133.1 Go" in texte
+
+
+def test_un_restore_d_un_autre_depot_n_est_pas_compte_comme_source_safe(tmp_path):
+    recovery = tmp_path / "runtime" / "recovery" / "full"
+    recovery.mkdir(parents=True)
+    (recovery / "RESTORE_REPORT.json").write_text(json.dumps({
+        "status": "REPLAY_READY_COMPLETE",
+        "repository": "example/another-repository",
+        "classification": {"usable_shards": 12, "usable_bytes": 4096},
+        "catalog_verification": {
+            "required_release_assets": 3,
+            "source_index_sha256": "f" * 64,
+            "selection_families": ["copy_vault_fills"],
+        },
+    }), encoding="utf-8")
+
+    sources = ETA.lire_sources_alinasync(tmp_path)
+
+    assert sources["restore_verified"] is False
+    assert sources["github_release_bound"] is False
+    assert "INCONNU (restauration non certifiée)" in "\n".join(
+        ETA.lignes_sources_live(sources)
+    )
+
+
+def test_eta_ne_declare_pas_des_shards_disponibles_sans_recu_valide(tmp_path):
+    sources = ETA.lire_sources_alinasync(tmp_path)
+
+    texte = "\n".join(ETA.lignes_sources_live(sources))
+
+    assert "aucun shard SAFE certifié par le reçu" in texte
+    assert "ces shards sont disponibles" not in texte
+
+
 def test_le_resume_operateur_montre_vivant_progression_debit_et_eta(tmp_path):
     ruban = tmp_path / "fills.jsonl"
     ruban.write_text("{}\n", encoding="utf-8")
-    mesure = {"lignes_par_minute": 12.5, "motif": None, "taille_octets": 42}
-    etat = {"code": "ACTIF", "detail": "croissance mesurée", "age_s": 0.4}
+    mesure = {
+        "lignes_par_minute": 12.5, "motif": None, "taille_octets": 42,
+        "active_sources": 7, "source_count": 94, "recent_sources": 12,
+    }
+    etat = {"code": "ACTIF", "detail": "7/94 fichiers de données en croissance", "age_s": 0.4}
     eta = {"statut": "EN_COURS", "heures": 26.0}
     lignes = ETA.lignes_resume(
         tours=4, ruban=ruban, mesure=mesure, etat=etat,
@@ -214,8 +463,182 @@ def test_le_resume_operateur_montre_vivant_progression_debit_et_eta(tmp_path):
     assert "EN DIRECT" in texte
     assert "50.0 %" in texte
     assert "12.5 lignes/min" in texte
+    assert "7/94 fichiers de données" in texte
+    assert "94 fichiers observés, pas 94 collecteurs" in texte
+    assert "12/94 récents" in texte
     assert "ETA moteur" in texte
     assert "demo [base]" in texte
+
+
+def _ecrire_suivi_collecteurs(racine: Path, payload: dict) -> None:
+    journal = racine / "runtime" / "logs" / "economic-collector-watchdog.jsonl"
+    journal.parent.mkdir(parents=True, exist_ok=True)
+    journal.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def test_suivi_collecteurs_distingue_processus_actifs_et_gaps_causaux(tmp_path):
+    now_ms = 1_800_000_000_000
+    noms = ["userfills-live", "copy-vault-checkpoints"]
+    _ecrire_suivi_collecteurs(tmp_path, {
+        "ts_ms": now_ms - 5_000,
+        "status": "ACTIVE",
+        "requested": noms,
+        "active": noms,
+        "missing": [],
+        "lease_renewal": "OK",
+        "causal_protocol_status": "OK",
+        "causal_evidence_reported_gaps": 1184,
+        "causal_evidence_gaps_since_start": 3,
+        "paper_read_only": True,
+        "real_execution": False,
+    })
+
+    suivi = ETA.lire_suivi_collecteurs(tmp_path, maintenant_ms=now_ms)
+    texte = "\n".join(ETA._lignes_suivi_collecteurs(suivi))
+
+    assert suivi["code"] == "ACTIF"
+    assert (suivi["actifs"], suivi["demandes"]) == (2, 2)
+    assert suivi["gaps_causaux"] == 1184
+    assert suivi["nouveaux_gaps"] == 3
+    assert "2/2 actifs" in texte
+    assert "écarts signalés: 1 184" in texte
+    assert "+3" in texte
+
+
+def test_suivi_collecteurs_perime_ne_confirme_pas_une_activite_actuelle(tmp_path):
+    now_ms = 1_800_000_000_000
+    _ecrire_suivi_collecteurs(tmp_path, {
+        "ts_ms": now_ms - 121_000,
+        "status": "ACTIVE",
+        "requested": ["worker"],
+        "active": ["worker"],
+        "missing": [],
+        "lease_renewal": "OK",
+        "causal_protocol_status": "OK",
+        "paper_read_only": True,
+        "real_execution": False,
+    })
+
+    suivi = ETA.lire_suivi_collecteurs(tmp_path, maintenant_ms=now_ms)
+
+    assert suivi["code"] == "PERIME"
+    assert "périmé" in "\n".join(ETA._lignes_suivi_collecteurs(suivi))
+
+
+def test_suivi_collecteurs_refuse_une_derniere_ligne_tronquee(tmp_path):
+    journal = tmp_path / ETA.JOURNAL_COLLECTEURS
+    journal.parent.mkdir(parents=True, exist_ok=True)
+    journal.write_bytes(b'{"status":"ACTIVE"')
+
+    suivi = ETA.lire_suivi_collecteurs(tmp_path, maintenant_ms=1_800_000_000_000)
+
+    assert suivi["code"] == "INCONNU"
+    assert "incomplète" in suivi["motif"]
+
+
+def test_suivi_collecteurs_affiche_une_erreur_de_supervision_sans_fausse_activite(tmp_path):
+    now_ms = 1_800_000_000_000
+    _ecrire_suivi_collecteurs(tmp_path, {
+        "ts_ms": now_ms,
+        "status": "WATCH_PASS_ERROR",
+        "error": "OSError: lecture temporairement impossible",
+        "paper_read_only": True,
+        "real_execution": False,
+    })
+
+    suivi = ETA.lire_suivi_collecteurs(tmp_path, maintenant_ms=now_ms)
+
+    assert suivi["code"] == "ERREUR"
+    assert "ERREUR superviseur" in "\n".join(ETA._lignes_suivi_collecteurs(suivi))
+
+
+def test_suivi_collecteurs_refuse_un_etat_non_paper_read_only(tmp_path):
+    now_ms = 1_800_000_000_000
+    for flags in (
+        {"paper_read_only": False, "real_execution": False},
+        {"paper_read_only": True, "real_execution": True},
+    ):
+        _ecrire_suivi_collecteurs(tmp_path, {
+            "ts_ms": now_ms,
+            "status": "ACTIVE",
+            "requested": ["worker"],
+            "active": ["worker"],
+            "missing": [],
+            "lease_renewal": "OK",
+            "causal_protocol_status": "OK",
+            **flags,
+        })
+
+        suivi = ETA.lire_suivi_collecteurs(tmp_path, maintenant_ms=now_ms)
+
+        assert suivi["code"] == "INCONNU"
+        assert "READ-ONLY" in suivi["motif"]
+
+
+def test_dashboard_court_affiche_separement_processus_et_croissance_fichiers():
+    lignes = ETA.lignes_dashboard_simple(
+        tours=1,
+        mesure={"motif": "PREMIERE_MESURE", "active_sources": 7, "source_count": 94},
+        etat={"code": "ACTIF"},
+        denses_acquis=0,
+        requis=6,
+        age_sonde_h=None,
+        eta={"statut": "INCONNU", "heures": None},
+        besoins=[],
+        sources=None,
+        intervalle_s=2.0,
+        suivi_collecteurs={"code": "ACTIF", "actifs": 20, "demandes": 20,
+                            "age_s": 4.0, "gaps_causaux": 1184, "nouveaux_gaps": 3},
+    )
+
+    texte = "\n".join(lignes)
+    assert "7/94 fichiers de données grossissent" in texte
+    assert "COLLECTEURS" in texte and "20/20 actifs" in texte
+    assert "écarts signalés: 1 184" in texte
+    assert "+3 depuis lancement du suivi" in texte
+
+
+def test_resume_detaille_explique_la_composition_des_ecarts_de_preuve():
+    lignes = ETA._lignes_detail_suivi_collecteurs({
+        "detail": {
+            "coverage_receipt_status": "UNMEASURABLE",
+            "checkpoint_expirations": 1159,
+            "invalid_rejected": 479,
+            "input_rotations": 7,
+            "writer_outages": 11,
+            "checkpoint_queue_rejections": 0,
+        }
+    })
+
+    assert lignes == [
+        "| DÉTAIL PREUVE     : UNMEASURABLE | expirés 1159; rejets invalides 479; "
+        "rotations 7; interruptions écrivain 11"
+    ]
+
+
+def test_dashboard_indique_l_age_reel_du_recensement_coffre(monkeypatch):
+    monkeypatch.setattr(ETA.time, "time", lambda: 10_000.0)
+    lignes = ETA.lignes_dashboard_simple(
+        tours=1,
+        mesure={"motif": "PREMIERE_MESURE", "active_sources": 0, "source_count": 8},
+        etat={"code": "EN_ATTENTE"},
+        denses_acquis=2,
+        requis=6,
+        age_sonde_h=0.1,
+        eta={"statut": "INCONNU", "heures": None},
+        besoins=[],
+        sources={
+            "coffre_couverture_pct": 90.75,
+            "coffre_status": "PARTIEL / À COMPLÉTER",
+            "coffre_fichiers": 31_601,
+            "coffre_genere_ms": 4_600_000,
+        },
+        intervalle_s=2.0,
+    )
+
+    coffre = next(ligne for ligne in lignes if "COFFRE" in ligne)
+
+    assert "MAJ 1 h 30 min" in coffre
 
 
 def test_le_dashboard_par_defaut_est_court_et_garde_les_sources_reelles(tmp_path):
@@ -253,12 +676,14 @@ def test_le_dashboard_par_defaut_est_court_et_garde_les_sources_reelles(tmp_path
         intervalle_s=2.0,
     )
     texte = "\n".join(lignes)
-    assert len(lignes) <= 15
+    assert len(lignes) <= 16
     assert "EN DIRECT" in texte
+    assert "2/7 fichiers de données grossissent" in texte
+    assert "pas 7 collecteurs" in texte
     assert "12.5 lignes/min" in texte
     assert "collecter encore 12 j 00 h 00 min 00 s" in texte
-    assert "déballé 2 shards" in texte
-    assert "Release 3 assets" in texte
+    assert "2 JSONL physiques selon le reçu" in texte
+    assert "GITHUB" in texte and "3 fichiers dans le reçu" in texte
     assert "BESOINS LIVE" not in texte
 
 

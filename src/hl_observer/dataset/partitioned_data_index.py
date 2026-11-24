@@ -18,6 +18,17 @@ MAX_PARTITION_BYTES = 8 * 1024 * 1024
 _PART_PATH = re.compile(r"data-index-parts/part-([0-9]{6})[.]json")
 
 
+def _dataset_id_fingerprint(dataset_id: str) -> int:
+    """Return a compact process-local key for fail-closed duplicate checks.
+
+    Python's keyed string hash avoids retaining millions of full IDs or
+    calculating a second cryptographic digest. A hash collision rejects the
+    catalogue; it can never make two equal dataset IDs appear different. The
+    value is temporary and is never persisted as provenance or evidence.
+    """
+    return hash(dataset_id)
+
+
 def _json_bytes(value: Any) -> bytes:
     return (
         json.dumps(value, sort_keys=True, ensure_ascii=False,
@@ -230,7 +241,7 @@ def iter_index_rows(
     parts_dir = index_path.parent / "data-index-parts"
     if parts_dir.is_symlink():
         raise ValueError("PARTITION_PARITY_UNSAFE_DIRECTORY")
-    seen: set[str] = set()
+    seen_fingerprints: set[int] = set()
     observed_count = 0
     global_digest = hashlib.sha256(b"[")
     has_global_rows = False
@@ -277,9 +288,13 @@ def iter_index_rows(
             # and the SHA/count checks below remain bound to the raw bytes.
             row = item
             identity = row.get("dataset_id")
-            if not isinstance(identity, str) or not identity or identity in seen:
+            if not isinstance(identity, str) or not identity:
                 raise ValueError("PARTITION_PARITY_DUPLICATE_OR_MISSING_DATASET_ID")
-            seen.add(identity)
+            fingerprint = _dataset_id_fingerprint(identity)
+            if fingerprint in seen_fingerprints:
+                # Includes both exact duplicates and digest collisions; fail closed.
+                raise ValueError("PARTITION_PARITY_DUPLICATE_OR_MISSING_DATASET_ID")
+            seen_fingerprints.add(fingerprint)
             observed_count += 1
             yield row
         if has_global_rows:
@@ -355,7 +370,7 @@ def select_index_rows(
         raise ValueError("PARTITION_PARITY_INVALID_METADATA")
 
     selected = []
-    seen: set[str] = set()
+    seen_fingerprints: set[int] = set()
     observed_count = 0
     global_digest = hashlib.sha256()
     global_digest.update(b"[")
@@ -403,9 +418,13 @@ def select_index_rows(
                 raise ValueError("PARTITION_PARITY_INVALID_ROW")
             row = dict(item)
             ident = row.get("dataset_id")
-            if not isinstance(ident, str) or not ident or ident in seen:
+            if not isinstance(ident, str) or not ident:
                 raise ValueError("PARTITION_PARITY_DUPLICATE_OR_MISSING_DATASET_ID")
-            seen.add(ident)
+            fingerprint = _dataset_id_fingerprint(ident)
+            if fingerprint in seen_fingerprints:
+                # Includes exact duplicates and digest collisions; fail closed.
+                raise ValueError("PARTITION_PARITY_DUPLICATE_OR_MISSING_DATASET_ID")
+            seen_fingerprints.add(fingerprint)
             observed_count += 1
             if predicate(row):
                 selected.append(row)

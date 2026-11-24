@@ -113,7 +113,8 @@ FLUX: tuple[Flux, ...] = (
          f"{ETUDE} --positions / --retrospectif (prix)"),
     Flux("funding_1h.jsonl", HISTORY, "tools/backfill_candles_vaults.py",
          "funding horaire publié par coin, récupéré après coup (208 jours)", "funding_history", CONSOMME,
-         f"{ETUDE} --replication-350 / --positions / --retrospectif (coût de portage d'une position tenue)"),
+         f"{ETUDE} --replication-paper (alias historique --replication-350) / --positions / --retrospectif "
+         "(coût de portage d'une position tenue)"),
     Flux("candles_1h.jsonl", HISTORY, "tools/backfill_candles_vaults.py",
          "bougies 1 h récupérées après coup (208 jours, dex HIP-3 compris)", "candle", CONSOMME,
          f"{ETUDE} --retrospectif --bougies 1h / --ouvertures (prix sur des mois)"),

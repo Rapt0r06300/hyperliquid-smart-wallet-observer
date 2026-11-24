@@ -175,7 +175,12 @@ def coverage_receipt(counters: Mapping[str, Any], *, expected_lines: int) -> dic
     captured = values["checkpoints_captured"]
     if any(type(value) is not int or value < 0 for value in (actual, captured)):
         return {"status": "UNMEASURABLE", "reason": "COUNTER_INVALID", "paper_read_only": True}
-    complete_counters = all(type(value) is int and value >= 0 for value in values.values())
+    writer_outages = counters.get("writer_outages", 0)
+    writer_outages_valid = type(writer_outages) is int and writer_outages >= 0
+    complete_counters = (
+        all(type(value) is int and value >= 0 for value in values.values())
+        and writer_outages_valid
+    )
     valid_incidents = {
         name: value if type(value) is int and value >= 0 else 0
         for name, value in values.items()
@@ -188,9 +193,8 @@ def coverage_receipt(counters: Mapping[str, Any], *, expected_lines: int) -> dic
         + valid_incidents["invalid_rejected"]
         + valid_incidents["checkpoints_expired"]
         + valid_incidents["pending_overflow_rejected"]
-        # Compteur ne le 17/11 : absent d'un etat anterieur, il vaut zero.
-        + (counters.get("writer_outages") if type(counters.get("writer_outages")) is int
-           and counters.get("writer_outages") > 0 else 0)
+        # Compteur absent des états antérieurs : absence = 0; présent mais invalide = reçu non prouvé.
+        + (writer_outages if writer_outages_valid else 0)
     )
     return {
         "status": "PROVEN" if complete_counters and actual == expected_lines and gaps == 0 else "UNMEASURABLE",
@@ -742,16 +746,18 @@ class CopyVaultCheckpointTail(VoiePreSignal):
         self.state["updated_at_ms"] = self.clock_ms()
         _atomic_write(self.state_path, self.state)
         counters = dict(self.state.get("counters") or {})
-        collector_gap_count = sum(
-            int(counters.get(name) or 0)
-            for name in (
-                "input_rotations",
-                "reconnect_backfill_blocked",
-                "checkpoints_expired",
-                "pending_overflow_rejected",
-                "writer_outages",
-            )
+        expected_lines = counters.get("complete_lines")
+        receipt = coverage_receipt(
+            counters,
+            expected_lines=(
+                expected_lines
+                if type(expected_lines) is int and expected_lines >= 0
+                else -1
+            ),
         )
+        collector_gap_count = receipt.get("gap_count")
+        if type(collector_gap_count) is not int or collector_gap_count < 0:
+            collector_gap_count = None
         return {
             "protocol": COMPANION_PROTOCOL,
             "identity_migration_reset": self.state.get("identity_migration_reset"),
@@ -761,7 +767,8 @@ class CopyVaultCheckpointTail(VoiePreSignal):
             "pending": len(self.state.get("pending") or []),
             "counters": counters,
             "collector_gap_count": collector_gap_count,
-            "replay_evidence_complete": collector_gap_count == 0,
+            "coverage_receipt_status": receipt["status"],
+            "replay_evidence_complete": receipt["status"] == "PROVEN",
             "paper_read_only": True,
             "real_execution": False,
         }

@@ -59,6 +59,7 @@ CHECKPOINT_PATH = ROOT / "runtime" / "reports" / "global-unique-trades" / "ident
 IDENTITY_VERSION = "native-id-or-venue-family-symbol-time-side-price-size-v3-full-string"
 MAX_IN_FLIGHT_RELEASE_BYTES = 768 * 1024 * 1024
 CHECKPOINT_COMMIT_INTERVAL = 32
+IDENTITY_INSERT_BATCH_SIZE = 4096
 _SCAN_ROW_KEYS = (
     "dataset_id", "family", "venue", "symbol", "trade_count",
     "trade_count_exact", "manifest_path", "release_repository",
@@ -66,6 +67,35 @@ _SCAN_ROW_KEYS = (
     "release_member", "release_storage", "release_remote_size",
     "release_remote_digest", "sha256", "bytes",
 )
+_SCAN_ROW_INDEX = {key: index for index, key in enumerate(_SCAN_ROW_KEYS)}
+
+
+class _CompactScanRow(Mapping[str, Any]):
+    """Slot-backed immutable view of the small metadata needed by a scan.
+
+    Candidate inventories can contain hundreds of thousands of rows. A dict
+    per row duplicates hash-table overhead while the values themselves remain
+    shared strings from the verified catalog. Keep the same Mapping interface
+    for callers, but store only the ordered values in one compact tuple.
+    """
+
+    __slots__ = ("_values",)
+
+    def __init__(self, values: Mapping[str, Any]) -> None:
+        self._values = tuple(values.get(key) for key in _SCAN_ROW_KEYS)
+
+    def __getitem__(self, key: str) -> Any:
+        try:
+            index = _SCAN_ROW_INDEX[key]
+        except KeyError:
+            raise KeyError(key) from None
+        return self._values[index]
+
+    def __iter__(self):
+        return iter(_SCAN_ROW_KEYS)
+
+    def __len__(self) -> int:
+        return len(_SCAN_ROW_KEYS)
 
 
 def _index_aliases(index: Mapping[str, Any]) -> tuple[str | None, dict[str, str], dict[str, str]]:
@@ -150,7 +180,7 @@ def _restore_exact_trade_count_row(
     return changed
 
 
-def _iter_trade_scan_rows(index_path: Path) -> tuple[list[dict[str, Any]], int, list[str], int]:
+def _iter_trade_scan_rows(index_path: Path) -> tuple[list[Mapping[str, Any]], int, list[str], int]:
     root = json.loads(index_path.read_text(encoding="utf-8"))
     if not isinstance(root, Mapping):
         raise ValueError("DATA_INDEX_INVALID_ROOT")
@@ -175,7 +205,7 @@ def _iter_trade_scan_rows(index_path: Path) -> tuple[list[dict[str, Any]], int, 
         if row.get("trade_count_exact") is not True:
             unproven.append(str(row.get("dataset_id") or ""))
         if _unique_candidate(row):
-            candidates.append(row)
+            candidates.append(_CompactScanRow(row))
     return candidates, trade_shards, sorted(unproven), restored
 
 
@@ -301,13 +331,29 @@ def _open_checkpoint(path: Path, candidates: list[Mapping[str, Any]]) -> sqlite3
         raise ValueError("checkpoint identity version mismatch")
     if database.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
         raise ValueError("checkpoint integrity check failed")
-    expected = {str(row.get("dataset_id") or ""): row for row in candidates}
-    if len(expected) != len(candidates) or not all(expected):
-        raise ValueError("duplicate or empty candidate dataset_id")
-    completed = database.execute("SELECT dataset_id, asset_sha256, trade_count, unique_count, global_new FROM completed").fetchall()
+    # Sort the compact inventory in place, then validate checkpoint provenance
+    # with a merge walk. This avoids a second 300k-entry dict alongside the
+    # candidate list while preserving exact ID/SHA/count matching.
+    candidates.sort(key=lambda row: str(row.get("dataset_id") or ""))
+    candidate_ids = [str(row.get("dataset_id") or "") for row in candidates]
+    previous_id = ""
+    for dataset_id in candidate_ids:
+        if not dataset_id or dataset_id == previous_id:
+            raise ValueError("duplicate or empty candidate dataset_id")
+        previous_id = dataset_id
+
+    completed = database.execute(
+        "SELECT dataset_id, asset_sha256, trade_count, unique_count, global_new "
+        "FROM completed ORDER BY dataset_id"
+    ).fetchall()
+    candidate_index = 0
     for dataset_id, sha, trades, unique, new in completed:
-        row = expected.get(dataset_id)
-        if (row is None or str(row.get("sha256") or "").lower() != sha
+        while candidate_index < len(candidate_ids) and candidate_ids[candidate_index] < dataset_id:
+            candidate_index += 1
+        if candidate_index >= len(candidate_ids) or candidate_ids[candidate_index] != dataset_id:
+            raise ValueError("checkpoint shard provenance mismatch")
+        row = candidates[candidate_index]
+        if (str(row.get("sha256") or "").lower() != sha
                 or row.get("trade_count_exact") is not True or row.get("trade_count") != trades
                 or not 0 <= new <= unique <= trades):
             raise ValueError("checkpoint shard provenance mismatch")
@@ -340,6 +386,20 @@ def _merge_checkpoint_shard(
         global_new = 0
         local_count = 0
         previous_identity: str | None = None
+        identity_batch: list[tuple[str]] = []
+
+        def flush_identity_batch() -> None:
+            nonlocal global_new
+            if not identity_batch:
+                return
+            before = database.total_changes
+            database.executemany(
+                "INSERT OR IGNORE INTO ids(identity) VALUES (?)",
+                identity_batch,
+            )
+            global_new += database.total_changes - before
+            identity_batch.clear()
+
         with identity_path.open("r", encoding="utf-8") as handle:
             for line in handle:
                 identity = canonical_identity(line.rstrip("\n"))
@@ -347,9 +407,10 @@ def _merge_checkpoint_shard(
                     raise ValueError("shard identity file is not strictly sorted and unique")
                 previous_identity = identity
                 local_count += 1
-                before = database.total_changes
-                database.execute("INSERT OR IGNORE INTO ids(identity) VALUES (?)", (identity,))
-                global_new += int(database.total_changes > before)
+                identity_batch.append((identity,))
+                if len(identity_batch) >= IDENTITY_INSERT_BATCH_SIZE:
+                    flush_identity_batch()
+        flush_identity_batch()
         if local_count != scanned["unique_trade_count"]:
             raise ValueError("shard unique identity count mismatch")
         database.execute(
@@ -578,7 +639,6 @@ def main() -> None:
         else {}
     )
 
-    all_candidates = sorted(all_candidates, key=lambda row: str(row.get("dataset_id") or ""))
     database = _open_checkpoint(CHECKPOINT_PATH, all_candidates)
     already_done = {row[0] for row in database.execute("SELECT dataset_id FROM completed")}
     candidates = [row for row in all_candidates if str(row.get("dataset_id") or "") not in already_done][: args.limit]

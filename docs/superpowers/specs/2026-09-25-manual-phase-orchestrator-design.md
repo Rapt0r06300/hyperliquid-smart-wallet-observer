@@ -16,6 +16,13 @@ The user controls phase changes manually through ChatGPT/GitHub. Autonomous runt
 
 The design must preserve strict paper/read-only behavior and must never enable real orders.
 
+The repository safety audit MUST include executable entry surfaces as well as
+runtime modules: `src/`, `hyper_smart_observer/`, `tools/`, `scripts/`, root-level
+`.cmd`/`.bat`/shell/PowerShell/JavaScript launchers, and `.github/workflows/`.
+The workflow runner-selector gate remains independent from the source scan.
+These static checks are fail-closed tripwires, not proof of runtime reachability;
+dynamic URL construction and indirect calls still require focused negative tests.
+
 ## Current CopyVault-only operating scope
 
 Until a reviewed change to the central strategy authority explicitly reactivates
@@ -142,6 +149,22 @@ compressed-byte seal. `SAFE_UNPACK_COMPLETE` is valid only with
 JSONL digest; it never claims that JSONL files exist on disk. Consumers must
 use `unpack_certified` for either admissible proof and `unpack_complete` only
 for physical JSONL availability.
+
+The read-only `ETA_COLLECTE` dashboard must hash the current canonical
+`catalog/DATA_INDEX.json` on its slow receipt refresh and bind both restore and
+unpack receipts to that exact digest. It may show an older or incomplete
+report's declared counts for diagnosis, but must mark them unverified and
+exclude them from verified SAFE/physical/streamable totals.
+Release-asset counts and SAFE restore receipts are local observations from
+AlinaSync, not a live GitHub health probe; downloaded shards become dense-day
+evidence only after the canonical replay validates them.
+`SYNC_REPORT.json` may expose SAFE shard and L2 counters only from a complete,
+canonical-repository `RESTORE_REPORT.json` whose source inventory digest,
+exact shard/byte parity, and catalog SHA validate against the current index;
+otherwise those counters are unavailable/zero, never borrowed from a stale
+receipt. The ETA dashboard must display the generation age of the vault
+inventory separately from the live collector refresh clock; a stale inventory
+has no countdown unless a measured rate supports one.
 
 Git LFS is not part of the operational backup, clone or restoration path:
 no smudge/mirror/migration workflow, no LFS object as a required source.
@@ -14358,3 +14381,38 @@ souscription prouve seulement une réponse de transport : il ne prouve ni
 continuité, ni absence de fills manquants. Après une reconnexion, seule une
 réconciliation de fenêtre complète et sans manque/ambiguïté rétablit la preuve ;
 sinon le corpus reste exclu des mesures qui exigent cette continuité.
+
+### 2026-11-24 â€” UnicitÃ© DATA_INDEX avec empreintes temporaires compactes
+
+Les lecteurs partitionnÃ©s `iter_index_rows` et `select_index_rows` gardent dÃ©sormais des empreintes entiÃ¨res calculÃ©es par le hash natif des chaÃ®nes, au lieu de conserver 1,85 million d'identifiants complets. Les empreintes restent Ã©phÃ©mÃ¨res au processus et ne remplacent jamais les identifiants ni les SHA de provenance. Un doublon exact produit toujours la mÃªme empreinte ; toute collision, y compris entre identifiants distincts, refuse le catalogue (fail-closed). Deux tests injectent explicitement une collision pour vÃ©rifier ce refus.
+
+Validation du DATA_INDEX rÃ©el par `_iter_trade_scan_rows` : 1 853 164 lignes intÃ©gralement parcourues, SHA/count global vÃ©rifiÃ© par l'itÃ©rateur, 293 888 shards trade candidats, 0 shard trade au compte exact non prouvÃ©. Passage prÃ©cÃ©dent avec empreintes BLAKE2b : 36,85 s et 698,9 Mio de pic RSS ; hash natif : 32,18 s et 667,5 Mio, soit 12,7 % plus rapide et 31,4 Mio de pic RSS en moins dans ces deux passes identiques. Mesure isolÃ©e sur les 9 581 IDs du premier partition : stockage estimÃ© du set de 1 714 404 Ã  864 444 octets ; temps 0,9 ms contre 1,1 ms. Les performances systÃ¨me restent sensibles au cache disque.
+
+Tests : `tests/test_partitioned_data_index.py` â€” 23 rÃ©ussis, 3 ignorÃ©s. Aucun patch de catalogue, shard SAFE ou checkpoint n'a Ã©tÃ© Ã©crit par cette validation. La preuve d'unicitÃ© globale des trades reste incomplÃ¨te; cette amÃ©lioration concerne uniquement la mÃ©moire du validateur d'identifiants du catalogue.
+
+### 2026-11-24 â€” DÃ©finition affichÃ©e du ratio activitÃ© collecteur
+
+Dans le suivi ETA, `active_sources/source_count` mesure les fichiers de donnÃ©es reconnus dont la taille a crÃ» entre deux Ã©chantillons ; il ne compte ni les processus collecteurs ni leur Ã©tat de santÃ©. Le dÃ©nominateur comprend les fichiers data locaux observÃ©s, y compris ceux qui ne changent pas pendant le cycle. Aucun seuil ou plafond Ã  10 n'existe. L'interface doit nommer Â« fichiers de donnÃ©es Â», rappeler Â« pas le nombre de collecteurs Â» et garder un diagnostic sÃ©parÃ© pour la santÃ© de chaque collecteur.
+
+### 2026-11-24 â€” Backfill unique : inventaire candidat Ã  mÃ©moire rÃ©duite
+
+Les candidats trade gardent maintenant une vue `Mapping` immuable stockÃ©e en tuple/slots plutÃ´t qu'un dictionnaire complet. `_open_checkpoint` trie cette liste en place, dÃ©tecte les IDs manquants/doublÃ©s par voisins, puis rÃ©concilie les reÃ§us SQLite par une marche ordonnÃ©e; il n'alloue plus un second dict complet `dataset_id -> row`. SHA, compte exact, identitÃ©, reÃ§us et rÃ¨gle fail-closed restent inchangÃ©s.
+
+Parcours rÃ©el read-only du catalogue aprÃ¨s compaction : 1 853 164 lignes, 293 888 candidats, 0 compte trade exact non prouvÃ©, 31,92 s, pic RSS 602,2 Mio. Le passage prÃ©cÃ©dent avec dictionnaires : mÃªmes nombres, 32,18 s, 667,5 Mio; baisse observÃ©e 65,3 Mio (9,8 %), temps comparable (âˆ’0,8 %, sensible au cache disque). `tests/test_global_unique_trade_backfill.py`: 24 rÃ©ussis, dont compatibilitÃ© Mapping, inventaire non triÃ©, doublons candidats et chevauchement inter-shards. Le checkpoint rÃ©el de 5,47 Go et le patch catalogue n'ont pas Ã©tÃ© ouverts en Ã©criture ni modifiÃ©s.
+
+La preuve d'unicitÃ© globale demeure incomplÃ¨te : les 89 888 candidats restant aprÃ¨s reÃ§us antÃ©rieurs ne sont pas certifiÃ©s par ce parcours de mÃ©tadonnÃ©es.
+
+### 2026-11-25 — Suivi des processus collecteurs dans ETA_COLLECTE
+
+`tools/eta_donnees_labo.py` lit maintenant, en lecture seule, la dernière ligne de `runtime/logs/economic-collector-watchdog.jsonl` (lecture bornée à 64 Kio). Le relevé n'est présenté comme actuel que si son horodatage a au plus 120 secondes et s'il confirme `paper_read_only=true` et `real_execution=false`. Journal absent, tronqué, incohérent, périmé ou non conforme : état `INCONNU`/`PÉRIMÉ`, jamais « actif » par supposition.
+
+Le tableau distingue explicitement les fichiers qui grossissent (`x/94`) des processus que le watchdog déclare actifs (`x/y`). Les gaps de preuve causale sont affichés à part : la présence des processus ne prouve ni continuité sans trou, ni journées denses, ni données admissibles au replay. Aucun appel de supervision, démarrage, arrêt ou renouvellement de bail n'est effectué par l'ETA.
+
+Contrôle réel en lecture seule le 25/11/2026 à 00:04:58 : watchdog frais (2 s), 20/20 collecteurs actifs, aucun manquant; heartbeat Copy-Vault frais (0,5 s), protocole présent, 1 184 gaps causaux cumulés dont 3 depuis le début de campagne. Le premier cycle ETA a correctement affiché `EN ATTENTE` et 0/94 fichiers en croissance faute de deuxième échantillon; 49/94 étaient modifiés récemment. Ces compteurs décrivent deux mesures différentes.
+
+
+### 2026-11-25 — Reçu Copy-Vault cohérent avec le heartbeat
+
+`CopyVaultCheckpointTail.poll_once()` réutilise maintenant `coverage_receipt()` pour le nombre d'incidents et l'état `replay_evidence_complete`. Une rotation et son `reconnect_backfill_blocked` sont une seule cause; les `invalid_rejected`, expirations, débordements et interruptions restent des motifs qui empêchent la preuve. Un compteur `writer_outages` présent mais non entier invalide le reçu. Le heartbeat transporte l'état du reçu et les compteurs détaillés; l'ETA ne transforme pas un reçu `UNMEASURABLE` sans nombre en zéro gap.
+
+Rectification de l'observation du début de journée : sur l'état persistant relu en lecture seule, `input_rotations=7`, `reconnect_backfill_blocked=7`, `checkpoints_expired=1159`, `invalid_rejected=479`, `writer_outages=11`, débordements=0. Le reçu canonique donne **1 656 incidents empêchant la preuve**; les incidents de continuité sans les rejets invalides sont **1 177**. L'ancien heartbeat actif affiche encore 1 184 car il double les 7 rotations et omet les 479 rejets invalides. `+3` mesure le delta depuis le premier relevé de CE watchdog pour le bail, pas depuis le début de collecte. Le processus actif n'a pas été redémarré; ses valeurs historiques ne sont pas réécrites.

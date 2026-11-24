@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from hl_observer.security.dependances import auditer_l_environnement
-from hl_observer.security.secrets import SecretFinding, scan_file_for_secret
+from hl_observer.security.secrets import SecretFinding, scan_file_for_secret, scan_text_for_secret
 
 
 @dataclass(slots=True)
@@ -24,6 +24,7 @@ TEXT_SUFFIXES = {
 }
 OPERATIONAL_SUFFIXES = {
     ".py", ".cmd", ".bat", ".ps1", ".sh", ".js", ".mjs", ".cjs", ".ts",
+    ".yaml", ".yml",
 }
 EXCLUDED_DIRS = {
     ".git",
@@ -109,10 +110,25 @@ def _is_git_repo(root: Path) -> bool:
 
 
 def _iter_operational_files(root: Path) -> list[Path]:
-    """Enumerate executable/source surfaces without descending into payloads."""
+    """Enumerate executable/source surfaces without descending into payloads.
+
+    Root launchers and workflow commands are executable entrypoints too: omitting
+    them leaves a route from the operator/CI surface outside the static safety
+    scan even when the imported Python modules are covered.
+    """
     root = Path(root).resolve()
     files: list[Path] = []
-    for relative_root in ("src", "hyper_smart_observer", "tools"):
+    for path in root.iterdir():
+        if path.is_file() and path.suffix.lower() in OPERATIONAL_SUFFIXES:
+            files.append(path)
+
+    for relative_root in (
+        "src",
+        "hyper_smart_observer",
+        "tools",
+        "scripts",
+        ".github/workflows",
+    ):
         base = root / relative_root
         if not base.is_dir():
             continue
@@ -125,11 +141,11 @@ def _iter_operational_files(root: Path) -> list[Path]:
                 and not name.startswith(EXCLUDED_DIR_PREFIXES)
                 and not _is_excluded_project_path(root, current / name)
             ]
-            for name in filenames:
+            for name in sorted(filenames):
                 path = current / name
-                if path.suffix in OPERATIONAL_SUFFIXES:
+                if path.suffix.lower() in OPERATIONAL_SUFFIXES:
                     files.append(path)
-    return files
+    return sorted(files, key=lambda path: path.as_posix().casefold())
 
 
 def _active_self_hosted_workflows(root: Path) -> list[Path]:
@@ -167,33 +183,70 @@ def run_safety_audit(root: str | Path = ".") -> SafetyAuditResult:
     checks: dict[str, bool] = {}
     findings: list[str] = []
 
-    secret_findings = []
+    source_files = [
+        path
+        for path in _iter_operational_files(project_root)
+        if path.name not in NON_OPERATIONAL_POLICY_FILES
+    ]
+    source_file_set = set(source_files)
+    source_files_seen: set[Path] = set()
+    source_read_errors: list[Path] = []
+    secret_findings: list[SecretFinding] = []
+    no_forbidden_method = True
+    no_exchange_endpoint = True
+    forbidden_method = "place" + "_mainnet_order"
+    forbidden_exchange_path = "/" + "exchange"
+
+    # Read operational files once: use the same bytes for secret detection and
+    # forbidden execution-path checks, without retaining a concatenated copy of
+    # thousands of files in memory.
     for path in _iter_scannable_files(project_root):
         if path.name == ".env.example":
             continue
-        finding = scan_file_for_secret(path)
+        if path in source_file_set:
+            try:
+                text = path.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                source_read_errors.append(path)
+                continue
+            source_files_seen.add(path)
+            finding = scan_text_for_secret(path, text)
+            if path.name not in NON_OPERATIONAL_POLICY_FILES:
+                no_forbidden_method = no_forbidden_method and forbidden_method not in text
+                no_exchange_endpoint = (
+                    no_exchange_endpoint
+                    and f'"{forbidden_exchange_path}"' not in text
+                    and f"'{forbidden_exchange_path}'" not in text
+                )
+        else:
+            finding = scan_file_for_secret(path)
         if finding:
             secret_findings.append(finding)
-    checks["no_secret_patterns"] = not secret_findings
+
+    missing_source_files = source_file_set - source_files_seen
+    source_scan_complete = not source_read_errors and not missing_source_files
+    if source_read_errors:
+        findings.extend(
+            f"could not read operational source: {path.relative_to(project_root)}"
+            for path in source_read_errors
+        )
+    if missing_source_files:
+        findings.append(
+            "operational files missing from the bounded scan: "
+            + ", ".join(
+                str(path.relative_to(project_root))
+                for path in sorted(missing_source_files, key=lambda item: item.as_posix().casefold())
+            )
+        )
+    checks["no_secret_patterns"] = not secret_findings and source_scan_complete
 
     env_committed = _git_tracks_env(project_root)
     checks["env_not_committed"] = not env_committed
     if env_committed:
         findings.append(".env is tracked by git")
 
-    source_files = [
-        path
-        for path in _iter_operational_files(project_root)
-        if path.name not in NON_OPERATIONAL_POLICY_FILES
-    ]
-    source_text = "\n".join(path.read_text(encoding="utf-8", errors="ignore") for path in source_files)
-    forbidden_method = "place" + "_mainnet_order"
-    checks["no_forbidden_mainnet_order_method"] = forbidden_method not in source_text
-    forbidden_exchange_path = "/" + "exchange"
-    checks["no_exchange_endpoint_in_runtime_source"] = (
-        f'"{forbidden_exchange_path}"' not in source_text
-        and f"'{forbidden_exchange_path}'" not in source_text
-    )
+    checks["no_forbidden_mainnet_order_method"] = source_scan_complete and no_forbidden_method
+    checks["no_exchange_endpoint_in_runtime_source"] = source_scan_complete and no_exchange_endpoint
     self_hosted = _active_self_hosted_workflows(project_root)
     checks["no_self_hosted_workflows"] = not self_hosted
     if self_hosted:

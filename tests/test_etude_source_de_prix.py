@@ -35,13 +35,16 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 RACINE = Path(__file__).resolve().parents[1]
 if str(RACINE / "src") not in sys.path:
     sys.path.insert(0, str(RACINE / "src"))
 
 _spec = importlib.util.spec_from_file_location(
-    "etude_copiabilite", RACINE / "tools" / "etude_copiabilite.py")
+    "etude_copiabilite_test_source_prix", RACINE / "tools" / "etude_copiabilite.py")
 EC = importlib.util.module_from_spec(_spec)
+sys.modules[_spec.name] = EC
 _spec.loader.exec_module(EC)
 
 T0 = 1_790_000_000_000
@@ -113,3 +116,32 @@ def test_la_peremption_des_bougies_est_PLUS_LARGE_et_c_est_mesurable():
     assert panel.provenance == "HYPERLIQUID_CANDLE_CLOSE_RETROSPECTIVE"
     # et la cloture n'est publiee qu'a la FIN de la bougie : aucune avance d'information
     assert int(panel.ts[0]) == T0 + 300_000
+
+
+def test_hash_du_moteur_est_inclus_dans_l_identite_de_la_replication():
+    base = {"source_sha256": {"etude.py": "a" * 64}, "corpus_sha256": "b" * 64,
+            "config_sha256": "c" * 64, "price_source": "mids", "experiment_id": "ancien"}
+    version_a = EC.inclure_sources_dans_identite(base, {"replication.py": "d" * 64})
+    version_b = EC.inclure_sources_dans_identite(base, {"replication.py": "e" * 64})
+    assert version_a["experiment_id"] != version_b["experiment_id"]
+    assert base["source_sha256"] == {"etude.py": "a" * 64}, "l'identité reçue ne doit pas être mutée"
+    assert version_a["source_sha256"]["replication.py"] == "d" * 64
+
+
+@pytest.mark.parametrize("option", ("--replication-paper", "--replication-350"))
+def test_aliases_cli_appellent_le_meme_moteur_paper(option, tmp_path, monkeypatch, capsys):
+    (tmp_path / "runtime" / "coffre_certifie").mkdir(parents=True)
+    (tmp_path / "runtime" / "coffre_certifie" / "LOCAL_INDEX.json").write_text("{}", encoding="utf-8")
+    appels = []
+
+    def faux_run(root, **kwargs):
+        appels.append((root, kwargs))
+        return {"report": {"config": {"capital_usd": 100.0},
+                           "verdicts": [{"hypothesis": "copy_vault_slow_replication_paper",
+                                         "status": "MORE_DATA", "reason": "couverture insuffisante"}]}}
+
+    assert EC.run_replication_350 is EC.run_replication_paper
+    monkeypatch.setattr(EC, "run_replication_paper", faux_run)
+    assert EC.main(["--root", str(tmp_path), option, "--sans-ecriture"]) == 0
+    assert appels[0][1]["price"] == "mids" and appels[0][1]["write"] is False
+    assert "réplication 100 USD" in capsys.readouterr().out

@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 RACINE = Path(__file__).resolve().parents[1]
 for _p in (RACINE / "src", RACINE / "tools", RACINE):
@@ -23,6 +24,19 @@ for _p in (RACINE / "src", RACINE / "tools", RACINE):
         sys.path.insert(0, str(_p))
 
 import etude_copiabilite as E  # noqa: E402
+
+
+def test_filtre_temporel_reutilise_le_dataframe_si_tout_est_dans_la_fenetre():
+    frame = pd.DataFrame({"time": pd.Series([10, 20, 30], dtype="Int64")})
+    mask = frame["time"].between(0, 30)
+    assert E.filtrer_observations_entre_bornes(frame, mask) is frame
+
+
+def test_filtre_temporel_exclut_fail_closed_les_timestamps_inconnus():
+    frame = pd.DataFrame({"time": pd.Series([10, pd.NA, 30], dtype="Int64")})
+    mask = (frame["time"] >= 0) & (frame["time"] <= 30)
+    resultat = E.filtrer_observations_entre_bornes(frame, mask)
+    assert resultat["time"].tolist() == [10, 30]
 
 
 def _shard(dossier: Path, nom: str, lignes: list[dict]) -> dict:

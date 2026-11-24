@@ -27,11 +27,17 @@ def _now_ms_apres(hb):
 
 def test_battre_persiste_les_metriques_et_round_trip(tmp_path):
     hb = _battre_sain(tmp_path, "bbo-collector",
-                      metriques={"gaps_critiques": 3, "carnet_desync": True, "reconnects": 7})
+                      metriques={"gaps_critiques": 3, "carnet_desync": True, "reconnects": 7,
+                                 "coverage_receipt_status": "UNMEASURABLE",
+                                 "invalid_rejected": 4, "writer_outages": 2})
     assert hb["metriques"]["gaps_critiques"] == 3
     assert hb["metriques"]["carnet_desync"] is True
+    assert hb["metriques"]["coverage_receipt_status"] == "UNMEASURABLE"
+    assert hb["metriques"]["invalid_rejected"] == 4
+    assert hb["metriques"]["writer_outages"] == 2
     relu = HB.lire(tmp_path, "bbo-collector")
     assert relu["metriques"]["gaps_critiques"] == 3 and relu["metriques"]["reconnects"] == 7
+    assert relu["metriques"]["coverage_receipt_status"] == "UNMEASURABLE"
 
 
 def test_metriques_none_conserve_l_etat_precedent(tmp_path):

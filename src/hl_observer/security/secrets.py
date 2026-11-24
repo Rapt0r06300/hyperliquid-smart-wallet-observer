@@ -26,6 +26,11 @@ def scan_file_for_secret(path: Path) -> SecretFinding | None:
         text = path.read_text(encoding="utf-8", errors="ignore")
     except OSError:
         return None
+    return scan_text_for_secret(path, text)
+
+
+def scan_text_for_secret(path: Path, text: str) -> SecretFinding | None:
+    """Scan already-read text so callers can combine checks without rereading files."""
     if _secret_assignment_match(text):
         return SecretFinding(path=path, pattern="secret_assignment")
     if OPENAI_KEY_RE.search(text):

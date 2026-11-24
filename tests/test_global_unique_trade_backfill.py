@@ -40,6 +40,61 @@ def test_checkpoint_resumes_without_recounting_and_rejects_changed_shard(tmp_pat
         global_counts._open_checkpoint(checkpoint, [{**rows[0], "sha256": "c" * 64}, rows[1]])
 
 
+def test_checkpoint_validates_unsorted_inventory_without_duplicate_ids(tmp_path):
+    rows = [
+        {"dataset_id": "b", "sha256": "b" * 64, "trade_count": 1, "trade_count_exact": True},
+        {"dataset_id": "a", "sha256": "a" * 64, "trade_count": 1, "trade_count_exact": True},
+    ]
+    database = global_counts._open_checkpoint(tmp_path / "identities.sqlite", rows)
+    assert [row["dataset_id"] for row in rows] == ["a", "b"]
+    database.close()
+
+    duplicates = [rows[0], {**rows[0]}]
+    with pytest.raises(ValueError, match="duplicate or empty candidate"):
+        global_counts._open_checkpoint(tmp_path / "duplicate.sqlite", duplicates)
+
+
+def test_identity_merge_batches_preserve_cross_shard_overlap_and_exact_counts(tmp_path):
+    rows = [
+        {"dataset_id": "a", "sha256": "a" * 64, "trade_count": 3000,
+         "trade_count_exact": True},
+        {"dataset_id": "b", "sha256": "b" * 64, "trade_count": 5000,
+         "trade_count_exact": True},
+    ]
+    database = global_counts._open_checkpoint(tmp_path / "identities.sqlite", rows)
+    first = tmp_path / "first.txt"
+    first.write_text(
+        "".join(f"trade-{number:05d}\n" for number in range(3000)),
+        encoding="utf-8",
+    )
+    second = tmp_path / "second.txt"
+    second.write_text(
+        "".join(f"trade-{number:05d}\n" for number in range(5000)),
+        encoding="utf-8",
+    )
+
+    global_counts._merge_checkpoint_shard(database, rows[0], {
+        "exact": True, "trade_count_scanned": 3000,
+        "unique_trade_count": 3000, "identity_path": str(first),
+    })
+    global_counts._merge_checkpoint_shard(database, rows[1], {
+        "exact": True, "trade_count_scanned": 5000,
+        "unique_trade_count": 5000, "identity_path": str(second),
+    })
+
+    assert database.execute("SELECT COUNT(*) FROM ids").fetchone()[0] == 5000
+    assert database.execute(
+        "SELECT global_new FROM completed WHERE dataset_id='a'"
+    ).fetchone()[0] == 3000
+    assert database.execute(
+        "SELECT global_new FROM completed WHERE dataset_id='b'"
+    ).fetchone()[0] == 2000
+    assert database.execute(
+        "SELECT SUM(global_new) FROM completed"
+    ).fetchone()[0] == 5000
+    database.close()
+
+
 def test_checkpoint_rolls_back_incomplete_identity_file(tmp_path):
     row = {"dataset_id": "a", "sha256": "a" * 64, "trade_count": 2, "trade_count_exact": True}
     database = global_counts._open_checkpoint(tmp_path / "identities.sqlite", [row])
@@ -288,6 +343,25 @@ def test_unique_candidate_excludes_non_trade_zero_count_assets():
     assert global_counts._unique_candidate({**base, "family": "l2Book", "trade_count": 100}) is False
     assert global_counts._unique_candidate({**base, "family": "trades", "trade_count": 0}) is False
     assert global_counts._unique_candidate({**base, "family": "trades", "trade_count": 1}) is True
+
+
+def test_compact_scan_row_preserves_read_only_mapping_contract():
+    values = {
+        "dataset_id": "trade-1",
+        "family": "trades",
+        "trade_count": 4,
+        "trade_count_exact": True,
+        "sha256": "a" * 64,
+        "release_tag": "release-1",
+    }
+    row = global_counts._CompactScanRow(values)
+
+    expected = {key: values.get(key) for key in global_counts._SCAN_ROW_KEYS}
+    assert dict(row) == expected
+    assert row["dataset_id"] == "trade-1"
+    assert row.get("missing", "fallback") == "fallback"
+    assert global_counts._unique_candidate(row) is False  # incomplete immutable release identity
+    assert not hasattr(row, "__dict__")
 
 
 def test_native_trade_keys_support_normalized_hyperliquid_fill_without_raw_envelope():

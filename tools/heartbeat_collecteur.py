@@ -135,6 +135,10 @@ CLES_METRIQUES = (
     "checkpoint_expirations",
     "checkpoint_queue_rejections",
     "input_rotations",
+    "reconnect_backfill_blocked",
+    "invalid_rejected",
+    "writer_outages",
+    "coverage_receipt_status",
 )
 
 _CLES_METRIQUES_ENTIERES = frozenset({
@@ -146,8 +150,10 @@ _CLES_METRIQUES_ENTIERES = frozenset({
     "invalid_json_frames", "unexpected_userfills_channels",
     "receive_clock_rejections",
     "checkpoint_expirations", "checkpoint_queue_rejections",
-    "input_rotations",
+    "input_rotations", "reconnect_backfill_blocked", "invalid_rejected", "writer_outages",
 })
+_CLES_METRIQUES_TEXTUELLES = frozenset({"coverage_receipt_status"})
+_ETATS_RECU_COUVERTURE = frozenset({"PROVEN", "UNMEASURABLE"})
 
 
 def _metriques_propres(m: Mapping[str, Any] | None) -> dict:
@@ -158,7 +164,12 @@ def _metriques_propres(m: Mapping[str, Any] | None) -> dict:
     for cle in CLES_METRIQUES:
         if cle in m:
             v = m[cle]
-            out[cle] = int(v) if cle in _CLES_METRIQUES_ENTIERES else bool(v)
+            if cle in _CLES_METRIQUES_ENTIERES:
+                out[cle] = int(v)
+            elif cle in _CLES_METRIQUES_TEXTUELLES:
+                out[cle] = v if isinstance(v, str) and v in _ETATS_RECU_COUVERTURE else "UNMEASURABLE"
+            else:
+                out[cle] = bool(v)
     return out
 
 

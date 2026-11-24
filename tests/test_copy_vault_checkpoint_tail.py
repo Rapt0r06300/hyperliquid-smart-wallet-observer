@@ -29,7 +29,10 @@ from hl_observer.collection.vault_fills_backfill import canonical_fill_id
 VAULT = "0x" + "a" * 40
 
 
-@pytest.mark.parametrize("incident", ("checkpoints_expired", "pending_overflow_rejected", "input_rotations"))
+@pytest.mark.parametrize(
+    "incident",
+    ("checkpoints_expired", "pending_overflow_rejected", "input_rotations", "invalid_rejected"),
+)
 def test_recu_couverture_refuse_les_incidents_meme_si_lignes_completes(incident: str) -> None:
     counters = {
         "complete_lines": 10, "checkpoints_captured": 20,
@@ -70,6 +73,20 @@ def test_recu_couverture_ne_compte_pas_deux_fois_une_rotation() -> None:
         "pending_overflow_rejected": 0,
     }
     assert coverage_receipt(counters, expected_lines=10)["gap_count"] == 1
+
+
+def test_recu_couverture_refuse_un_compteur_writer_outage_invalide() -> None:
+    counters = {
+        "complete_lines": 10, "checkpoints_captured": 20,
+        "reconnect_backfill_blocked": 0, "invalid_rejected": 0,
+        "input_rotations": 0, "checkpoints_expired": 0,
+        "pending_overflow_rejected": 0, "writer_outages": True,
+    }
+
+    receipt = coverage_receipt(counters, expected_lines=10)
+
+    assert receipt["status"] == "UNMEASURABLE"
+    assert receipt["reason"] == "COUNTERS_INCOMPLETE_OR_INVALID"
 
 
 def _fill(
@@ -234,6 +251,9 @@ def test_checkpoint_rejette_les_marqueurs_snapshot_contradictoires(tmp_path: Pat
     assert result["captured"] == 0
     assert result["pending"] == 0
     assert result["counters"]["invalid_rejected"] == 1
+    assert result["collector_gap_count"] == 1
+    assert result["coverage_receipt_status"] == "UNMEASURABLE"
+    assert result["replay_evidence_complete"] is False
 
 
 @pytest.mark.parametrize(
@@ -601,6 +621,8 @@ def test_file_replacement_is_recovered_and_SEGMENTS_the_clean_epoch(tmp_path: Pa
     assert result["captured"] == 0
     assert result["counters"]["input_rotations"] == 1
     assert result["counters"]["reconnect_backfill_blocked"] == 1
+    assert result["collector_gap_count"] == 1
+    assert result["coverage_receipt_status"] == "UNMEASURABLE"
     assert result["replay_evidence_complete"] is False
 
     # The replacement file's pre-existing contents are a reconnect snapshot or

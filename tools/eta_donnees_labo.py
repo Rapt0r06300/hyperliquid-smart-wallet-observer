@@ -28,6 +28,7 @@ rafraichissement sur la CROISSANCE du ruban -- une operation en temps constant.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -37,6 +38,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 RACINE = Path(__file__).resolve().parents[1]
+REPOSITORY_CANONIQUE = "Rapt0r06300/hyperliquid-smart-wallet-observer"
 if str(RACINE / "src") not in sys.path:
     sys.path.insert(0, str(RACINE / "src"))
 if str(RACINE / "tools") not in sys.path:
@@ -58,6 +60,193 @@ RUBANS_FILLS = (
     "runtime/data/vault_fills_live.jsonl",
     "runtime/labo_tranches_20261121/workspace/runtime/data/vault_fills_live.jsonl",
 )
+
+JOURNAL_COLLECTEURS = Path("runtime/logs/economic-collector-watchdog.jsonl")
+AGE_MAX_JOURNAL_COLLECTEURS_S = 120
+TAILLE_MAX_LECTURE_JOURNAL_COLLECTEURS = 64 * 1024
+
+
+def lire_suivi_collecteurs(
+    racine: Path,
+    *,
+    maintenant_ms: int | None = None,
+    age_max_s: int = AGE_MAX_JOURNAL_COLLECTEURS_S,
+) -> dict:
+    """Lit le dernier relevé du watchdog, sans démarrer ni piloter les collecteurs.
+
+    La présence d'un PID ne prouve pas la qualité des données : l'état des processus,
+    le protocole causal et les gaps restent des champs séparés. Un journal absent,
+    tronqué, trop ancien ou non PAPER/READ-ONLY donne un état INCONNU.
+    """
+    chemin = Path(racine) / JOURNAL_COLLECTEURS
+
+    def inconnu(motif: str) -> dict:
+        return {"code": "INCONNU", "motif": motif}
+
+    try:
+        with chemin.open("rb") as fichier:
+            fichier.seek(0, os.SEEK_END)
+            taille = fichier.tell()
+            if taille <= 0:
+                return inconnu("journal vide")
+            debut = max(0, taille - TAILLE_MAX_LECTURE_JOURNAL_COLLECTEURS)
+            fichier.seek(debut)
+            contenu = fichier.read()
+    except OSError:
+        return inconnu("journal absent ou illisible")
+
+    if debut:
+        separateur = contenu.find(b"\n")
+        if separateur < 0:
+            return inconnu("dernière ligne trop longue")
+        contenu = contenu[separateur + 1 :]
+    if not contenu.endswith(b"\n"):
+        return inconnu("dernière écriture incomplète")
+    ligne = contenu.rstrip(b"\r\n").rsplit(b"\n", 1)[-1]
+    if not ligne or len(ligne) > TAILLE_MAX_LECTURE_JOURNAL_COLLECTEURS:
+        return inconnu("dernière ligne vide ou trop longue")
+    try:
+        releve = json.loads(ligne.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return inconnu("dernière ligne JSON invalide")
+    if not isinstance(releve, dict):
+        return inconnu("format du relevé invalide")
+    if releve.get("paper_read_only") is not True or releve.get("real_execution") is not False:
+        return inconnu("contrat PAPER/READ-ONLY non confirmé")
+
+    ts_ms = releve.get("ts_ms")
+    if type(ts_ms) is not int or ts_ms <= 0:
+        return inconnu("horodatage du relevé invalide")
+    now_ms = int(time.time() * 1000) if maintenant_ms is None else maintenant_ms
+    if type(now_ms) is not int or now_ms < ts_ms:
+        return inconnu("horloge incohérente")
+    age_s = (now_ms - ts_ms) / 1000.0
+
+    statut_source = releve.get("status")
+    if statut_source == "WATCH_PASS_ERROR":
+        return {
+            "code": "ERREUR",
+            "motif": str(releve.get("error") or "échec du cycle watchdog")[:160],
+            "age_s": age_s,
+        }
+    demandes = releve.get("requested")
+    actifs_source = releve.get("active")
+    manquants_source = releve.get("missing")
+    if not all(isinstance(valeur, list) for valeur in (demandes, actifs_source, manquants_source)):
+        return inconnu("inventaire des collecteurs invalide")
+    if any(not isinstance(nom, str) or not nom for nom in demandes + actifs_source + manquants_source):
+        return inconnu("nom de collecteur invalide")
+    if (
+        len(set(demandes)) != len(demandes)
+        or len(set(actifs_source)) != len(actifs_source)
+        or len(set(manquants_source)) != len(manquants_source)
+    ):
+        return inconnu("noms de collecteurs dupliqués")
+    demandes_set = set(demandes)
+    actifs_set = set(actifs_source)
+    manquants_set = set(manquants_source)
+    attendus_manquants = demandes_set - actifs_set
+    if not demandes or manquants_set != attendus_manquants:
+        return inconnu("inventaire actif/manquant incohérent")
+
+    actifs = len(demandes_set & actifs_set)
+    gaps = releve.get("causal_evidence_reported_gaps")
+    nouveaux_gaps = releve.get("causal_evidence_gaps_since_start")
+    gaps = gaps if type(gaps) is int and gaps >= 0 else None
+    nouveaux_gaps = nouveaux_gaps if type(nouveaux_gaps) is int and nouveaux_gaps >= 0 else None
+    protocole = releve.get("causal_protocol_status")
+    bail = releve.get("lease_renewal")
+    details = releve.get("causal_evidence_detail")
+    if not isinstance(details, dict):
+        details = None
+
+    if age_s > max(0, int(age_max_s)):
+        code = "PERIME"
+    elif statut_source == "ACTIVE" and actifs == len(demandes) and bail == "OK":
+        code = "ACTIF"
+    elif statut_source == "STARTING":
+        code = "DEMARRAGE"
+    elif statut_source in {"DEGRADED", "WATCH_PASS_ERROR"} or actifs < len(demandes) or bail != "OK":
+        code = "DEGRADE"
+    else:
+        return inconnu("statut watchdog non reconnu")
+
+    return {
+        "code": code,
+        "statut_source": statut_source,
+        "actifs": actifs,
+        "demandes": len(demandes),
+        "manquants": len(attendus_manquants),
+        "age_s": age_s,
+        "gaps_causaux": gaps,
+        "nouveaux_gaps": nouveaux_gaps,
+        "detail": details,
+        "protocole": str(protocole or "INCONNU"),
+        "bail": str(bail or "INCONNU"),
+    }
+
+
+def _lignes_suivi_collecteurs(suivi: dict | None) -> list[str]:
+    """Formate la santé process sans confondre présence et preuve de continuité."""
+    if not isinstance(suivi, dict):
+        return ["| COLLECTEURS        : INCONNU — aucun relevé du superviseur"]
+    code = suivi.get("code")
+    age_s = suivi.get("age_s")
+    age_txt = (
+        f"{age_s:.0f} s" if isinstance(age_s, (int, float)) and age_s < 60
+        else f"{age_s / 60:.1f} min" if isinstance(age_s, (int, float))
+        else "âge inconnu"
+    )
+    if code == "ACTIF":
+        etat = f"{suivi.get('actifs', 0)}/{suivi.get('demandes', 0)} actifs, relevé {age_txt}"
+    elif code == "PERIME":
+        etat = f"dernier relevé périmé ({age_txt})"
+    elif code == "ERREUR":
+        etat = f"ERREUR superviseur — {suivi.get('motif') or 'cycle non confirmé'}"
+    elif code in {"DEGRADE", "DEMARRAGE"}:
+        etat = (
+            f"{suivi.get('actifs', 0)}/{suivi.get('demandes', 0)} actifs, "
+            f"{suivi.get('manquants', 0)} manquants ({code.lower()})"
+        )
+    else:
+        etat = f"INCONNU — {suivi.get('motif') or 'état non vérifiable'}"
+
+    gaps = suivi.get("gaps_causaux")
+    if type(gaps) is int:
+        etat += f" | écarts signalés: {gaps:,}".replace(",", " ")
+        nouveaux = suivi.get("nouveaux_gaps")
+        if type(nouveaux) is int:
+            etat += f" (+{nouveaux} depuis lancement du suivi)"
+    protocole = suivi.get("protocole")
+    if protocole and protocole != "OK":
+        etat += f" | protocole: {protocole}"
+    bail = suivi.get("bail")
+    if bail and bail != "OK":
+        etat += f" | bail: {bail}"
+    return [f"| COLLECTEURS : {etat}"]
+
+
+def _lignes_detail_suivi_collecteurs(suivi: dict | None) -> list[str]:
+    """N'affiche le détail que si le heartbeat porte le nouveau contrat de reçu."""
+    detail = suivi.get("detail") if isinstance(suivi, dict) else None
+    if not isinstance(detail, dict) or detail.get("coverage_receipt_status") not in {
+        "PROVEN", "UNMEASURABLE"
+    }:
+        return []
+    champs = (
+        ("checkpoint_expirations", "expirés"),
+        ("invalid_rejected", "rejets invalides"),
+        ("input_rotations", "rotations"),
+        ("writer_outages", "interruptions écrivain"),
+        ("checkpoint_queue_rejections", "débords file"),
+    )
+    morceaux = [
+        f"{etiquette} {detail[cle]}"
+        for cle, etiquette in champs
+        if type(detail.get(cle)) is int and detail[cle] > 0
+    ]
+    contenu = "; ".join(morceaux) if morceaux else "aucun incident signalé"
+    return [f"| DÉTAIL PREUVE     : {detail['coverage_receipt_status']} | {contenu}"]
 
 
 def trouver_ruban(racine) -> tuple[Path | None, list[str]]:
@@ -361,20 +550,32 @@ def lire_sources_alinasync(racine: Path) -> dict:
     dossier = Path(racine) / "runtime" / "recovery" / "full"
     resultat: dict = {
         "restore_status": "INCONNU",
+        "restore_issue": "REPORT_ABSENT",
         "safe_shards": None,
         "safe_bytes": None,
         "release_assets": None,
         "repository": None,
         "catalog_sha256": None,
+        "current_catalog_sha256": None,
         "selection_scope": None,
         "families": [],
         "unpack_status": "INCONNU",
+        "unpack_mode": "INCONNU",
+        "unpack_certified": False,
+        "unpack_physical_jsonl_available": False,
+        "unpack_streamable_gzip_available": False,
+        "unpack_read_mode": None,
+        "certified_shards": None,
+        "reported_certified_shards": None,
         "unpacked_shards": None,
+        "reported_unpacked_shards": None,
+        "unpack_issue": "REPORT_ABSENT",
         "sync_status": "INCONNU",
         "sync_report_status": None,
         "coffre_status": "INCONNU",
         "coffre_couverture_pct": None,
         "coffre_fichiers": None,
+        "coffre_genere_ms": None,
     }
 
     def charger(nom: str) -> dict | None:
@@ -387,6 +588,21 @@ def lire_sources_alinasync(racine: Path) -> dict:
             return None
         return charge if isinstance(charge, dict) else None
 
+    index_path = Path(racine) / "catalog" / "DATA_INDEX.json"
+    try:
+        if (
+            not index_path.parent.is_symlink()
+            and not index_path.is_symlink()
+            and index_path.is_file()
+        ):
+            digest = hashlib.sha256()
+            with index_path.open("rb") as handle:
+                for block in iter(lambda: handle.read(1024 * 1024), b""):
+                    digest.update(block)
+            resultat["current_catalog_sha256"] = digest.hexdigest()
+    except OSError:
+        resultat["current_catalog_sha256"] = None
+
     restore = charger("RESTORE_REPORT.json")
     if restore is not None:
         resultat["restore_status"] = str(restore.get("status") or "INCONNU")
@@ -395,31 +611,110 @@ def lire_sources_alinasync(racine: Path) -> dict:
         resultat["source_inventory_sha256"] = restore.get("source_inventory_sha256")
         classification = restore.get("classification")
         verification = restore.get("catalog_verification")
-        if isinstance(classification, dict):
+        if not isinstance(classification, dict) or not isinstance(verification, dict):
+            resultat["restore_issue"] = "RESTORE_CONTRACT_INCONSISTENT"
+        elif resultat["current_catalog_sha256"] is None:
+            resultat["restore_issue"] = "CURRENT_CATALOG_UNAVAILABLE"
+        elif verification.get("source_index_sha256") != resultat["current_catalog_sha256"]:
+            resultat["restore_issue"] = "CATALOG_SHA_MISMATCH"
+        else:
+            expected_shards = classification.get("expected_usable_shards")
             shards = classification.get("usable_shards")
+            expected_bytes = classification.get("expected_usable_bytes")
             octets = classification.get("usable_bytes")
-            if type(shards) is int and shards >= 0:
+            safe_catalog_shards = verification.get("safe_catalog_shards")
+            inventory_sha = resultat["source_inventory_sha256"]
+            inventory_valid = (
+                isinstance(inventory_sha, str)
+                and len(inventory_sha) == 64
+                and all(char in "0123456789abcdef" for char in inventory_sha)
+            )
+            exact_parity = (
+                type(expected_shards) is int and expected_shards >= 0
+                and type(shards) is int and shards == expected_shards
+                and type(expected_bytes) is int and expected_bytes >= 0
+                and type(octets) is int and octets == expected_bytes
+                and type(safe_catalog_shards) is int
+                and safe_catalog_shards == expected_shards
+                and classification.get("materialization_complete") is True
+                and classification.get("failures") in ([], None)
+            )
+            restore_valid = (
+                restore.get("status") == "REPLAY_READY_COMPLETE"
+                and restore.get("repository") == REPOSITORY_CANONIQUE
+                and inventory_valid
+                and exact_parity
+            )
+            resultat["restore_issue"] = (
+                None if restore_valid else "RESTORE_CONTRACT_INCONSISTENT"
+            )
+            if restore_valid:
                 resultat["safe_shards"] = shards
-            if type(octets) is int and octets >= 0:
                 resultat["safe_bytes"] = octets
-        if isinstance(verification, dict):
-            assets = verification.get("required_release_assets")
-            if type(assets) is int and assets >= 0:
-                resultat["release_assets"] = assets
-            sha = verification.get("source_index_sha256")
-            if isinstance(sha, str) and sha:
-                resultat["catalog_sha256"] = sha
-            resultat["selection_scope"] = verification.get("selection_scope") or resultat["selection_scope"]
-            families = verification.get("selection_families")
-            if isinstance(families, list):
-                resultat["families"] = [str(f) for f in families if str(f).strip()]
+                assets = verification.get("required_release_assets")
+                if type(assets) is int and assets >= 0:
+                    resultat["release_assets"] = assets
+                resultat["catalog_sha256"] = verification["source_index_sha256"]
+                resultat["selection_scope"] = (
+                    verification.get("selection_scope")
+                    or resultat["selection_scope"]
+                )
+                families = verification.get("selection_families")
+                if isinstance(families, list):
+                    resultat["families"] = [str(f) for f in families if str(f).strip()]
 
     unpack = charger("UNPACK_REPORT.json")
     if unpack is not None:
         resultat["unpack_status"] = str(unpack.get("status") or "INCONNU")
+        resultat["unpack_mode"] = str(unpack.get("mode") or "INCONNU")
+        resultat["unpack_physical_jsonl_available"] = (
+            unpack.get("physical_jsonl_available") is True
+        )
+        resultat["unpack_streamable_gzip_available"] = (
+            unpack.get("streamable_gzip_available") is True
+        )
+        resultat["unpack_read_mode"] = unpack.get("replay_read_mode")
+        unpack_sha = unpack.get("catalog_index_sha256")
+        catalog_bound = (
+            isinstance(resultat["catalog_sha256"], str)
+            and unpack_sha == resultat["catalog_sha256"]
+            and unpack_sha == resultat["current_catalog_sha256"]
+            and resultat["restore_issue"] is None
+        )
+        physical = (
+            unpack.get("status") == "SAFE_UNPACK_COMPLETE"
+            and resultat["unpack_mode"] == "FULL_JSONL"
+            and resultat["unpack_physical_jsonl_available"]
+            and resultat["unpack_read_mode"] == "JSONL"
+        )
+        seal_only = (
+            unpack.get("status") == "SAFE_SEAL_CERTIFICATION_COMPLETE"
+            and resultat["unpack_mode"] == "SEAL_ONLY"
+            and not resultat["unpack_physical_jsonl_available"]
+            and resultat["unpack_streamable_gzip_available"]
+            and resultat["unpack_read_mode"] == "GZIP_STREAM"
+        )
+        resultat["unpack_certified"] = catalog_bound and (physical or seal_only)
+        resultat["unpack_verified"] = catalog_bound and physical
+        if not catalog_bound:
+            resultat["unpack_issue"] = (
+                resultat["restore_issue"] or "CATALOG_SHA_MISMATCH"
+            )
+        elif not (physical or seal_only):
+            resultat["unpack_issue"] = "UNPACK_CONTRACT_INCONSISTENT"
+        else:
+            resultat["unpack_issue"] = None
+
+        certified = unpack.get("certified_shards")
+        if type(certified) is int and certified >= 0:
+            resultat["reported_certified_shards"] = certified
+            if resultat["unpack_certified"]:
+                resultat["certified_shards"] = certified
         unpacked = unpack.get("unpacked_shards")
         if type(unpacked) is int and unpacked >= 0:
-            resultat["unpacked_shards"] = unpacked
+            resultat["reported_unpacked_shards"] = unpacked
+            if resultat["unpack_verified"]:
+                resultat["unpacked_shards"] = unpacked
 
     sync = charger("SYNC_REPORT.json")
     if sync is not None:
@@ -433,10 +728,13 @@ def lire_sources_alinasync(racine: Path) -> dict:
             if isinstance(couverture, dict):
                 pct = couverture.get("couverture_pct")
                 fichiers = couverture.get("fichiers_de_donnees")
+                genere_ms = couverture.get("genere_ms")
                 if isinstance(pct, (int, float)) and math.isfinite(float(pct)):
                     resultat["coffre_couverture_pct"] = float(pct)
                 if type(fichiers) is int and fichiers >= 0:
                     resultat["coffre_fichiers"] = fichiers
+                if type(genere_ms) is int and genere_ms > 0:
+                    resultat["coffre_genere_ms"] = genere_ms
                 resultat["coffre_status"] = (
                     "CERTIFIÉ 100 %"
                     if couverture.get("cent_pour_cent") is True
@@ -447,15 +745,18 @@ def lire_sources_alinasync(racine: Path) -> dict:
 
     resultat["restore_verified"] = (
         resultat["restore_status"] == "REPLAY_READY_COMPLETE"
+        and resultat["restore_issue"] is None
+        and resultat["repository"] == REPOSITORY_CANONIQUE
         and isinstance(resultat["safe_shards"], int)
         and isinstance(resultat["safe_bytes"], int)
+        and isinstance(resultat["catalog_sha256"], str)
+        and resultat["catalog_sha256"] == resultat["current_catalog_sha256"]
     )
-    resultat["unpack_verified"] = resultat["unpack_status"] == "SAFE_UNPACK_COMPLETE"
     resultat["github_release_bound"] = (
         resultat["restore_verified"]
-        and resultat["repository"] == "Rapt0r06300/hyperliquid-smart-wallet-observer"
         and isinstance(resultat["release_assets"], int)
         and isinstance(resultat["catalog_sha256"], str)
+        and resultat["catalog_sha256"] == resultat["current_catalog_sha256"]
     )
     return resultat
 
@@ -471,6 +772,48 @@ def _octets_lisibles(octets: int | None) -> str:
     return "INCONNU"
 
 
+def _description_deballage(sources: dict) -> str:
+    """Ne confond pas un certificat en flux avec des JSONL matérialisés."""
+    if (
+        sources.get("unpack_verified")
+        and isinstance(sources.get("unpacked_shards"), int)
+    ):
+        return f"{sources['unpacked_shards']:,} JSONL déballés selon le reçu"
+    if (
+        sources.get("unpack_certified")
+        and isinstance(sources.get("certified_shards"), int)
+    ):
+        return (
+            f"{sources['certified_shards']:,} shards certifiés en flux "
+            "(JSONL non décompressés; lecture GZIP)"
+        )
+    if sources.get("unpack_issue") == "CATALOG_SHA_MISMATCH":
+        cause = "rapport de déballage lié à un autre catalogue"
+    else:
+        cause = "contrat du rapport incomplet ou incohérent"
+    annonce = sources.get("reported_unpacked_shards")
+    if isinstance(annonce, int):
+        return (
+            f"{annonce:,} annoncés par le reçu, non vérifiés et non comptés "
+            f"({cause})"
+        )
+    if sources.get("unpack_issue") == "CATALOG_SHA_MISMATCH":
+        return f"INCONNU ({cause})"
+    return "INCONNU (preuve de déballage incomplète ou incohérente)"
+
+
+def _description_deballage_courte(sources: dict) -> str:
+    """Version opérateur compacte; les détails du reçu restent dans --detail."""
+    if sources.get("unpack_verified") and isinstance(sources.get("unpacked_shards"), int):
+        return f"{sources['unpacked_shards']:,} JSONL physiques selon le reçu"
+    if sources.get("unpack_certified") and isinstance(sources.get("certified_shards"), int):
+        return f"{sources['certified_shards']:,} vérifiés en flux; pas décompressés"
+    annonce = sources.get("reported_unpacked_shards")
+    if isinstance(annonce, int):
+        return f"{annonce:,} annoncés; NON VÉRIFIÉS (reçu incomplet)"
+    return "INCONNU (preuve incomplète)"
+
+
 def lignes_sources_live(sources: dict | None) -> list[str]:
     """Explique ce qui vient des collecteurs et ce qui vient d'AlinaSync."""
     if not isinstance(sources, dict):
@@ -480,11 +823,7 @@ def lignes_sources_live(sources: dict | None) -> list[str]:
         f"{sources['safe_shards']:,} shards / {_octets_lisibles(sources['safe_bytes'])}"
         if sources.get("restore_verified") else "INCONNU (restauration non certifiée)"
     )
-    unpack = (
-        f"{sources['unpacked_shards']:,} shards"
-        if sources.get("unpack_verified") and isinstance(sources.get("unpacked_shards"), int)
-        else "INCONNU (décompression non certifiée)"
-    )
+    unpack = _description_deballage(sources)
     github = (
         f"preuve locale liée à {sources['repository']} / {sources['release_assets']:,} assets"
         if sources.get("github_release_bound") else "INCONNU (aucune preuve Release complète)"
@@ -497,6 +836,11 @@ def lignes_sources_live(sources: dict | None) -> list[str]:
         if isinstance(coffre_pct, (int, float)) and isinstance(sources.get("coffre_fichiers"), int)
         else sources.get("coffre_status", "INCONNU")
     )
+    regle_comptage = (
+        "le reçu SAFE déclare ces shards restaurés; ils ne deviennent des jours denses qu'après replay validé."
+        if sources.get("restore_verified")
+        else "aucun shard SAFE certifié par le reçu; aucune progression dense n'est ajoutée."
+    )
     return [
         f"| ALINASYNC RESTORE   : {restore} | SAFE utilisable : {safe}",
         f"| ALINASYNC DÉBALLAGE : {sources.get('unpack_status', 'INCONNU')} | {unpack}",
@@ -505,7 +849,7 @@ def lignes_sources_live(sources: dict | None) -> list[str]:
         f"| GITHUB / RELEASE     : {github}",
         f"| FAMILLES SAFE LUES  : {familles}",
         f"| COFFRE CERTIFIÉ      : {coffre}",
-        "| RÈGLE DE COMPTAGE   : ces shards sont disponibles, mais ne deviennent des jours denses qu'après replay validé.",
+        f"| RÈGLE DE COMPTAGE   : {regle_comptage}",
     ]
 
 
@@ -521,13 +865,18 @@ def lignes_dashboard_simple(
     besoins: list[dict],
     sources: dict | None,
     intervalle_s: float,
+    suivi_collecteurs: dict | None = None,
 ) -> list[str]:
     """Vue opérateur courte : une personne doit comprendre l'essentiel en 5 secondes."""
     etude = progression_etude(besoins)
     clair = {
-        "ACTIF": f"EN DIRECT — {mesure.get('active_sources', 0)}/{mesure.get('source_count', 0)} flux écrivent",
+        "ACTIF": (
+            f"EN DIRECT — {mesure.get('active_sources', 0)}/"
+            f"{mesure.get('source_count', 0)} fichiers de données grossissent "
+            f"(pas {mesure.get('source_count', 0)} collecteurs)"
+        ),
         "EN_ATTENTE": "EN ATTENTE — aucune nouvelle écriture mesurée sur ce cycle",
-        "SANS_NOUVELLE": "SANS NOUVELLE — aucun flux n'a écrit récemment",
+        "SANS_NOUVELLE": "SANS NOUVELLE — aucun fichier observé n'a grossi récemment",
         "INCONNU": "INCONNU — les fichiers ne sont pas vérifiables",
     }.get(etat.get("code"), "INCONNU — état non reconnu")
     debit = (
@@ -554,25 +903,53 @@ def lignes_dashboard_simple(
     else:
         prochaine = "aucune étape chiffrée disponible"
     eta_etude = etude["eta_live"]
+    raison_restore = {
+        "CATALOG_SHA_MISMATCH": "reçu d'un ancien catalogue",
+        "CURRENT_CATALOG_UNAVAILABLE": "catalogue local illisible",
+        "RESTORE_CONTRACT_INCONSISTENT": "reçu incomplet ou incohérent",
+    }.get(
+        sources.get("restore_issue") if isinstance(sources, dict) else None,
+        "restauration SAFE non certifiée",
+    )
     if sources and sources.get("restore_verified"):
         safe = f"{sources['safe_shards']:,} shards / {_octets_lisibles(sources['safe_bytes'])}"
     else:
-        safe = "INCONNU — restauration SAFE non certifiée"
+        safe = f"INCONNU — {raison_restore}"
     unpacked = (
-        f"{sources['unpacked_shards']:,} shards"
-        if sources and sources.get("unpack_verified") and isinstance(sources.get("unpacked_shards"), int)
-        else "INCONNU"
+        _description_deballage_courte(sources)
+        if isinstance(sources, dict)
+        else "INCONNU (reçu AlinaSync absent)"
     )
     release = (
-        f"{sources['release_assets']:,} assets"
+        f"{sources['release_assets']:,} fichiers dans le reçu"
         if sources and sources.get("github_release_bound") and isinstance(sources.get("release_assets"), int)
         else "INCONNU"
     )
     coffre_pct = sources.get("coffre_couverture_pct") if sources else None
-    if isinstance(coffre_pct, (int, float)):
-        coffre = f"{coffre_pct:.3f} % ({sources.get('coffre_status', 'INCONNU')})"
+    coffre_genere_ms = sources.get("coffre_genere_ms") if sources else None
+    if type(coffre_genere_ms) is int and coffre_genere_ms > 0:
+        age_coffre_s = time.time() - coffre_genere_ms / 1000.0
+        if age_coffre_s >= 0:
+            age_coffre = f"MAJ {duree_lisible(age_coffre_s / 3600.0)}"
+        elif age_coffre_s >= -300:
+            age_coffre = "MAJ \u00e0 l'instant"
+        else:
+            age_coffre = "date future"
     else:
-        coffre = "INCONNU"
+        age_coffre = "MAJ inconnue"
+    if isinstance(coffre_pct, (int, float)):
+        fichiers_coffre = sources.get("coffre_fichiers")
+        fichiers_txt = (
+            f" | {fichiers_coffre:,} fichiers"
+            if type(fichiers_coffre) is int and fichiers_coffre >= 0
+            else ""
+        )
+        coffre = (
+            f"{coffre_pct:.3f} %{fichiers_txt} | "
+            f"{sources.get('coffre_status', 'INCONNU')} | {age_coffre}"
+        )
+    else:
+        coffre = f"INCONNU | {age_coffre}"
     return [
         "+" + "=" * 76 + "+",
         f"| COPY-VAULT — SUIVI EN DIRECT | cycle {tours} | {time.strftime('%H:%M:%S')} |",
@@ -582,9 +959,12 @@ def lignes_dashboard_simple(
         f"| PROCHAINE ÉTAPE   : {prochaine}",
         f"| TEMPS MINIMUM     : {eta_etude} (si chaque journée reste dense)",
         f"| ETA MOTEUR        : {moteur} | ancienne mesure: {denses_acquis}/{requis} jours",
-        f"| DONNÉES DISPONIBLES: SAFE {safe} | déballé {unpacked} | Release {release}",
+        f"| SAFE RESTAURÉ     : {safe}",
+        f"| EXTRACTION        : {unpacked}",
+        f"| GITHUB            : {release}",
         f"| COFFRE            : {coffre}",
-        "| À SAVOIR          : un fichier téléchargé ne devient pas une journée dense avant replay validé.",
+        *_lignes_suivi_collecteurs(suivi_collecteurs),
+        "| À SAVOIR          : un fichier téléchargé ne devient pas une journée dense avant replay.",
         "| q = quitter       | --detail = afficher le diagnostic complet",
         "+" + "=" * 76 + "+",
     ]
@@ -603,15 +983,19 @@ def lignes_resume(
     besoins: list[dict],
     sources: dict | None = None,
     intervalle_s: float = 5.0,
+    suivi_collecteurs: dict | None = None,
 ) -> list[str]:
     """Bloc opérateur court placé avant le détail scientifique historique."""
     sonde_fiable = age_sonde_h is not None and age_sonde_h <= AGE_MAX_SONDE_H
     moteur_pct = pourcentage_progression(denses_acquis, requis) if sonde_fiable else None
     etude = progression_etude(besoins)
     etat_clair = {
-        "ACTIF": "Collecte active : le ruban vient de grandir.",
+        "ACTIF": (
+            f"Collecte active : {mesure.get('active_sources', 0)}/"
+            f"{mesure.get('source_count', 0)} fichiers ont grandi."
+        ),
         "EN_ATTENTE": "En attente : pas encore assez de recul pour mesurer le débit.",
-        "SANS_NOUVELLE": "Aucune nouvelle écriture récente ; cela ne prouve pas un arrêt.",
+        "SANS_NOUVELLE": "Aucun fichier observé n'a grandi récemment ; cela ne prouve pas un arrêt.",
         "INCONNU": "État inconnu : le ruban n'est pas vérifiable.",
     }.get(etat["code"], "État non reconnu : aucune conclusion.")
     debit = (
@@ -627,7 +1011,7 @@ def lignes_resume(
     sonde_txt = "inconnue" if age_sonde_h is None else f"{age_sonde_h:.1f} h"
     if mesure.get("source_count"):
         ruban_txt = (
-            f"{mesure['source_count']} flux observés"
+            f"{mesure['source_count']} fichiers de données observés"
             + (f" | actifs: {', '.join(mesure.get('active_source_paths', [])[:3])}"
                if mesure.get("active_source_paths") else "")
         )
@@ -649,8 +1033,11 @@ def lignes_resume(
         *besoins_live(besoins),
         *lignes_sources_live(sources),
         f"| DÉBIT MESURÉ        : {debit} | ETA moteur : {eta_txt}",
-        f"| ACTIVITÉ DES FLUX    : {mesure.get('active_sources', 0)}/{mesure.get('source_count', 0)} actifs | "
+        f"| ACTIVITÉ FICHIERS   : {mesure.get('active_sources', 0)}/{mesure.get('source_count', 0)} actifs | "
         f"{mesure.get('recent_sources', 0)}/{mesure.get('source_count', 0)} récents",
+        *_lignes_suivi_collecteurs(suivi_collecteurs),
+        *_lignes_detail_suivi_collecteurs(suivi_collecteurs),
+        f"| À SAVOIR            : {mesure.get('source_count', 0)} fichiers observés, pas {mesure.get('source_count', 0)} collecteurs",
         f"| ÉTAT DU RUBAN       : {etat['detail']} | dernière écriture : {etat.get('age_s', '?')} s",
         f"| SONDE DENSITÉ       : âge {sonde_txt} | source : {ruban_txt} | refresh {max(0.5, float(intervalle_s)):.1f} s",
         "+" + "=" * 72 + "+",
@@ -788,18 +1175,18 @@ def etat_flux_global(mesure: dict, *, maintenant: float | None = None) -> dict:
     if actifs:
         return {
             "code": "ACTIF",
-            "detail": f"{actifs}/{total} flux en croissance; {recents}/{total} modifiés récemment",
+            "detail": f"{actifs}/{total} fichiers de données en croissance; {recents}/{total} modifiés récemment",
             "age_s": mesure.get("age_s"),
         }
     if recents:
         return {
             "code": "EN_ATTENTE",
-            "detail": f"{recents}/{total} flux récents, aucune croissance mesurée sur ce cycle",
+            "detail": f"{recents}/{total} fichiers récents, aucune croissance mesurée sur ce cycle",
             "age_s": mesure.get("age_s"),
         }
     return {
         "code": "SANS_NOUVELLE",
-        "detail": f"aucune croissance récente sur {total} flux observés",
+        "detail": f"aucune croissance récente sur {total} fichiers de données observés",
         "age_s": mesure.get("age_s"),
     }
 
@@ -1023,6 +1410,7 @@ def main(argv: list[str] | None = None) -> int:
             sources = lire_sources_alinasync(racine)
         denses_acquis, source_denses, age_sonde_h = lire_sonde_denses(racine, args.sonde)
         mesure = debit.lire()
+        suivi_collecteurs = lire_suivi_collecteurs(racine)
         secondes_restantes = _secondes_restantes_aujourdhui()
         eta = calculer_eta(
             denses_acquis=denses_acquis, requis=int(args.requis),
@@ -1065,6 +1453,7 @@ def main(argv: list[str] | None = None) -> int:
                 besoins=besoins,
                 sources=sources,
                 intervalle_s=args.intervalle,
+                suivi_collecteurs=suivi_collecteurs,
             ) + [
                 "=" * 68,
                 "  DETAIL ETA DONNEES LABO — pourquoi cette estimation ?",
@@ -1123,6 +1512,7 @@ def main(argv: list[str] | None = None) -> int:
                 besoins=besoins,
                 sources=sources,
                 intervalle_s=args.intervalle,
+                suivi_collecteurs=suivi_collecteurs,
             )
         if os.name == "nt" and getattr(sys.stdout, "isatty", lambda: False)():
             os.system("cls")      # noqa: S605 S607 - rafraichissement d'ecran, pas d'entree externe

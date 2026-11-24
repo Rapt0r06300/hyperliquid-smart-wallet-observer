@@ -41,7 +41,7 @@ def test_un_effet_net_et_precis_passe_devant_un_effet_flou_et_un_rejet_ne_recoit
     ]
     plan = P.build_plan(registre)
     ordre = [h["hypothesis"] for h in plan["hypotheses"]]
-    assert ordre == ["copy_vault_aggressive_open_drift", "copy_vault_slow_replication_350usd",
+    assert ordre == ["copy_vault_aggressive_open_drift", "copy_vault_slow_replication_paper",
                      "copy_vault_naive_mirror_taker"]
     assert plan["prochaine_action"] == "copy_vault_aggressive_open_drift"
     net, flou, rejet = (_ligne(plan, h) for h in ordre)
@@ -58,7 +58,7 @@ def test_un_effet_net_et_precis_passe_devant_un_effet_flou_et_un_rejet_ne_recoit
 def test_jours_restants_le_plus_exigeant_de_l_etude_et_de_la_statistique():
     # 10 jours mesurés ; intervalle de demi-largeur 3,8 pour un effet de 0,8 : il faudrait (3,8/0,8)^2 fois plus
     plan = P.build_plan([_replication("MORE_DATA", 0.80, [-3.0, 4.6], 10)])
-    ligne = _ligne(plan, "copy_vault_slow_replication_350usd")
+    ligne = _ligne(plan, "copy_vault_slow_replication_paper")
     assert ligne["jours_pour_trancher"] == pytest.approx(10 * (3.8 / 0.8) ** 2, rel=0.02)
     assert ligne["jours_requis"] == 20 and ligne["jours_restants"] == ligne["jours_pour_trancher"] - 10
     assert "attendre environ" in ligne["action"]
@@ -73,7 +73,7 @@ def test_jours_restants_le_plus_exigeant_de_l_etude_et_de_la_statistique():
 def test_seul_le_dernier_enregistrement_compte_et_un_effet_negatif_n_a_aucune_priorite():
     plan = P.build_plan([_replication("MORE_DATA", 0.8, [0.2, 1.4], 25, run="ancien"),
                          _replication("MORE_DATA", -0.5, [-1.1, 0.1], 40, run="recent")])
-    ligne = _ligne(plan, "copy_vault_slow_replication_350usd")
+    ligne = _ligne(plan, "copy_vault_slow_replication_paper")
     assert ligne["run_id"] == "recent" and ligne["essais_enregistres"] == 2
     assert ligne["priorite"] == 0.0 and ligne["p_positif"] < 0.1 and plan["prochaine_action"] is None
 
@@ -87,12 +87,12 @@ def test_non_mesurable_et_hypothese_inconnue_ne_sont_ni_inventees_ni_oubliees():
     ]
     plan = P.build_plan(registre)
     assert {h["hypothesis"] for h in plan["hypotheses"]} == {
-        "copy_vault_leader_order_intent", "hypothese_sans_extracteur", "copy_vault_slow_replication_350usd"}
+        "copy_vault_leader_order_intent", "hypothese_sans_extracteur", "copy_vault_slow_replication_paper"}
     ordres = _ligne(plan, "copy_vault_leader_order_intent")
     assert ordres["effet"] is None and ordres["priorite"] == 0.0 and "activer la collecte" in ordres["action"]
     inconnue = _ligne(plan, "hypothese_sans_extracteur")
     assert inconnue["effet"] is None and inconnue["priorite"] == 0.0 and "geler le candidat" in inconnue["action"]
-    sans_mesure = _ligne(plan, "copy_vault_slow_replication_350usd")
+    sans_mesure = _ligne(plan, "copy_vault_slow_replication_paper")
     assert sans_mesure["p_positif"] is None and sans_mesure["jours_restants"] == 17
     texte = P.render_plan(plan)
     assert all(h["hypothesis"] in texte for h in plan["hypotheses"]) and "ne promeut aucun candidat" in texte
@@ -100,10 +100,23 @@ def test_non_mesurable_et_hypothese_inconnue_ne_sont_ni_inventees_ni_oubliees():
     assert P.build_plan([])["hypotheses"] == [] and P.build_plan([])["prochaine_action"] is None
 
 
+def test_ancien_identifiant_350_est_reconcilie_avec_la_replication_paper_canonique():
+    ancien = _replication("MORE_DATA", -0.2, [-0.6, 0.2], 7)
+    nouveau = dict(ancien)
+    nouveau["verdicts"] = [{"hypothesis": "copy_vault_slow_replication_paper",
+                            "status": "MORE_DATA", "reason": "nouvelle exécution"}]
+    plan = P.build_plan([ancien, nouveau])
+    assert [h["hypothesis"] for h in plan["hypotheses"]] == ["copy_vault_slow_replication_paper"]
+    ligne = _ligne(plan, "copy_vault_slow_replication_paper")
+    assert ligne["essais_enregistres"] == 2
+    assert ligne["run_id"] == nouveau["run_id"]
+
+
 def test_l_outil_ecrit_le_plan_depuis_le_registre_verifie(tmp_path):
-    spec = importlib.util.spec_from_file_location("etude_copiabilite", RACINE / "tools" / "etude_copiabilite.py")
+    spec = importlib.util.spec_from_file_location(
+        "etude_copiabilite_test_research_planner", RACINE / "tools" / "etude_copiabilite.py")
     etude = importlib.util.module_from_spec(spec)
-    sys.modules["etude_copiabilite"] = etude
+    sys.modules[spec.name] = etude
     spec.loader.exec_module(etude)
     dossier = tmp_path / etude.REPORT_DIR
     dossier.mkdir(parents=True)
@@ -134,7 +147,7 @@ def test_lecture_en_quatre_cas_et_on_n_attend_pas_des_annees():
     ])
     lectures = {h["hypothesis"]: h["lecture"] for h in plan["hypotheses"]}
     assert lectures == {
-        "copy_vault_slow_replication_350usd": "SIGNAL_PROMETTEUR",
+        "copy_vault_slow_replication_paper": "SIGNAL_PROMETTEUR",
         "copy_vault_aggressive_open_drift": "DONNEES_INSUFFISANTES",
         "hypothese_sans_extracteur": "DONNEES_INSUFFISANTES",                 # rien d'inventé
         "copy_vault_leader_skill_persistence": "ABSENCE_D_AVANTAGE_DEMONTRE",
@@ -144,7 +157,7 @@ def test_lecture_en_quatre_cas_et_on_n_attend_pas_des_annees():
     assert sans_fin["jours_pour_trancher"] > 5_000 and sans_fin["action"].startswith("ne pas attendre")
     # ordre : priorité, puis ce qui peut encore apprendre le plus vite ; l'absence d'avantage ferme la marche
     ordre = [h["hypothesis"] for h in plan["hypotheses"]]
-    assert ordre[0] == "copy_vault_slow_replication_350usd"
+    assert ordre[0] == "copy_vault_slow_replication_paper"
     assert ordre.index("copy_vault_aggressive_open_drift") < ordre.index("copy_vault_leader_skill_persistence")
     assert set(ordre[-2:]) == {"copy_vault_leader_skill_persistence", "copy_vault_naive_mirror_taker"}
     fragile = P.build_plan([_ouvertures("MORE_DATA", 12.0, [9.0, 15.0], 20, 0.4)])["hypotheses"][0]

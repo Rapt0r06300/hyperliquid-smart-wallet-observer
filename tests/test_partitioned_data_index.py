@@ -203,6 +203,32 @@ def test_partition_reader_refuses_duplicate_identity_across_verified_parts(tmp_p
     with pytest.raises(ValueError, match="DUPLICATE_OR_MISSING_DATASET_ID"):
         load_partitioned_index(_stage(tmp_path, root, files))
 
+
+def test_partition_reader_fails_closed_on_identity_fingerprint_collision(
+    tmp_path, monkeypatch,
+):
+    from tools import partitioned_data_index as module
+
+    root, files = partition_index(_index(), max_partition_bytes=240)
+    path = _stage(tmp_path, root, files)
+    monkeypatch.setattr(module, "_dataset_id_fingerprint", lambda _value: 42)
+
+    with pytest.raises(ValueError, match="DUPLICATE_OR_MISSING_DATASET_ID"):
+        list(module.iter_index_rows(path))
+
+
+def test_select_partition_rows_fails_closed_on_identity_fingerprint_collision(
+    tmp_path, monkeypatch,
+):
+    from tools import partitioned_data_index as module
+
+    root, files = partition_index(_index(), max_partition_bytes=240)
+    path = _stage(tmp_path, root, files)
+    monkeypatch.setattr(module, "_dataset_id_fingerprint", lambda _value: 42)
+
+    with pytest.raises(ValueError, match="DUPLICATE_OR_MISSING_DATASET_ID"):
+        module.select_index_rows(path, lambda _row: True)
+
 def test_snapshot_cli_helper_preserves_source_and_reconstructs_all(tmp_path):
     from tools.partitioned_data_index import prove_partitioned_index
     source = _stage(tmp_path, _index(), {})

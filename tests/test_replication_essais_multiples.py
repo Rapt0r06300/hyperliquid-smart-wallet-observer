@@ -128,7 +128,7 @@ def test_le_correctif_se_lit_AVANT_le_tableau_par_leader():
                     "funding_coverage": 1.0, "mean_cost_usd_per_day": {}},
         "inputs": {"comptes": 3, "comptes_simules": 3, "prix": "prix observés",
                    "coins_avec_ecart": 10, "coins_avec_funding": 10, "panel_points": 5000},
-        "config": {"capital_usd": 350.0, "rebalance_ms": 3_600_000, "reaction_ms": 60_000,
+        "config": {"capital_usd": 100.0, "rebalance_ms": 3_600_000, "reaction_ms": 60_000,
                    "min_order_usd": 10.0, "taker_fee_bps": 4.5},
         "verdicts": [{"hypothesis": "h", "status": "MORE_DATA", "reason": "5 jours"}],
         "leaders": [{"compte": "0xa", "complete_days": 4, "net_usd_per_day": 18.85, "orders": 10,
@@ -152,6 +152,9 @@ def test_le_correctif_se_lit_AVANT_le_tableau_par_leader():
         "la correction doit PRECEDER le tableau qui tente l'oeil")
     assert OS.VERDICT_BRUIT in texte
     assert "105 comptes" in texte
+    assert "compte de 100 USD" in texte
+    assert "LOCAL_OBSERVED_PORTFOLIOS_PAPER_100_EXPLORATORY" in texte
+    assert "350 USD" not in texte
 
 
 # ───────── 17/11 : LA CAPACITÉ, CONFRONTÉE AU VOLUME RÉELLEMENT RÉPLIQUÉ ─────────
