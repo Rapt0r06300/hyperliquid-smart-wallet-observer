@@ -1,6 +1,7 @@
 @echo off
 chcp 65001 >nul
 setlocal EnableExtensions
+call "%~dp0tools\launcher_lifecycle.cmd" --scope "ETA_COLLECTE" --launcher "%~f0"
 rem ===================================================================
 rem   ETA DONNEES LABO - combien de temps encore collecter ?
 rem ===================================================================

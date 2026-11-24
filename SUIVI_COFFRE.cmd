@@ -1,5 +1,6 @@
 @echo off
 setlocal EnableExtensions
+call "%~dp0tools\launcher_lifecycle.cmd" --scope "SUIVI_COFFRE" --launcher "%~f0" --related-pattern "coffre-certificateur"
 cd /d "%~dp0"
 chcp 65001 >nul
 set "PYTHONUTF8=1"

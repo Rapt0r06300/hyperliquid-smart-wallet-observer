@@ -440,7 +440,9 @@ def attribute_pnl(
         bucket = ts // (k * 60_000)
         change = np.r_[True, bucket[1:] != bucket[:-1]]
         rebalance_index[k] = np.maximum.accumulate(np.where(change, np.arange(len(ts)), 0))
-    f = fills[fills["coin"].map(panel.column).notna()]
+    avec_prix = fills["coin"].map(panel.column).notna()
+    # 24/11/2026 : sans coin écarté, le filtre recopiait tout le tableau (~3 Go sur 22 M fills) pour rien
+    f = fills if bool(avec_prix.all()) else fills[avec_prix]
     unit_of = f["vault"].map(units).fillna(f["vault"])
     unit_names = sorted(unit_of.unique())
     unit_pos = {name: i for i, name in enumerate(unit_names)}
@@ -475,51 +477,64 @@ def attribute_pnl(
         "max_staleness_ms": max_staleness_ms if observation_times is not None else None,
     }
     instantanes = observation_times is not None and max_staleness_ms is not None
-    taches: dict[str, dict[str, Any]] = {}
-    for ordre, ((vault, coin), g) in enumerate(f.groupby(["vault", "coin"], sort=True)):
-        u = unit_pos[units.get(vault, vault)]
-        seen_times = None
-        if instantanes:
-            seen_times = observation_times.get(vault)
-            if seen_times is None or len(seen_times) == 0:
-                continue
-            if vault not in hours_done:
-                hours_done.add(vault)
-                last = np.searchsorted(seen_times, ts, side="right") - 1
-                known = (last >= 0) & ((ts - seen_times[np.clip(last, 0, len(seen_times) - 1)]) <= max_staleness_ms)
-                measured = valid & known[:-1]
-                vault_hours = np.bincount(day_idx[:-1][measured], weights=dt_hours[measured], minlength=n_days)
-                unit_day_hours[u] = np.maximum(unit_day_hours[u], vault_hours)
-        ci = panel.column(coin)
-        tm = g["time"].to_numpy()
-        tache = taches.get(coin)
-        if tache is None:
+    # rang de chaque couple dans l'ordre d'origine (groupby trié sur (vault, coin)) : c'est l'ordre des sommes.
+    # Tenu à part, par POSITION de ligne : ``assign`` aurait recopié tout le tableau (~3 Go sur 22 M fills).
+    ordre_lignes = f.groupby(["vault", "coin"], sort=True).ngroup().to_numpy()
+    infos: dict[int, dict[str, Any]] = {}
+
+    def taches():
+        """Une tâche par coin, construite AU MOMENT où elle part (mémoire bornée : jamais toutes les copies à la fois).
+
+        24/11/2026 : la première version parallèle préparait toutes les tâches d'avance (~1,5 Go de copies des fills),
+        de quoi faire tuer le labo quand Codex occupe la mémoire."""
+        for coin, positions_coin in f.groupby("coin", sort=True).indices.items():
+            fc = f.iloc[positions_coin]
+            ci = panel.column(coin)
             hs = half_spread_bps.get(coin)
-            tache = taches[coin] = {
-                "coin": coin, "price": panel.px[:, ci],
-                "funding_rate": None if funding_rates is None else funding_rates.get(coin),
-                "rate": None if hs is None or not math.isfinite(hs) else (cfg.taker_fee_bps + hs) * 1e-4,
-                "couples": []}
-        tache["couples"].append({
-            "ordre": ordre, "u": u, "tm": tm, "obs": g["obs"].to_numpy(), "after": g["after"].to_numpy(),
-            "first_start": float(g["start_pos"].to_numpy()[0]), "q": (g["signe"] * g["sz"]).to_numpy(),
-            "ref": panel.at(tm, ci), "px": g["px"].to_numpy(), "closed_pnl": g["closed_pnl"].to_numpy(),
-            "fee": g["fee"].to_numpy(), "seen_times": seen_times,
-            "n": len(g), "notional": float(g["notional"].sum()),
-            "taker": float(g.loc[g["crossed"] == 1.0, "notional"].sum()),
-        })
+            tache = {"coin": coin, "price": panel.px[:, ci],
+                     "funding_rate": None if funding_rates is None else funding_rates.get(coin),
+                     "rate": None if hs is None or not math.isfinite(hs) else (cfg.taker_fee_bps + hs) * 1e-4,
+                     "couples": []}
+            for vault, positions_vault in fc.groupby("vault", sort=True).indices.items():
+                g = fc.iloc[positions_vault]
+                u = unit_pos[units.get(vault, vault)]
+                seen_times = None
+                if instantanes:
+                    seen_times = observation_times.get(vault)
+                    if seen_times is None or len(seen_times) == 0:
+                        continue
+                    if vault not in hours_done:
+                        hours_done.add(vault)
+                        last = np.searchsorted(seen_times, ts, side="right") - 1
+                        known = (last >= 0) & ((ts - seen_times[np.clip(last, 0, len(seen_times) - 1)])
+                                               <= max_staleness_ms)
+                        measured = valid & known[:-1]
+                        vault_hours = np.bincount(day_idx[:-1][measured], weights=dt_hours[measured],
+                                                  minlength=n_days)
+                        unit_day_hours[u] = np.maximum(unit_day_hours[u], vault_hours)   # max : ordre indifférent
+                ordre = int(ordre_lignes[positions_coin[positions_vault[0]]])
+                tm = g["time"].to_numpy()
+                infos[ordre] = {"n": len(g), "notional": float(g["notional"].sum()),
+                                "taker": float(g.loc[g["crossed"] == 1.0, "notional"].sum())}
+                tache["couples"].append({
+                    "ordre": ordre, "u": u, "tm": tm, "obs": g["obs"].to_numpy(), "after": g["after"].to_numpy(),
+                    "first_start": float(g["start_pos"].to_numpy()[0]), "q": (g["signe"] * g["sz"]).to_numpy(),
+                    "ref": panel.at(tm, ci), "px": g["px"].to_numpy(), "closed_pnl": g["closed_pnl"].to_numpy(),
+                    "fee": g["fee"].to_numpy(), "seen_times": seen_times,
+                })
+            if tache["couples"]:
+                yield tache
+
     resultats: list[tuple[int, int, dict[str, np.ndarray]]] = []
-    liste = list(taches.values())
-    if parallele is not None and sum(len(t["couples"]) for t in liste) >= 200:
+    if parallele is not None and len(ordre_lignes) and int(ordre_lignes.max()) + 1 >= 200:
         # ``parallele(initialiseur, args, fonction, taches)`` est FOURNI par l'appelant (l'outil d'étude) : ce module
         # reste un calcul pur, sans processus ni réseau (tests/test_copy_vault_copiability.py le vérifie)
-        for morceau in parallele(_installer_communs, (communs,), _contributions_d_un_coin, liste):
+        for morceau in parallele(_installer_communs, (communs,), _contributions_d_un_coin, taches()):
             resultats.extend(morceau)
     else:
         _installer_communs(communs)
-        for tache in liste:
+        for tache in taches():
             resultats.extend(_contributions_d_un_coin(tache))
-    infos = {c["ordre"]: c for t in liste for c in t["couples"]}
     for ordre, u, contributions in sorted(resultats, key=lambda r: r[0]):       # l'ORDRE d'origine des couples
         for champ, valeur in contributions.items():
             acc[champ][u] += valeur

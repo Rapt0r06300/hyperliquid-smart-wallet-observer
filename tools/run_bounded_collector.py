@@ -24,6 +24,9 @@ from hl_observer.ops.collector_lease import validate_lease  # noqa: E402
 
 _LOG_MAX_BYTES = 4 * 1024 * 1024
 _LOG_BACKUPS = 3
+_HEARTBEAT_INTERVAL_S = 30.0
+_RESTART_BACKOFF_INITIAL_S = 1.0
+_RESTART_BACKOFF_MAX_S = 60.0
 
 
 class _RotatingLog:
@@ -148,6 +151,30 @@ def attendre_sous_bail(secondes: float, *, valide, dormir=time.sleep, horloge=ti
     return None
 
 
+def _next_restart_backoff(
+    previous_s: float,
+    returncode: int | None,
+    *,
+    initial_s: float = _RESTART_BACKOFF_INITIAL_S,
+    maximum_s: float = _RESTART_BACKOFF_MAX_S,
+) -> float:
+    """Bound a failed-child restart delay without slowing healthy cycles.
+
+    A collector that exits immediately with a non-zero code must not become a
+    hot restart loop.  Successful exits retain the configured interval, while
+    repeated failures use capped exponential backoff.  The helper is pure so
+    its safety bound can be tested without starting a collector.
+    """
+
+    if returncode in (None, 0):
+        return 0.0
+    initial = max(0.0, float(initial_s))
+    maximum = max(initial, float(maximum_s))
+    if previous_s <= 0.0:
+        return min(initial, maximum)
+    return min(maximum, max(initial, previous_s * 2.0))
+
+
 def run(
     *,
     root: Path,
@@ -177,6 +204,10 @@ def run(
     with _RotatingLog(log) as output:
         output.write_text(f"bounded collector={name} script={script} interval={interval_s}s\n")
         output.write_text("safety=READ_ONLY lease_enforced=true\n")
+        output.write_text(
+            "restart_policy=success:configured_interval;failure:capped_exponential\n"
+        )
+        restart_backoff_s = 0.0
         if initial_delay_s > 0:
             # DEPART DIFFERE (22/11/2026) : le certificateur partait avec les collecteurs et traitait
             # 132 fichiers (dont 251 Mo de bougies) pendant qu'ils s'abonnaient. Le bail reste verifie.
@@ -215,6 +246,11 @@ def run(
                 env=child_env,
                 bufsize=0,
             )
+            started_at = time.monotonic()
+            output.write_text(
+                "[launch] pid=%s script=%s args=%r\n"
+                % (child.pid, script.name, script_args)
+            )
             assert child.stdout is not None
             output_pump = threading.Thread(
                 target=_pump_child_output,
@@ -224,24 +260,45 @@ def run(
             )
             output_pump.start()
             try:
+                next_heartbeat = started_at + _HEARTBEAT_INTERVAL_S
                 while child.poll() is None:
                     valid, reason, _ = validate_lease(lease_file, lease_token, root)
                     if not valid:
                         output.write_text(f"[bounded-stop-worker] {reason}\n")
                         _stop_child(child)
                         return 0
+                    now = time.monotonic()
+                    if now >= next_heartbeat:
+                        output.write_text(
+                            "[heartbeat] pid=%s elapsed_s=%.1f lease_valid=true\n"
+                            % (child.pid, now - started_at)
+                        )
+                        next_heartbeat = now + _HEARTBEAT_INTERVAL_S
                     time.sleep(1.0)
             finally:
                 _stop_child(child)
                 output_pump.join(timeout=10.0)
-            output.write_text(f"[pass-end] returncode={child.returncode}\n")
-            deadline = time.monotonic() + max(0.0, interval_s)
-            while time.monotonic() < deadline:
-                valid, reason, _ = validate_lease(lease_file, lease_token, root)
-                if not valid:
-                    output.write_text(f"[bounded-stop-wait] {reason}\n")
-                    return 0
-                time.sleep(min(1.0, max(0.0, deadline - time.monotonic())))
+            returncode = child.returncode
+            output.write_text(
+                "[pass-end] pid=%s returncode=%s elapsed_s=%.1f\n"
+                % (child.pid, returncode, time.monotonic() - started_at)
+            )
+            restart_backoff_s = _next_restart_backoff(
+                restart_backoff_s, returncode
+            )
+            delay_s = max(0.0, float(interval_s), restart_backoff_s)
+            if restart_backoff_s > 0.0:
+                output.write_text(
+                    "[restart-backoff] returncode=%s delay_s=%.1f\n"
+                    % (returncode, delay_s)
+                )
+            motif = attendre_sous_bail(
+                delay_s,
+                valide=lambda: validate_lease(lease_file, lease_token, root)[:2],
+            )
+            if motif is not None:
+                output.write_text(f"[bounded-stop-wait] {motif}\n")
+                return 0
 
 
 def main(argv: list[str] | None = None) -> int:

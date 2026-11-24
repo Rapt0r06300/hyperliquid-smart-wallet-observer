@@ -1,5 +1,6 @@
 @echo off
 setlocal enableextensions enabledelayedexpansion
+call "%~dp0tools\launcher_lifecycle.cmd" --scope "RATTRAPAGE" --launcher "%~f0"
 chcp 65001 >nul
 title ALINA SMART FLOW - RATTRAPAGE DES DONNEES
 set "CV_ROOT=%~dp0"

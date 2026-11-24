@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 import time
@@ -206,6 +207,458 @@ def duree_lisible(heures: float | None) -> str:
     return f"{minutes} min"
 
 
+def duree_lisible_precise(secondes: float | int | None) -> str:
+    """Formate une durée dynamique sans perdre les secondes.
+
+    ``None`` et les valeurs non finies restent explicitement inconnues : l'ETA ne
+    doit jamais transformer une absence de mesure en faux compte à rebours.
+    """
+    if secondes is None:
+        return "INCONNU"
+    try:
+        valeur = float(secondes)
+    except (TypeError, ValueError):
+        return "INCONNU"
+    if not math.isfinite(valeur):
+        return "INCONNU"
+    total = max(0, int(round(valeur)))
+    jours, reste = divmod(total, 24 * 60 * 60)
+    heures, reste = divmod(reste, 60 * 60)
+    minutes, secondes_entieres = divmod(reste, 60)
+    return f"{jours} j {heures:02d} h {minutes:02d} min {secondes_entieres:02d} s"
+
+
+def pourcentage_progression(part: int | float | None, total: int | float | None) -> float | None:
+    """Pourcentage mesuré, ou ``None`` quand le dénominateur n'est pas prouvé."""
+    if part is None or total is None or float(total) <= 0:
+        return None
+    return round(max(0.0, min(100.0, float(part) * 100.0 / float(total))), 1)
+
+
+def barre_progression(pourcent: float | None, *, largeur: int = 24) -> str:
+    """Barre ASCII portable pour les consoles Windows et les sorties CI."""
+    if pourcent is None:
+        return "?" * max(1, int(largeur))
+    remplie = round(max(0.0, min(100.0, pourcent)) * max(1, int(largeur)) / 100.0)
+    return "#" * remplie + "." * (max(1, int(largeur)) - remplie)
+
+
+def etat_flux(ruban: Path | None, mesure: dict, *, maintenant: float | None = None) -> dict:
+    """État lisible du flux sans prétendre prouver l'état des processus.
+
+    ``ACTIF`` signifie qu'une croissance a été mesurée entre deux rafraîchissements.
+    Un fichier présent mais immobile devient ``EN_ATTENTE`` ou ``SANS_NOUVELLE`` : on
+    ne le transforme jamais silencieusement en collecte arrêtée.
+    """
+    if ruban is None:
+        return {"code": "INCONNU", "detail": "ruban absent", "age_s": None}
+    try:
+        age_s = max(0.0, (time.time() if maintenant is None else float(maintenant)) - ruban.stat().st_mtime)
+    except OSError:
+        return {"code": "INCONNU", "detail": "ruban illisible", "age_s": None}
+    lignes_min = mesure.get("lignes_par_minute")
+    if isinstance(lignes_min, (int, float)) and lignes_min > 0:
+        return {"code": "ACTIF", "detail": "croissance mesurée", "age_s": round(age_s, 1)}
+    if mesure.get("motif") == "PREMIERE_MESURE":
+        return {"code": "EN_ATTENTE", "detail": "première mesure; attente du prochain rafraîchissement", "age_s": round(age_s, 1)}
+    if age_s <= AGE_MAX_DEBIT_S:
+        return {"code": "EN_ATTENTE", "detail": "aucune nouvelle ligne sur ce cycle", "age_s": round(age_s, 1)}
+    return {"code": "SANS_NOUVELLE", "detail": "ruban présent mais inchangé", "age_s": round(age_s, 1)}
+
+
+def progression_etude(besoins: list[dict]) -> dict:
+    """Résumé du prochain stade chiffré, recalculé depuis l'instant présent."""
+    candidats = [
+        b for b in besoins
+        if b.get("statut") == "MORE_DATA"
+        and isinstance(b.get("mesures"), int)
+        and isinstance(b.get("requis"), int)
+        and b["requis"] > 0
+    ]
+    if not candidats:
+        return {
+            "pourcent": None,
+            "texte": "INCONNU (aucune étude chiffrée en attente)",
+            "eta_live": "INCONNU",
+        }
+    cible = min(candidats, key=lambda b: (b["restants"] if b.get("restants") is not None else 10**9, b["hypothese"]))
+    pct = pourcentage_progression(cible["mesures"], cible["requis"])
+    nom = str(cible["hypothese"]).replace("copy_vault_", "")
+    restants = cible.get("restants")
+    maintenant = datetime.now(timezone.utc)
+    date_cible = cible.get("date_estimee")
+    if isinstance(date_cible, datetime):
+        if date_cible.tzinfo is None:
+            date_cible = date_cible.replace(tzinfo=timezone.utc)
+        eta_live_secondes = max(0.0, (date_cible - maintenant).total_seconds())
+        eta_live = (
+            f">= {duree_lisible_precise(eta_live_secondes)}, vers le "
+            f"{date_cible.strftime('%d/%m %H:%M:%S')} UTC"
+            if eta_live_secondes > 0
+            else "À RÉÉVALUER (échéance dépassée)"
+        )
+    elif isinstance(restants, int):
+        # Fallback uniquement pour les appels/tests qui fournissent un besoin sans date.
+        date_cible = maintenant + timedelta(days=restants)
+        eta_live_secondes = restants * 24 * 60 * 60
+        eta_live = f">= {duree_lisible_precise(eta_live_secondes)}, vers le {date_cible.strftime('%d/%m %H:%M:%S')} UTC"
+    else:
+        eta_live = "INCONNU (besoin non chiffré)"
+        eta_live_secondes = None
+    return {
+        "pourcent": pct,
+        "texte": f"{cible['mesures']}/{cible['requis']} jours ({pct:.1f} %) — {nom}",
+        "eta_live": eta_live,
+        "eta_live_secondes": eta_live_secondes,
+    }
+
+
+def besoins_live(besoins: list[dict], maintenant: datetime | None = None) -> list[str]:
+    """Construit une ligne temps réel pour chaque besoin connu du laboratoire.
+
+    Le résumé ne choisit plus silencieusement un seul type de donnée : chaque étude
+    apparaît avec son statut, son avancement et son ETA. Les besoins non chiffrés ou
+    périmés restent lisibles comme tels.
+    """
+    maintenant = maintenant or datetime.now(timezone.utc)
+    if not besoins:
+        return ["| BESOINS LIVE         : INCONNU (aucune étude lue)"]
+    lignes: list[str] = []
+    for index, besoin in enumerate(besoins, start=1):
+        nom = str(besoin.get("hypothese") or "hypothèse inconnue").replace("copy_vault_", "")
+        genre = str(besoin.get("etude") or "base")
+        identifiant = f"{nom} [{genre}]"
+        statut = str(besoin.get("statut") or "INCONNU")
+        mesures = besoin.get("mesures")
+        requis = besoin.get("requis")
+        restants = besoin.get("restants")
+        if statut == "MORE_DATA" and isinstance(mesures, int) and isinstance(requis, int) and requis > 0:
+            pct = pourcentage_progression(mesures, requis)
+            if isinstance(restants, int) and restants >= 0:
+                eta_secondes = restants * 24 * 60 * 60
+                eta = duree_lisible_precise(eta_secondes)
+                date_live = maintenant + timedelta(seconds=eta_secondes)
+                detail = f"{mesures}/{requis} j ({pct:.1f} %) | reste >= {eta} | vers {date_live.strftime('%d/%m %H:%M:%S')} UTC"
+            else:
+                detail = f"{mesures}/{requis} j ({pct:.1f} %) | ETA INCONNU (besoin non chiffré)"
+        elif statut == "MORE_DATA":
+            detail = "MORE_DATA | avancement INCONNU | ETA INCONNU"
+        else:
+            detail = f"{statut} | ETA non applicable"
+        lignes.append(f"| {index:02d}. {identifiant} : {detail}")
+    return lignes
+
+
+def lire_sources_alinasync(racine: Path) -> dict:
+    """Lit les reçus locaux AlinaSync sans rescanner ni télécharger le corpus.
+
+    Un fichier téléchargé n'est pas une donnée utilisable par le labo par sa seule
+    présence. Cette vue ne compte donc que les compteurs inscrits dans les reçus
+    SAFE/RESTORE cohérents et garde séparés : restauration, décompression et source
+    GitHub. Elle est relue au rythme lent des études, pas à chaque rafraîchissement
+    du débit, afin de ne pas relire un rapport de plusieurs dizaines de mégaoctets.
+    """
+    dossier = Path(racine) / "runtime" / "recovery" / "full"
+    resultat: dict = {
+        "restore_status": "INCONNU",
+        "safe_shards": None,
+        "safe_bytes": None,
+        "release_assets": None,
+        "repository": None,
+        "catalog_sha256": None,
+        "selection_scope": None,
+        "families": [],
+        "unpack_status": "INCONNU",
+        "unpacked_shards": None,
+        "sync_status": "INCONNU",
+        "sync_report_status": None,
+        "coffre_status": "INCONNU",
+        "coffre_couverture_pct": None,
+        "coffre_fichiers": None,
+    }
+
+    def charger(nom: str) -> dict | None:
+        chemin = dossier / nom
+        try:
+            if chemin.is_symlink() or not chemin.is_file():
+                return None
+            charge = json.loads(chemin.read_text(encoding="utf-8"))
+        except (OSError, ValueError, UnicodeDecodeError):
+            return None
+        return charge if isinstance(charge, dict) else None
+
+    restore = charger("RESTORE_REPORT.json")
+    if restore is not None:
+        resultat["restore_status"] = str(restore.get("status") or "INCONNU")
+        resultat["repository"] = restore.get("repository")
+        resultat["selection_scope"] = restore.get("selection_scope")
+        resultat["source_inventory_sha256"] = restore.get("source_inventory_sha256")
+        classification = restore.get("classification")
+        verification = restore.get("catalog_verification")
+        if isinstance(classification, dict):
+            shards = classification.get("usable_shards")
+            octets = classification.get("usable_bytes")
+            if type(shards) is int and shards >= 0:
+                resultat["safe_shards"] = shards
+            if type(octets) is int and octets >= 0:
+                resultat["safe_bytes"] = octets
+        if isinstance(verification, dict):
+            assets = verification.get("required_release_assets")
+            if type(assets) is int and assets >= 0:
+                resultat["release_assets"] = assets
+            sha = verification.get("source_index_sha256")
+            if isinstance(sha, str) and sha:
+                resultat["catalog_sha256"] = sha
+            resultat["selection_scope"] = verification.get("selection_scope") or resultat["selection_scope"]
+            families = verification.get("selection_families")
+            if isinstance(families, list):
+                resultat["families"] = [str(f) for f in families if str(f).strip()]
+
+    unpack = charger("UNPACK_REPORT.json")
+    if unpack is not None:
+        resultat["unpack_status"] = str(unpack.get("status") or "INCONNU")
+        unpacked = unpack.get("unpacked_shards")
+        if type(unpacked) is int and unpacked >= 0:
+            resultat["unpacked_shards"] = unpacked
+
+    sync = charger("SYNC_REPORT.json")
+    if sync is not None:
+        resultat["sync_status"] = str(sync.get("status") or "INCONNU")
+        resultat["sync_report_status"] = sync.get("restore_report_status")
+
+    couverture_path = Path(racine) / "runtime" / "coffre_certifie" / "COUVERTURE_PROJET.json"
+    try:
+        if not couverture_path.is_symlink() and couverture_path.is_file():
+            couverture = json.loads(couverture_path.read_text(encoding="utf-8"))
+            if isinstance(couverture, dict):
+                pct = couverture.get("couverture_pct")
+                fichiers = couverture.get("fichiers_de_donnees")
+                if isinstance(pct, (int, float)) and math.isfinite(float(pct)):
+                    resultat["coffre_couverture_pct"] = float(pct)
+                if type(fichiers) is int and fichiers >= 0:
+                    resultat["coffre_fichiers"] = fichiers
+                resultat["coffre_status"] = (
+                    "CERTIFIÉ 100 %"
+                    if couverture.get("cent_pour_cent") is True
+                    else "PARTIEL / À COMPLÉTER"
+                )
+    except (OSError, ValueError, UnicodeDecodeError):
+        resultat["coffre_status"] = "INCONNU"
+
+    resultat["restore_verified"] = (
+        resultat["restore_status"] == "REPLAY_READY_COMPLETE"
+        and isinstance(resultat["safe_shards"], int)
+        and isinstance(resultat["safe_bytes"], int)
+    )
+    resultat["unpack_verified"] = resultat["unpack_status"] == "SAFE_UNPACK_COMPLETE"
+    resultat["github_release_bound"] = (
+        resultat["restore_verified"]
+        and resultat["repository"] == "Rapt0r06300/hyperliquid-smart-wallet-observer"
+        and isinstance(resultat["release_assets"], int)
+        and isinstance(resultat["catalog_sha256"], str)
+    )
+    return resultat
+
+
+def _octets_lisibles(octets: int | None) -> str:
+    if not isinstance(octets, int) or octets < 0:
+        return "INCONNU"
+    valeur = float(octets)
+    for unite in ("o", "Ko", "Mo", "Go", "To"):
+        if valeur < 1024.0 or unite == "To":
+            return f"{valeur:.1f} {unite}"
+        valeur /= 1024.0
+    return "INCONNU"
+
+
+def lignes_sources_live(sources: dict | None) -> list[str]:
+    """Explique ce qui vient des collecteurs et ce qui vient d'AlinaSync."""
+    if not isinstance(sources, dict):
+        return ["| SOURCES SAFE        : INCONNU (reçus AlinaSync non lus)"]
+    restore = sources.get("restore_status", "INCONNU")
+    safe = (
+        f"{sources['safe_shards']:,} shards / {_octets_lisibles(sources['safe_bytes'])}"
+        if sources.get("restore_verified") else "INCONNU (restauration non certifiée)"
+    )
+    unpack = (
+        f"{sources['unpacked_shards']:,} shards"
+        if sources.get("unpack_verified") and isinstance(sources.get("unpacked_shards"), int)
+        else "INCONNU (décompression non certifiée)"
+    )
+    github = (
+        f"preuve locale liée à {sources['repository']} / {sources['release_assets']:,} assets"
+        if sources.get("github_release_bound") else "INCONNU (aucune preuve Release complète)"
+    )
+    familles = ", ".join(sources.get("families") or ()) or "INCONNU"
+    coffre_pct = sources.get("coffre_couverture_pct")
+    coffre = (
+        f"{sources['coffre_status']} | couverture {coffre_pct:.3f} % | "
+        f"{sources['coffre_fichiers']:,} fichiers"
+        if isinstance(coffre_pct, (int, float)) and isinstance(sources.get("coffre_fichiers"), int)
+        else sources.get("coffre_status", "INCONNU")
+    )
+    return [
+        f"| ALINASYNC RESTORE   : {restore} | SAFE utilisable : {safe}",
+        f"| ALINASYNC DÉBALLAGE : {sources.get('unpack_status', 'INCONNU')} | {unpack}",
+        f"| ALINASYNC JOURNAL   : {sources.get('sync_status', 'INCONNU')}"
+        f" (dernier journal, non prioritaire sur RESTORE_REPORT)",
+        f"| GITHUB / RELEASE     : {github}",
+        f"| FAMILLES SAFE LUES  : {familles}",
+        f"| COFFRE CERTIFIÉ      : {coffre}",
+        "| RÈGLE DE COMPTAGE   : ces shards sont disponibles, mais ne deviennent des jours denses qu'après replay validé.",
+    ]
+
+
+def lignes_dashboard_simple(
+    *,
+    tours: int,
+    mesure: dict,
+    etat: dict,
+    denses_acquis: int,
+    requis: int,
+    age_sonde_h: float | None,
+    eta: dict,
+    besoins: list[dict],
+    sources: dict | None,
+    intervalle_s: float,
+) -> list[str]:
+    """Vue opérateur courte : une personne doit comprendre l'essentiel en 5 secondes."""
+    etude = progression_etude(besoins)
+    clair = {
+        "ACTIF": f"EN DIRECT — {mesure.get('active_sources', 0)}/{mesure.get('source_count', 0)} flux écrivent",
+        "EN_ATTENTE": "EN ATTENTE — aucune nouvelle écriture mesurée sur ce cycle",
+        "SANS_NOUVELLE": "SANS NOUVELLE — aucun flux n'a écrit récemment",
+        "INCONNU": "INCONNU — les fichiers ne sont pas vérifiables",
+    }.get(etat.get("code"), "INCONNU — état non reconnu")
+    debit = (
+        f"{mesure['lignes_par_minute']:.1f} lignes/min"
+        if mesure.get("lignes_par_minute") is not None
+        else f"INCONNU ({mesure.get('motif') or 'première mesure'})"
+    )
+    if age_sonde_h is None:
+        moteur = "INCONNU — aucune sonde"
+    elif age_sonde_h > AGE_MAX_SONDE_H:
+        moteur = f"INCONNU — sonde périmée depuis {age_sonde_h:.1f} h"
+    elif eta.get("statut") == "ATTEINT":
+        moteur = "ATTEINT"
+    else:
+        moteur = duree_lisible(eta.get("heures"))
+    eta_secondes = etude.get("eta_live_secondes")
+    if isinstance(eta_secondes, (int, float)) and eta_secondes > 0:
+        prochaine = (
+            f"collecter encore {duree_lisible_precise(eta_secondes)} — "
+            f"{etude['texte'].split(' — ', 1)[0]}"
+        )
+    elif eta_secondes == 0:
+        prochaine = "échéance dépassée — relancer l'étude pour recalculer"
+    else:
+        prochaine = "aucune étape chiffrée disponible"
+    eta_etude = etude["eta_live"]
+    if sources and sources.get("restore_verified"):
+        safe = f"{sources['safe_shards']:,} shards / {_octets_lisibles(sources['safe_bytes'])}"
+    else:
+        safe = "INCONNU — restauration SAFE non certifiée"
+    unpacked = (
+        f"{sources['unpacked_shards']:,} shards"
+        if sources and sources.get("unpack_verified") and isinstance(sources.get("unpacked_shards"), int)
+        else "INCONNU"
+    )
+    release = (
+        f"{sources['release_assets']:,} assets"
+        if sources and sources.get("github_release_bound") and isinstance(sources.get("release_assets"), int)
+        else "INCONNU"
+    )
+    coffre_pct = sources.get("coffre_couverture_pct") if sources else None
+    if isinstance(coffre_pct, (int, float)):
+        coffre = f"{coffre_pct:.3f} % ({sources.get('coffre_status', 'INCONNU')})"
+    else:
+        coffre = "INCONNU"
+    return [
+        "+" + "=" * 76 + "+",
+        f"| COPY-VAULT — SUIVI EN DIRECT | cycle {tours} | {time.strftime('%H:%M:%S')} |",
+        "+" + "-" * 76 + "+",
+        f"| ÉTAT              : {clair}",
+        f"| DÉBIT             : {debit} | actualisation toutes les {max(0.5, float(intervalle_s)):.1f} s",
+        f"| PROCHAINE ÉTAPE   : {prochaine}",
+        f"| TEMPS MINIMUM     : {eta_etude} (si chaque journée reste dense)",
+        f"| ETA MOTEUR        : {moteur} | ancienne mesure: {denses_acquis}/{requis} jours",
+        f"| DONNÉES DISPONIBLES: SAFE {safe} | déballé {unpacked} | Release {release}",
+        f"| COFFRE            : {coffre}",
+        "| À SAVOIR          : un fichier téléchargé ne devient pas une journée dense avant replay validé.",
+        "| q = quitter       | --detail = afficher le diagnostic complet",
+        "+" + "=" * 76 + "+",
+    ]
+
+
+def lignes_resume(
+    *,
+    tours: int,
+    ruban: Path | None,
+    mesure: dict,
+    etat: dict,
+    denses_acquis: int,
+    requis: int,
+    age_sonde_h: float | None,
+    eta: dict,
+    besoins: list[dict],
+    sources: dict | None = None,
+    intervalle_s: float = 5.0,
+) -> list[str]:
+    """Bloc opérateur court placé avant le détail scientifique historique."""
+    sonde_fiable = age_sonde_h is not None and age_sonde_h <= AGE_MAX_SONDE_H
+    moteur_pct = pourcentage_progression(denses_acquis, requis) if sonde_fiable else None
+    etude = progression_etude(besoins)
+    etat_clair = {
+        "ACTIF": "Collecte active : le ruban vient de grandir.",
+        "EN_ATTENTE": "En attente : pas encore assez de recul pour mesurer le débit.",
+        "SANS_NOUVELLE": "Aucune nouvelle écriture récente ; cela ne prouve pas un arrêt.",
+        "INCONNU": "État inconnu : le ruban n'est pas vérifiable.",
+    }.get(etat["code"], "État non reconnu : aucune conclusion.")
+    debit = (
+        f"{mesure['lignes_par_minute']:.1f} lignes/min"
+        if mesure.get("lignes_par_minute") is not None
+        else f"INCONNU ({mesure.get('motif') or 'mesure en cours'})"
+    )
+    eta_txt = (
+        ("ATTEINT" if eta.get("statut") == "ATTEINT" else duree_lisible(eta.get("heures")))
+        if sonde_fiable
+        else "INCONNU (sonde périmée)"
+    )
+    sonde_txt = "inconnue" if age_sonde_h is None else f"{age_sonde_h:.1f} h"
+    if mesure.get("source_count"):
+        ruban_txt = (
+            f"{mesure['source_count']} flux observés"
+            + (f" | actifs: {', '.join(mesure.get('active_source_paths', [])[:3])}"
+               if mesure.get("active_source_paths") else "")
+        )
+    else:
+        ruban_txt = str(ruban) if ruban is not None else "aucun ruban trouvé"
+    progression_txt = (
+        f"{moteur_pct:.1f} %"
+        if moteur_pct is not None
+        else f"INCONNUE (dernière valeur {denses_acquis}/{requis}, sonde périmée)"
+    )
+    return [
+        "+" + "=" * 72 + "+",
+        f"| ETA COLLECTE COPY-VAULT | {'EN DIRECT' if etat['code'] == 'ACTIF' else etat['code']:<10} | cycle {tours:<4} | {time.strftime('%H:%M:%S')} |",
+        "+" + "-" * 72 + "+",
+        f"| PROGRESSION MOTEUR  : [{barre_progression(moteur_pct)}] {progression_txt} ({denses_acquis}/{requis} dernières journées)",
+        f"| EN CLAIR            : {etat_clair}",
+        f"| PROCHAIN STADE      : {etude['texte']}",
+        f"| ETA MINIMUM ACTUEL  : {etude['eta_live']} (si chaque journée reste dense)",
+        *besoins_live(besoins),
+        *lignes_sources_live(sources),
+        f"| DÉBIT MESURÉ        : {debit} | ETA moteur : {eta_txt}",
+        f"| ACTIVITÉ DES FLUX    : {mesure.get('active_sources', 0)}/{mesure.get('source_count', 0)} actifs | "
+        f"{mesure.get('recent_sources', 0)}/{mesure.get('source_count', 0)} récents",
+        f"| ÉTAT DU RUBAN       : {etat['detail']} | dernière écriture : {etat.get('age_s', '?')} s",
+        f"| SONDE DENSITÉ       : âge {sonde_txt} | source : {ruban_txt} | refresh {max(0.5, float(intervalle_s)):.1f} s",
+        "+" + "=" * 72 + "+",
+        "  Lecture seule : le résumé indique des observations, il ne démarre ni n'arrête rien.",
+        "",
+    ]
+
+
 class MesureDeDebit:
     """Debit du ruban de fills, mesure sur sa CROISSANCE -- en temps constant.
 
@@ -236,14 +689,20 @@ class MesureDeDebit:
             self.octets_par_ligne = len(donnees) / lignes
 
     def lire(self) -> dict:
-        """`{debit_par_heure, lignes_par_minute, age_s, motif}` — `None` si inconnu."""
+        """Mesure le débit sans relire le ruban.
+
+        Le résumé opérateur réutilise aussi ``taille_octets`` et
+        ``octets_par_minute`` pour montrer que l'écran observe bien une croissance
+        réelle, pas seulement une horloge qui tourne.
+        """
         if self.octets_par_ligne is None:
             self._mesurer_la_ligne_moyenne()
         try:
             taille = self.chemin.stat().st_size
         except OSError:
             self._dernier = None
-            return {"debit_par_heure": None, "lignes_par_minute": None, "age_s": None,
+            return {"debit_par_heure": None, "lignes_par_minute": None,
+                    "octets_par_minute": None, "taille_octets": None, "age_s": None,
                     "motif": "RUBAN_ILLISIBLE"}
         # Une horloge murale peut avoir une résolution trop grossière sous Windows
         # et rendre deux lectures immédiates indistinguables. Pour un débit, seule
@@ -251,25 +710,164 @@ class MesureDeDebit:
         maintenant = time.monotonic()
         if self._dernier is None:
             self._dernier = (maintenant, taille)
-            return {"debit_par_heure": None, "lignes_par_minute": None, "age_s": 0.0,
+            return {"debit_par_heure": None, "lignes_par_minute": None,
+                    "octets_par_minute": None, "taille_octets": taille, "age_s": 0.0,
                     "motif": "PREMIERE_MESURE"}
         t0, taille0 = self._dernier
         ecoule = maintenant - t0
         if ecoule <= 0:
-            return {"debit_par_heure": None, "lignes_par_minute": None, "age_s": 0.0,
+            return {"debit_par_heure": None, "lignes_par_minute": None,
+                    "octets_par_minute": None, "taille_octets": taille, "age_s": 0.0,
                     "motif": "INTERVALLE_NUL"}
         if ecoule > AGE_MAX_DEBIT_S:
             self._dernier = (maintenant, taille)
             return {"debit_par_heure": None, "lignes_par_minute": None,
+                    "octets_par_minute": None, "taille_octets": taille,
                     "age_s": round(ecoule, 1), "motif": "MESURE_PERIMEE"}
         self._dernier = (maintenant, taille)
         if self.octets_par_ligne is None or self.octets_par_ligne <= 0:
             return {"debit_par_heure": None, "lignes_par_minute": None,
+                    "octets_par_minute": None, "taille_octets": taille,
                     "age_s": round(ecoule, 1), "motif": "LIGNE_MOYENNE_INCONNUE"}
         lignes = max(0, taille - taille0) / self.octets_par_ligne
         par_minute = lignes / (ecoule / 60.0)
+        octets_par_minute = max(0, taille - taille0) / (ecoule / 60.0)
         return {"debit_par_heure": par_minute * 60.0, "lignes_par_minute": par_minute,
+                "octets_par_minute": octets_par_minute, "taille_octets": taille,
                 "age_s": round(ecoule, 1), "motif": None}
+
+
+FLUX_DATA_EXTENSIONS = (".jsonl", ".ndjson", ".csv", ".json")
+FLUX_DATA_SUFFIXES_IGNORES = (".lock", ".part", ".partial", ".idx.json")
+
+
+def trouver_flux_de_donnees(racine: Path) -> list[Path]:
+    """Découvre les flux locaux sans ouvrir ni modifier leurs données.
+
+    Les collecteurs écrivent plusieurs rubans en parallèle. L'ancien ETA choisissait
+    ``vault_fills_poll`` puis pouvait afficher 0 alors que L2, trades ou checkpoints
+    avançaient. On observe tous les fichiers de données directement sous
+    ``runtime/data`` et les rubans live connus, sans compter les archives SAFE ni les
+    rapports du labo comme du débit de collecte.
+    """
+    vus: dict[str, Path] = {}
+    dossier = Path(racine) / "runtime" / "data"
+    try:
+        candidats = list(dossier.iterdir()) if dossier.is_dir() else []
+    except OSError:
+        candidats = []
+    for chemin in candidats:
+        try:
+            if not chemin.is_file() or chemin.is_symlink():
+                continue
+            nom = chemin.name.lower()
+            if nom.endswith(FLUX_DATA_SUFFIXES_IGNORES):
+                continue
+            if chemin.suffix.lower() not in FLUX_DATA_EXTENSIONS:
+                continue
+            vus[str(chemin.resolve()).lower()] = chemin
+        except OSError:
+            continue
+    for relatif in RUBANS_FILLS:
+        chemin = Path(racine) / relatif
+        try:
+            if chemin.is_file() and not chemin.is_symlink():
+                vus[str(chemin.resolve()).lower()] = chemin
+        except OSError:
+            continue
+    return sorted(vus.values(), key=lambda chemin: str(chemin).lower())
+
+
+def etat_flux_global(mesure: dict, *, maintenant: float | None = None) -> dict:
+    """Résume l'activité de tous les rubans sans déduire un état de processus."""
+    total = int(mesure.get("source_count") or 0)
+    actifs = int(mesure.get("active_sources") or 0)
+    recents = int(mesure.get("recent_sources") or 0)
+    if total == 0:
+        return {"code": "INCONNU", "detail": "aucun flux de données trouvé", "age_s": None}
+    if actifs:
+        return {
+            "code": "ACTIF",
+            "detail": f"{actifs}/{total} flux en croissance; {recents}/{total} modifiés récemment",
+            "age_s": mesure.get("age_s"),
+        }
+    if recents:
+        return {
+            "code": "EN_ATTENTE",
+            "detail": f"{recents}/{total} flux récents, aucune croissance mesurée sur ce cycle",
+            "age_s": mesure.get("age_s"),
+        }
+    return {
+        "code": "SANS_NOUVELLE",
+        "detail": f"aucune croissance récente sur {total} flux observés",
+        "age_s": mesure.get("age_s"),
+    }
+
+
+class MesureMultiFlux:
+    """Mesure le débit opérationnel de tous les rubans locaux en parallèle."""
+
+    def __init__(self, racine: Path) -> None:
+        self.racine = Path(racine)
+        self._mesures: dict[Path, MesureDeDebit] = {}
+
+    def lire(self) -> dict:
+        chemins = trouver_flux_de_donnees(self.racine)
+        lignes_total = 0.0
+        octets_total = 0.0
+        actifs: list[Path] = []
+        actifs_detail: list[tuple[Path, float]] = []
+        recents = 0
+        ages: list[float] = []
+        mesures: list[tuple[Path, dict]] = []
+        for chemin in chemins:
+            mesure = self._mesures.setdefault(chemin, MesureDeDebit(chemin)).lire()
+            mesures.append((chemin, mesure))
+            lignes = mesure.get("lignes_par_minute")
+            octets = mesure.get("octets_par_minute")
+            if isinstance(lignes, (int, float)) and lignes > 0:
+                lignes_total += float(lignes)
+            if isinstance(octets, (int, float)) and octets > 0:
+                octets_total += float(octets)
+            croissance = (
+                (isinstance(lignes, (int, float)) and lignes > 0)
+                or (isinstance(octets, (int, float)) and octets > 0)
+            )
+            if croissance:
+                actifs.append(chemin)
+                actifs_detail.append((chemin, float(octets or 0.0)))
+            try:
+                age = max(0.0, time.time() - chemin.stat().st_mtime)
+            except OSError:
+                continue
+            ages.append(age)
+            if age <= AGE_MAX_DEBIT_S:
+                recents += 1
+        actifs_detail.sort(key=lambda item: item[1], reverse=True)
+        principaux = [str(path.relative_to(self.racine)).replace(chr(92), "/") for path, _ in actifs_detail[:8]]
+        derniere = min(ages) if ages else None
+        premiere_mesure = bool(mesures) and all(
+            mesure.get("motif") == "PREMIERE_MESURE" for _, mesure in mesures
+        )
+        motif = None
+        if not chemins:
+            motif = "AUCUN_FLUX"
+        elif not actifs:
+            motif = "AUCUNE_CROISSANCE"
+        elif all(m.get("motif") == "PREMIERE_MESURE" for _, m in mesures):
+            motif = "PREMIERE_MESURE"
+        return {
+            "debit_par_heure": None if premiere_mesure else (lignes_total * 60.0 if lignes_total > 0 else 0.0),
+            "lignes_par_minute": None if premiere_mesure else lignes_total,
+            "octets_par_minute": None if premiere_mesure else (octets_total if octets_total > 0 else 0.0),
+            "taille_octets": sum(int(m.get("taille_octets") or 0) for _, m in mesures),
+            "age_s": round(derniere, 1) if derniere is not None else None,
+            "motif": "PREMIERE_MESURE" if premiere_mesure else motif,
+            "source_count": len(chemins),
+            "active_sources": len(actifs),
+            "recent_sources": recents,
+            "active_source_paths": principaux,
+        }
 
 
 #: Au-delà, la sonde des journées denses ne décrit plus le corpus : on l'affiche PÉRIMÉE au lieu de la croire.
@@ -391,7 +989,7 @@ def _charger_etat_de_fond(chemin: Path) -> dict | None:
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--racine", default=".")
-    p.add_argument("--intervalle", type=float, default=5.0,
+    p.add_argument("--intervalle", type=float, default=2.0,
                    help="secondes entre deux rafraichissements de l'ETA")
     p.add_argument("--tours", type=int, default=0,
                    help="nombre de rafraichissements (0 = sans fin, q pour quitter)")
@@ -399,6 +997,11 @@ def main(argv: list[str] | None = None) -> int:
                    help="rapport horloges explicite ; par défaut le plus récent est relu")
     p.add_argument("--requis", type=int, default=DS.MINIMUM_SIGNAL_UTC_DAYS)
     p.add_argument("--une-fois", action="store_true", help="une seule mesure, puis sortie")
+    p.add_argument(
+        "--detail",
+        action="store_true",
+        help="affiche le diagnostic complet ; par défaut, l'écran reste volontairement synthétique",
+    )
     args = p.parse_args(argv)
 
     racine = Path(args.racine).resolve()
@@ -409,13 +1012,15 @@ def main(argv: list[str] | None = None) -> int:
         pass
 
     ruban, cherches = trouver_ruban(racine)
-    debit = MesureDeDebit(ruban) if ruban else MesureDeDebit(racine / RUBANS_FILLS[0])
+    debit = MesureMultiFlux(racine)
     tours = 0
     besoins: list[dict] = []
+    sources: dict | None = None
     while True:
         tours += 1
-        if tours == 1 or tours % 12 == 0:              # les études changent rarement : relues ~1 fois par minute
+        if tours == 1 or tours % 12 == 0:              # études et reçus lourds : relus ~1 fois par minute
             besoins = besoins_du_labo(racine)
+            sources = lire_sources_alinasync(racine)
         denses_acquis, source_denses, age_sonde_h = lire_sonde_denses(racine, args.sonde)
         mesure = debit.lire()
         secondes_restantes = _secondes_restantes_aujourdhui()
@@ -425,68 +1030,101 @@ def main(argv: list[str] | None = None) -> int:
             debit_par_heure=mesure["debit_par_heure"],
             aujourdhui_deja_dense=False,
             secondes_restantes_dans_la_journee=secondes_restantes)
+        etat = etat_flux_global(mesure)
+        eta_detail = eta if age_sonde_h is not None and age_sonde_h <= AGE_MAX_SONDE_H else {
+            **eta,
+            "statut": "INCONNU",
+            "heures": None,
+            "motif": "sonde de densité périmée",
+        }
 
-        en_attente = [b for b in besoins if b["statut"] == "MORE_DATA" and b["restants"] is not None
-                      and not echeance_passee(b)]
-        if en_attente:
-            prochaine, derniere = en_attente[0], max(en_attente, key=lambda b: b["restants"])
-            tete = [
-                f"  ETA LABO (etudes)            : prochaine hypothese tranchable vers le "
-                f"{prochaine['date_estimee'].strftime('%d/%m')} ({prochaine['hypothese'].replace('copy_vault_', '')}),",
-                f"                                 toutes vers le {derniere['date_estimee'].strftime('%d/%m')}"
-                f" -- si chaque journee reste dense",
+        if args.detail or args.une_fois:
+            en_attente = [b for b in besoins if b["statut"] == "MORE_DATA" and b["restants"] is not None
+                          and not echeance_passee(b)]
+            if en_attente:
+                prochaine, derniere = en_attente[0], max(en_attente, key=lambda b: b["restants"])
+                tete = [
+                    f"  ETA LABO (etudes)            : prochaine hypothese tranchable vers le "
+                    f"{prochaine['date_estimee'].strftime('%d/%m')} ({prochaine['hypothese'].replace('copy_vault_', '')}),",
+                    f"                                 toutes vers le {derniere['date_estimee'].strftime('%d/%m')}"
+                    f" -- si chaque journee reste dense",
+                ]
+            elif besoins:
+                tete = ["  ETA LABO (etudes)            : aucune hypothese chiffree en jours n'attend de donnees"]
+            else:
+                tete = ["  ETA LABO (etudes)            : INCONNU (aucune etude lue)"]
+            lignes = lignes_resume(
+                tours=tours,
+                ruban=ruban,
+                mesure=mesure,
+                etat=etat,
+                denses_acquis=denses_acquis,
+                requis=int(args.requis),
+                age_sonde_h=age_sonde_h,
+                eta=eta,
+                besoins=besoins,
+                sources=sources,
+                intervalle_s=args.intervalle,
+            ) + [
+                "=" * 68,
+                "  DETAIL ETA DONNEES LABO — pourquoi cette estimation ?",
+                "=" * 68,
+                *tete,
+                "",
+                "  CE QUE LES ETUDES DU LABO DISENT LEUR MANQUER (passage le plus recent) :",
+                *lignes_besoins(besoins),
+                "",
+                "  PLANCHER DU MOTEUR (decoupage TRAIN/TEST, pas le besoin des etudes) :",
+                f"  journees UTC DENSES acquises : {denses_acquis} / {args.requis} requises",
+                f"  seuil de densite             : {MIN_SIGNALS_PER_DAY} signaux evaluables/jour",
+                f"  source des journees          : {source_denses}",
+                ("  age de cette mesure          : "
+                 + (f"{age_sonde_h:.1f} h" if age_sonde_h is not None else "INCONNU")
+                 + ("  -- PERIMEE (tools/sonde_horloges_carnets.py la refait)"
+                    if age_sonde_h is not None and age_sonde_h > AGE_MAX_SONDE_H else "")),
+                "  ATTENTION                    : borne HAUTE — la sonde lit les rubans par",
+                "                                 regex, hors des filtres du labo (dedup,",
+                "                                 certification, une_seule_connexion_par_coin).",
+                ("  ruban de debit               : "
+                 + (str(ruban.relative_to(racine)) if ruban
+                    else "INTROUVABLE parmi " + ", ".join(cherches))),
+                "",
+                ("  debit observe                : "
+                 + (f"{mesure['lignes_par_minute']:.1f} lignes/min"
+                    if mesure["lignes_par_minute"] is not None
+                    else f"INCONNU ({mesure['motif']})")),
+                f"  mesure sur                   : {mesure['age_s']} s",
+                "",
+                f"  plancher du moteur           : {duree_lisible(eta_detail['heures'])}"
+                f"   [{eta_detail['statut']}]",
             ]
-        elif besoins:
-            tete = ["  ETA LABO (etudes)            : aucune hypothese chiffree en jours n'attend de donnees"]
+            if eta_detail.get("motif"):
+                lignes.append(f"  pourquoi                     : {eta_detail['motif']}")
+            if eta_detail["statut"] in ("EN_COURS", "JOURNEE_EN_COURS_PERDUE"):
+                lignes.append(
+                    f"  dont aujourd'hui             : "
+                    f"{duree_lisible(eta_detail.get('heures_pour_finir_aujourdhui'))}"
+                    f"  puis {eta_detail.get('journees_calendaires_ensuite')} journee(s) calendaire(s)")
+            lignes.append("")
+            lignes.append("  (l'ETA RECULE si le debit tombe : une journee trop pauvre ne compte pas)")
+            lignes.append("  (dates des etudes : jours REQUIS moins jours MESURES a la date de l'etude ; relancer")
+            lignes.append("   LANCER_LAB_QUANT_COPY_VAULT.cmd copiabilite pour les remettre a jour)")
+            if not args.une_fois:
+                lignes.append("  q ou Ctrl+C pour quitter")
         else:
-            tete = ["  ETA LABO (etudes)            : INCONNU (aucune etude lue)"]
-        lignes = [
-            "=" * 68,
-            "  ETA DONNEES LABO — combien de temps encore collecter ?",
-            "=" * 68,
-            *tete,
-            "",
-            "  CE QUE LES ETUDES DU LABO DISENT LEUR MANQUER (passage le plus recent) :",
-            *lignes_besoins(besoins),
-            "",
-            "  PLANCHER DU MOTEUR (decoupage TRAIN/TEST, pas le besoin des etudes) :",
-            f"  journees UTC DENSES acquises : {denses_acquis} / {args.requis} requises",
-            f"  seuil de densite             : {MIN_SIGNALS_PER_DAY} signaux evaluables/jour",
-            f"  source des journees          : {source_denses}",
-            ("  age de cette mesure          : "
-             + (f"{age_sonde_h:.1f} h" if age_sonde_h is not None else "INCONNU")
-             + ("  -- PERIMEE (tools/sonde_horloges_carnets.py la refait)"
-                if age_sonde_h is not None and age_sonde_h > AGE_MAX_SONDE_H else "")),
-            "  ATTENTION                    : borne HAUTE — la sonde lit les rubans par",
-            "                                 regex, hors des filtres du labo (dedup,",
-            "                                 certification, une_seule_connexion_par_coin).",
-            ("  ruban de debit               : "
-             + (str(ruban.relative_to(racine)) if ruban
-                else "INTROUVABLE parmi " + ", ".join(cherches))),
-            "",
-            ("  debit observe                : "
-             + (f"{mesure['lignes_par_minute']:.1f} lignes/min"
-                if mesure["lignes_par_minute"] is not None
-                else f"INCONNU ({mesure['motif']})")),
-            f"  mesure sur                   : {mesure['age_s']} s",
-            "",
-            f"  plancher du moteur           : {duree_lisible(eta['heures'])}"
-            f"   [{eta['statut']}]",
-        ]
-        if eta.get("motif"):
-            lignes.append(f"  pourquoi                     : {eta['motif']}")
-        if eta["statut"] in ("EN_COURS", "JOURNEE_EN_COURS_PERDUE"):
-            lignes.append(
-                f"  dont aujourd'hui             : "
-                f"{duree_lisible(eta.get('heures_pour_finir_aujourdhui'))}"
-                f"  puis {eta.get('journees_calendaires_ensuite')} journee(s) calendaire(s)")
-        lignes.append("")
-        lignes.append("  (l'ETA RECULE si le debit tombe : une journee trop pauvre ne compte pas)")
-        lignes.append("  (dates des etudes : jours REQUIS moins jours MESURES a la date de l'etude ; relancer")
-        lignes.append("   LANCER_LAB_QUANT_COPY_VAULT.cmd copiabilite pour les remettre a jour)")
-        if not args.une_fois:
-            lignes.append("  q ou Ctrl+C pour quitter")
-        if os.name == "nt":
+            lignes = lignes_dashboard_simple(
+                tours=tours,
+                mesure=mesure,
+                etat=etat,
+                denses_acquis=denses_acquis,
+                requis=int(args.requis),
+                age_sonde_h=age_sonde_h,
+                eta=eta_detail,
+                besoins=besoins,
+                sources=sources,
+                intervalle_s=args.intervalle,
+            )
+        if os.name == "nt" and getattr(sys.stdout, "isatty", lambda: False)():
             os.system("cls")      # noqa: S605 S607 - rafraichissement d'ecran, pas d'entree externe
         print("\n".join(lignes), flush=True)
 

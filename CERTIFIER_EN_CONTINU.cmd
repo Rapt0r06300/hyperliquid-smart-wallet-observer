@@ -1,5 +1,6 @@
 @echo off
 setlocal enabledelayedexpansion
+call "%~dp0tools\launcher_lifecycle.cmd" --scope "CERTIFIER_EN_CONTINU" --launcher "%~f0" --stop-file "%~dp0runtime\data\stop_certification.flag"
 rem ============================================================
 rem  CERTIFICATION EN CONTINU — a laisser ouverte A COTE d une campagne.
 rem

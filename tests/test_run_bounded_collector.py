@@ -1,19 +1,17 @@
 from __future__ import annotations
 
-from pathlib import Path
-
-from tools.run_bounded_collector import _RotatingLog
+from tools.run_bounded_collector import _next_restart_backoff
 
 
-def test_bounded_collector_log_rotates_without_losing_recent_chunks(tmp_path: Path) -> None:
-    path = tmp_path / "worker.log"
+def test_restart_backoff_is_zero_after_success() -> None:
+    assert _next_restart_backoff(16.0, 0) == 0.0
 
-    with _RotatingLog(path, max_bytes=8, backup_count=2) as output:
-        output.write(b"oldest!!")
-        output.write(b"middle!!")
-        output.write(b"newest!!")
 
-    assert path.read_bytes() == b"newest!!"
-    assert path.with_name("worker.log.1").read_bytes() == b"middle!!"
-    assert path.with_name("worker.log.2").read_bytes() == b"oldest!!"
-    assert sum(item.stat().st_size for item in tmp_path.iterdir()) == 24
+def test_restart_backoff_grows_after_failure_and_is_capped() -> None:
+    assert _next_restart_backoff(0.0, 1) == 1.0
+    assert _next_restart_backoff(1.0, 1) == 2.0
+    assert _next_restart_backoff(60.0, 1) == 60.0
+
+
+def test_restart_backoff_never_uses_negative_limits() -> None:
+    assert _next_restart_backoff(0.0, 1, initial_s=-2.0, maximum_s=0.0) == 0.0

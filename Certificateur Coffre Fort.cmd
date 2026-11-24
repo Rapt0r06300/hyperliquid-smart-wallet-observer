@@ -1,5 +1,6 @@
 @echo off
 setlocal enableextensions enabledelayedexpansion
+call "%~dp0tools\launcher_lifecycle.cmd" --scope "CERTIFICATEUR_COFFRE" --launcher "%~f0"
 chcp 65001 >nul
 title ALINA SMART FLOW - CERTIFIER COFFRE-FORT
 set "CV_ROOT=%~dp0"
@@ -66,6 +67,8 @@ echo   PAPER / LECTURE SEULE - les seules requetes sont candleSnapshot et fundin
 echo.
 call "%CV_ROOT%tools\launcher_log.cmd" "Certificateur Coffre Fort" START preflight "certification-request" ""
 
+rem Ouvre l'ecran de suivi (%% avancement, debit, ETA) dans une fenetre separee.
+rem
 rem Ouvre l'ecran de suivi (%% avancement, debit, ETA) dans une fenetre separee.
 rem
 rem CV_NO_OPEN : la MEME garde que RAPPORT-COLLECTEURS.cmd applique deja (20/11/2026). Pour

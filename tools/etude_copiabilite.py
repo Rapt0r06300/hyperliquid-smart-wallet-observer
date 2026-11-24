@@ -241,8 +241,18 @@ def executeur_parallele(workers: int):
         return None
 
     def executer(initialiseur, args, fonction, taches):
+        # au plus 2 taches par processus EN VOL : pool.map aurait serialise toutes les taches d'avance (memoire)
+        from collections import deque
+
+        resultats, en_vol = [], deque()
         with ProcessPoolExecutor(max_workers=workers, initializer=initialiseur, initargs=args) as pool:
-            return list(pool.map(fonction, taches, chunksize=1))
+            for tache in taches:
+                en_vol.append(pool.submit(fonction, tache))
+                if len(en_vol) >= 2 * workers:
+                    resultats.append(en_vol.popleft().result())
+            while en_vol:
+                resultats.append(en_vol.popleft().result())
+        return resultats
 
     return executer
 
@@ -583,7 +593,9 @@ def run(root: Path, *, price: str, workers: int, config: cop.CopiabilityConfig, 
         panel = load_mid_panel(shards["allmids"], config.stale_price_ms, cache_dir=root / CACHE_DIR)
         panel, aliases = cop.alias_legacy_symbols(panel, raw["coin"].unique())
         if len(panel.ts):
-            raw = raw[(raw["time"] >= int(panel.ts[0])) & (raw["time"] <= int(panel.ts[-1]))]
+            dans = (raw["time"] >= int(panel.ts[0])) & (raw["time"] <= int(panel.ts[-1]))
+            if not bool(dans.all()):          # toutes dedans : pas de copie de 22 M lignes pour rien (24/11/2026)
+                raw = raw[dans]
         fills, prepared_rejects = cop.prepare_fills(raw, config)
     else:
         fills, prepared_rejects = cop.prepare_fills(raw, config)

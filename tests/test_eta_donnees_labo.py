@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 RACINE = Path(__file__).resolve().parents[1]
@@ -135,6 +136,143 @@ def test_la_duree_lisible_est_juste():
     assert ETA.duree_lisible(49.5) == "2 j 01 h 30 min"
 
 
+def test_la_duree_precise_affiche_jours_heures_minutes_secondes():
+    assert ETA.duree_lisible_precise(93784) == "1 j 02 h 03 min 04 s"
+    assert ETA.duree_lisible_precise(None) == "INCONNU"
+
+
+def test_tous_les_besoins_live_sont_visibles_et_ne_cachent_pas_l_inconnu():
+    lignes = ETA.besoins_live([
+        {"statut": "MORE_DATA", "mesures": 8, "requis": 20,
+         "restants": 12, "hypothese": "copy_vault_demo", "etude": "base"},
+        {"statut": "MORE_DATA", "mesures": None, "requis": None,
+         "restants": None, "hypothese": "copy_vault_l2", "etude": "oos"},
+        {"statut": "PROVEN", "hypothese": "copy_vault_done", "etude": "base"},
+    ], maintenant=datetime(2026, 11, 24, tzinfo=timezone.utc))
+    texte = "\n".join(lignes)
+    assert "demo [base]" in texte
+    assert "8/20 j (40.0 %)" in texte
+    assert "0 j 00 h 00 min 00 s" not in texte
+    assert "l2 [oos]" in texte
+    assert "ETA INCONNU" in texte
+    assert "done [base]" in texte
+    assert "PROVEN" in texte
+
+
+def test_l_eta_lit_separement_alinasync_github_et_coffre(tmp_path):
+    recovery = tmp_path / "runtime" / "recovery" / "full"
+    recovery.mkdir(parents=True)
+    (recovery / "RESTORE_REPORT.json").write_text(json.dumps({
+        "status": "REPLAY_READY_COMPLETE",
+        "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "selection_scope": "ALL_SAFE_REPLAYABLE",
+        "classification": {"usable_shards": 12, "usable_bytes": 4096},
+        "catalog_verification": {
+            "required_release_assets": 3,
+            "source_index_sha256": "a" * 64,
+            "selection_families": ["copy_vault_fills", "copy_vault_l2"],
+        },
+    }), encoding="utf-8")
+    (recovery / "UNPACK_REPORT.json").write_text(json.dumps({
+        "status": "SAFE_UNPACK_COMPLETE", "unpacked_shards": 2,
+    }), encoding="utf-8")
+    (recovery / "SYNC_REPORT.json").write_text(json.dumps({
+        "status": "REPLAY_READY_COMPLETE",
+    }), encoding="utf-8")
+    coffre = tmp_path / "runtime" / "coffre_certifie"
+    coffre.mkdir(parents=True)
+    (coffre / "COUVERTURE_PROJET.json").write_text(json.dumps({
+        "complet": True, "cent_pour_cent": False,
+        "couverture_pct": 92.5, "fichiers_de_donnees": 40,
+    }), encoding="utf-8")
+
+    sources = ETA.lire_sources_alinasync(tmp_path)
+    lignes = "\n".join(ETA.lignes_sources_live(sources))
+    assert sources["restore_verified"] is True
+    assert sources["safe_shards"] == 12
+    assert sources["unpacked_shards"] == 2
+    assert sources["github_release_bound"] is True
+    assert "3 assets" in lignes
+    assert "PARTIEL / À COMPLÉTER" in lignes
+    assert "92.500 %" in lignes
+    assert "ne deviennent des jours denses" in lignes
+
+
+def test_le_resume_operateur_montre_vivant_progression_debit_et_eta(tmp_path):
+    ruban = tmp_path / "fills.jsonl"
+    ruban.write_text("{}\n", encoding="utf-8")
+    mesure = {"lignes_par_minute": 12.5, "motif": None, "taille_octets": 42}
+    etat = {"code": "ACTIF", "detail": "croissance mesurée", "age_s": 0.4}
+    eta = {"statut": "EN_COURS", "heures": 26.0}
+    lignes = ETA.lignes_resume(
+        tours=4, ruban=ruban, mesure=mesure, etat=etat,
+        denses_acquis=3, requis=6, age_sonde_h=0.2, eta=eta,
+        besoins=[{"statut": "MORE_DATA", "mesures": 8, "requis": 20,
+                  "restants": 12, "hypothese": "copy_vault_demo"}],
+    )
+    texte = "\n".join(lignes)
+    assert "EN DIRECT" in texte
+    assert "50.0 %" in texte
+    assert "12.5 lignes/min" in texte
+    assert "ETA moteur" in texte
+    assert "demo [base]" in texte
+
+
+def test_le_dashboard_par_defaut_est_court_et_garde_les_sources_reelles(tmp_path):
+    lignes = ETA.lignes_dashboard_simple(
+        tours=2,
+        mesure={
+            "lignes_par_minute": 12.5,
+            "motif": None,
+            "active_sources": 2,
+            "source_count": 7,
+        },
+        etat={"code": "ACTIF"},
+        denses_acquis=3,
+        requis=6,
+        age_sonde_h=30.0,
+        eta={"statut": "INCONNU", "heures": None},
+        besoins=[{
+            "statut": "MORE_DATA",
+            "mesures": 8,
+            "requis": 20,
+            "restants": 12,
+            "hypothese": "copy_vault_demo",
+        }],
+        sources={
+            "restore_verified": True,
+            "safe_shards": 12,
+            "safe_bytes": 1024,
+            "unpack_verified": True,
+            "unpacked_shards": 2,
+            "github_release_bound": True,
+            "release_assets": 3,
+            "coffre_couverture_pct": 92.5,
+            "coffre_status": "PARTIEL / À COMPLÉTER",
+        },
+        intervalle_s=2.0,
+    )
+    texte = "\n".join(lignes)
+    assert len(lignes) <= 15
+    assert "EN DIRECT" in texte
+    assert "12.5 lignes/min" in texte
+    assert "collecter encore 12 j 00 h 00 min 00 s" in texte
+    assert "déballé 2 shards" in texte
+    assert "Release 3 assets" in texte
+    assert "BESOINS LIVE" not in texte
+
+
+def test_un_flux_absent_reste_inconnu_et_ne_devient_pas_arrete():
+    etat = ETA.etat_flux(None, {"lignes_par_minute": None, "motif": "RUBAN_ILLISIBLE"})
+    assert etat["code"] == "INCONNU"
+    assert "absent" in etat["detail"]
+
+
+def test_barre_progression_est_ascii_et_bornee():
+    assert ETA.barre_progression(50, largeur=10) == "#####....."
+    assert ETA.barre_progression(None, largeur=4) == "????"
+
+
 # ------------------------------------------------------- le debit refuse sans mentir
 def test_un_ruban_ABSENT_rend_un_debit_INCONNU_et_le_nomme(tmp_path):
     mesure = ETA.MesureDeDebit(tmp_path / "jamais_ecrit.jsonl")
@@ -170,6 +308,26 @@ def test_un_ruban_qui_GRANDIT_donne_un_debit_positif(tmp_path, monkeypatch):
     assert lu["debit_par_heure"] is not None
     assert lu["debit_par_heure"] > 0
     assert lu["lignes_par_minute"] > 0
+
+
+def test_eta_agrege_tous_les_flux_et_signale_le_flux_actif(tmp_path, monkeypatch):
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    ligne = '{"ts_ms":1700000000000,"coin":"BTC","px":1.0}\n'
+    actif = data / "copy_vault_trades_lane.jsonl"
+    immobile = data / "copy_vault_l2_lane.jsonl"
+    actif.write_text(ligne * 100, encoding="utf-8")
+    immobile.write_text(ligne * 100, encoding="utf-8")
+    horloge = iter((0.0, 0.0, 60.0, 60.0))
+    monkeypatch.setattr(ETA.time, "monotonic", lambda: next(horloge))
+    mesure = ETA.MesureMultiFlux(tmp_path)
+    mesure.lire()
+    actif.write_text(actif.read_text(encoding="utf-8") + ligne * 100, encoding="utf-8")
+    lu = mesure.lire()
+    assert lu["source_count"] == 2
+    assert lu["active_sources"] == 1
+    assert lu["lignes_par_minute"] > 0
+    assert ETA.etat_flux_global(lu)["code"] == "ACTIF"
 
 
 def test_le_ruban_est_CHERCHE_a_plusieurs_endroits_et_on_dit_lesquels(tmp_path):
@@ -217,7 +375,7 @@ def test_l_eta_recharge_la_sonde_a_chaque_rafraichissement(tmp_path, monkeypatch
     monkeypatch.setattr(ETA.time, "sleep", avancer_la_sonde)
     monkeypatch.setattr(ETA.os, "system", lambda _commande: 0)
 
-    assert ETA.main(["--racine", str(tmp_path), "--tours", "2"]) == 0
+    assert ETA.main(["--racine", str(tmp_path), "--tours", "2", "--detail"]) == 0
     assert capsys.readouterr().out.count("[ATTEINT]") == 1
 
 

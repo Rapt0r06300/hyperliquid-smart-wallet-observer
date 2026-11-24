@@ -1,6 +1,7 @@
 @echo off
 chcp 65001 >nul
 setlocal EnableExtensions
+call "%~dp0tools\launcher_lifecycle.cmd" --scope "COFFRE_DONNEES_EXTERNES" --launcher "%~f0"
 rem ===================================================================
 rem   COFFRE - DONNEES EXTERNES GRATUITES
 rem ===================================================================

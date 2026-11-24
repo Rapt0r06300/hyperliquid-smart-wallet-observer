@@ -1,6 +1,7 @@
 @echo off
 chcp 65001 >nul
 setlocal EnableExtensions EnableDelayedExpansion
+call "%~dp0tools\launcher_lifecycle.cmd" --scope "LANCER_HYPERSMART" --launcher "%~f0"
 set "ALINA_LAUNCH_RUN_ID=%DATE%_%TIME%_%RANDOM%_%RANDOM%"
 set "ALINA_LAUNCH_MODE=autopilot"
 set "ALINA_LAUNCH_PYTHON=unresolved"

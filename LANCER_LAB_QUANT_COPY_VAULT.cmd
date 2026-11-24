@@ -1,5 +1,6 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
+call "%~dp0tools\launcher_lifecycle.cmd" --scope "LANCER_LAB_QUANT_COPY_VAULT" --launcher "%~f0"
 cd /d "%~dp0"
 chcp 65001 >nul
 set "PYTHONPATH=%~dp0src;%~dp0;%~dp0tools"

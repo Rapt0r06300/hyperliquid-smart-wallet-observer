@@ -1,6 +1,7 @@
 @echo off
 chcp 65001 >nul
 setlocal
+call "%~dp0tools\launcher_lifecycle.cmd" --scope "RAPPORT_COLLECTEURS" --launcher "%~f0"
 cd /d "%~dp0"
 title RAPPORT COLLECTEURS - erreurs + ameliorations
 set "LOGS_ONLY=0"

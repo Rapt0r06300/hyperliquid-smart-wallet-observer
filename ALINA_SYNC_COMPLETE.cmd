@@ -1,6 +1,7 @@
 @echo off
 chcp 65001 >nul
 setlocal EnableDelayedExpansion
+call "%~dp0tools\launcher_lifecycle.cmd" --scope "ALINA_SYNC_COMPLETE" --launcher "%~f0"
 rem ============================================================================
 rem ALINA_SYNC_COMPLETE.cmd  -  Entree officielle OFFICIAL_DATA_SYNC (Windows).
 rem PAPER / LECTURE SEULE : reprise apres sinistre et synchronisation du corpus

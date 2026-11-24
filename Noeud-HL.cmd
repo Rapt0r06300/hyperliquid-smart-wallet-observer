@@ -1,6 +1,7 @@
 @echo off
 chcp 65001 >nul
 setlocal
+call "%~dp0tools\launcher_lifecycle.cmd" --scope "NOEUD_HL" --launcher "%~f0"
 set "ALINA_LAUNCH_RUN_ID=%DATE%_%TIME%_%RANDOM%_%RANDOM%"
 set "ALINA_LAUNCH_MODE=run-wsl-node"
 set "ALINA_LAUNCH_PYTHON=not-used"

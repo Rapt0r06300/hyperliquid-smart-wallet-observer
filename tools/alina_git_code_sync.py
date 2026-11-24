@@ -3831,10 +3831,29 @@ class Synchronizer:
                 f"[GARDE DONNEES] {len(removed_safe)} fichier(s) SAFE locaux "
                 f"supprimes pour permettre la fusion (recrees par le remote)."
             )
-        self.command(
-            "read-tree", new_tip,
+        # 24/11/2026 -- GARDER LES DATES DE L'INDEX. `read-tree <new>` seul
+        # reconstruisait les 1 941 337 entrees SANS date ni taille (mesure :
+        # 100 % a zero dans l'index partage). Chaque `git status` suivant --
+        # ceux de Codex compris -- devait alors re-hacher TOUS les fichiers
+        # suivis : > 10 min chacun, jusqu'a 19 git empiles et 11 Go, de quoi
+        # faire tuer le labo. La fusion a deux arbres `-m -i <old> <new>`
+        # garde l'entree existante (et sa date) de tout chemin inchange entre
+        # les deux commits, sans regarder l'arbre de travail (comme avant :
+        # index seul). Si git la refuse, on retombe EXACTEMENT sur l'ancien
+        # `read-tree <new>` : aucun nouveau cas d'echec.
+        fusion = self.command(
+            "read-tree", "-m", "-i", old_tip, new_tip,
+            check=False,
             timeout=REPLAY_WORKTREE_TIMEOUT_SECONDS,
         )
+        if fusion.returncode:
+            self.report["adoption_index"] = "READ_TREE_SIMPLE_REPLI"
+            self.command(
+                "read-tree", new_tip,
+                timeout=REPLAY_WORKTREE_TIMEOUT_SECONDS,
+            )
+        else:
+            self.report["adoption_index"] = "READ_TREE_DEUX_ARBRES_DATES_GARDEES"
         code_changed = [
             p for p in incoming_paths
             if not _protected(p) or _adoptable_depuis_le_distant(p)

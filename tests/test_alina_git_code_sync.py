@@ -739,6 +739,8 @@ def test_launcher_uses_tracked_canonical_engine_and_preserves_failure_status() -
     assert "ALINA_LOCAL_ENGINE_SHA256" not in launcher
     assert 'set "RC=%ERRORLEVEL%"' in launcher
     assert "exit /b %RC%" in launcher
+    assert "fsmonitor--daemon" in launcher
+    assert "IsNullOrWhiteSpace($_.CommandLine)" in launcher
 
 
 @pytest.mark.parametrize("verb", ["fetch", "push"])
@@ -1166,9 +1168,11 @@ def test_git_replay_print_plan_is_applied_without_ref_race(tmp_path: Path) -> No
         "--ref-action=print", "base..refs/heads/main",
     )
     # The index must be prepared before an old-SHA-guarded ref update.
-    assert ("read-tree", new) in commands
+    # 24/11/2026 : two-tree merge keeps the stat data of unchanged entries.
+    assert ("read-tree", "-m", "-i", old, new) in commands
+    assert ("read-tree", new) not in commands
     assert ("update-ref", "refs/heads/main", new, old) in commands
-    assert commands.index(("read-tree", new)) < commands.index(
+    assert commands.index(("read-tree", "-m", "-i", old, new)) < commands.index(
         ("update-ref", "refs/heads/main", new, old)
     )
     assert not any(cmd[0] in {"reset", "clean"} for cmd in commands)

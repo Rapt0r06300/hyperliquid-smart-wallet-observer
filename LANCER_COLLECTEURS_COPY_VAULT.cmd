@@ -1,5 +1,6 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
+call "%~dp0tools\launcher_lifecycle.cmd" --scope "LANCER_COLLECTEURS_COPY_VAULT" --launcher "%~f0" --stop-file "%~dp0runtime\data\stop_collecteurs.flag"
 rem 22/11/2026 : ce lanceur n ecrivait plus rien dans runtime\logs\launchers depuis le 12/11 ; on ne
 rem   pouvait donc pas savoir si un lancement avait ete tente. Meme journal que LANCER_HYPERSMART.
 set "ALINA_LAUNCH_RUN_ID=%DATE%_%TIME%_%RANDOM%_%RANDOM%"

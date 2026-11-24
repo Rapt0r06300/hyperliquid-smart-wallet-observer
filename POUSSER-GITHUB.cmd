@@ -1,5 +1,6 @@
 @echo off
 setlocal EnableExtensions DisableDelayedExpansion
+call "%~dp0tools\launcher_lifecycle.cmd" --scope "POUSSER_GITHUB" --launcher "%~f0"
 set "ALINA_LAUNCH_RUN_ID=%DATE%_%TIME%_%RANDOM%_%RANDOM%"
 set "ALINA_LAUNCH_MODE=argument-dispatch"
 set "ALINA_LAUNCH_PYTHON=unresolved"
@@ -254,17 +255,20 @@ endlocal & exit /b %RC%
 
 rem ============================================================
 rem  Self-healing SUR : supprime un verrou Git index.lock PERIME
-rem  (uniquement si AUCUN processus git ne tourne). Jamais de reset,
-rem  force, clean ou stash. Un verrou tenu par un git actif est
-rem  respecte. Appele via `call`, retourne par `goto :eof`.
+rem  uniquement si aucun processus d'ecriture Git ne tourne. Les demons
+rem  fsmonitor sont des lecteurs longue duree et ne doivent pas bloquer.
+rem  Toute commande Git active ou tout processus sans ligne identifiable
+rem  reste bloque par prudence. Jamais de reset, force, clean ou stash.
+rem  Appele via `call`, retourne par `goto :eof`.
 rem ============================================================
 :ensure_no_stale_lock
 if not exist "%ALINA_ROOT%.git\index.lock" goto :eof
-tasklist /FI "IMAGENAME eq git.exe" /NH 2>nul | findstr /I "git.exe" >nul 2>nul
-if not errorlevel 1 (
-  echo [VERROU] Un processus git est actif; verrou respecte ^(pas de suppression^).
+set "ALINA_GIT_WRITER_ACTIVE="
+for /f "delims=" %%G in ('powershell -NoProfile -Command "$p=Get-CimInstance Win32_Process ^| Where-Object { $_.Name -eq 'git.exe' -and ([string]::IsNullOrWhiteSpace($_.CommandLine) -or $_.CommandLine -notmatch 'fsmonitor--daemon') }; if ($p) { 'ACTIVE' }"') do set "ALINA_GIT_WRITER_ACTIVE=%%G"
+if /I "%ALINA_GIT_WRITER_ACTIVE%"=="ACTIVE" (
+  echo [VERROU] Un processus Git d'ecriture est actif; verrou respecte ^(pas de suppression^).
   goto :eof
 )
-echo [AUTO-REPAIR] Verrou Git perime detecte ^(aucun git actif^) -^> suppression securisee.
+echo [AUTO-REPAIR] Verrou Git perime detecte ^(aucun ecrivain Git; fsmonitor ignore^) -^> suppression securisee.
 del /f /q "%ALINA_ROOT%.git\index.lock" >nul 2>nul
 goto :eof
