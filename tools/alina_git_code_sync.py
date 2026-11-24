@@ -3866,7 +3866,15 @@ class Synchronizer:
             for ci_start in range(0, len(code_changed), PROTECTED_PATH_BATCH_SIZE):
                 ci_batch = code_changed[ci_start:ci_start + PROTECTED_PATH_BATCH_SIZE]
                 self.command(
-                    "checkout-index", "-f", "--", *ci_batch,
+                    # The protected-index guard marks local SAFE catalog
+                    # entries skip-worktree while Git history is replayed.
+                    # Only _adoptable_depuis_le_distant paths reach this
+                    # allowlisted batch, after their local bytes were checked
+                    # against HEAD above; explicitly materialize those
+                    # canonical upstream bytes without touching other SAFE
+                    # paths.
+                    "checkout-index", "-f", "--ignore-skip-worktree-bits",
+                    "--", *ci_batch,
                 )
         updated = self.command(
             "update-ref", "refs/heads/main", new_tip, old_tip,

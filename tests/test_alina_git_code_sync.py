@@ -2119,6 +2119,19 @@ def test_l_adoption_materialise_le_catalogue_canonique(repos):
     assert task.report["adoption_canonical_materialises"] >= 1
 
 
+def test_l_adoption_materialise_catalogue_canonique_malgre_skip_worktree(repos):
+    """Le garde skip-worktree ne doit pas bloquer les seules voies catalogues admises."""
+    local, _cloud, _origin = repos
+    task, depart, arrivee = _monte_adoption(local, _cloud)
+    fichier = local / "catalog" / "state.json"
+
+    with task._preserve_local_protected_index():
+        task._adopter_tete_sans_balayage(arrivee, depart, "skip-worktree regression")
+
+    assert fichier.read_text(encoding="utf-8") == "v2" + chr(10)
+    assert not git(local, "ls-files", "-v", "--", "catalog/state.json").startswith("S ")
+
+
 def test_les_racines_lourdes_restent_exclues_de_l_ecriture() -> None:
     """Elargir a `catalog/` ne doit pas ouvrir les shards.
 
