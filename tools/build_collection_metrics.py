@@ -467,11 +467,26 @@ def build() -> dict[str, Any]:
         and totals["units_trade_count_coverage_incomplete"] == 0
         and totals["units_uncompressed_coverage_incomplete"] == 0
     )
+    # Every durable result is an observed admission unit.  Even an empty
+    # result must carry an explicit validated admission record before the
+    # quality verdict can be COMPLETE.
+    admission_complete = admission_seen_units == admission_covered_units
+    quality_reasons: list[str] = []
+    if not collection_metrics_complete:
+        quality_reasons.append("COLLECTION_METRICS_INCOMPLETE")
+    if not admission_complete:
+        quality_reasons.append("SOURCE_ADMISSION_INCOMPLETE")
+    quality_status = "COMPLETE" if not quality_reasons else "INCOMPLETE"
 
     payload = {
         "schema": "alina.collection_metrics.v1",
         "status": "OK",
         "stale": False,
+        # ``status`` is the publication/build result for compatibility.  The
+        # quality verdict must remain separate so an operationally published
+        # report cannot be mistaken for complete dataset evidence.
+        "quality_status": quality_status,
+        "quality_reasons": quality_reasons,
         "dataset_generation": "V2_FRESH",
         "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
         "source": "durable_campaign_checkpoints_on_main",
@@ -521,7 +536,7 @@ def build() -> dict[str, Any]:
         "by_kind": by_kind_public,
         "source_admission": {
             "status": (
-                "COMPLETE" if admission_seen_units == admission_covered_units
+                "COMPLETE" if admission_complete
                 else "INCOMPLETE"
             ),
             "units_observed": admission_seen_units,
@@ -595,6 +610,8 @@ def safe_build() -> dict[str, Any]:
             degraded = dict(previous)
             degraded["status"] = "DEGRADED"
             degraded["stale"] = True
+            degraded["quality_status"] = "DEGRADED"
+            degraded["quality_reasons"] = ["METRICS_BUILD_FAILED"]
             degraded["source"] = "last_known_good_snapshot"
             degraded["degraded_reason"] = error
             degraded["rebuild_required"] = True
@@ -603,6 +620,8 @@ def safe_build() -> dict[str, Any]:
                 "schema": "alina.collection_metrics.v1",
                 "status": "DEGRADED",
                 "stale": True,
+                "quality_status": "DEGRADED",
+                "quality_reasons": ["METRICS_BUILD_FAILED"],
                 "dataset_generation": "V2_FRESH",
                 "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
                 "source": "no_last_known_good_snapshot",

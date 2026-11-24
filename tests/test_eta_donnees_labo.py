@@ -219,3 +219,75 @@ def test_l_eta_recharge_la_sonde_a_chaque_rafraichissement(tmp_path, monkeypatch
 
     assert ETA.main(["--racine", str(tmp_path), "--tours", "2"]) == 0
     assert capsys.readouterr().out.count("[ATTEINT]") == 1
+
+
+def _etude(racine, nom, verdicts):
+    d = racine / ETA.ETUDES / nom
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "resultat.json").write_text(json.dumps({"report": {"verdicts": verdicts}}), encoding="utf-8")
+
+
+def test_les_besoins_viennent_des_etudes_du_labo_et_le_passage_le_plus_recent_fait_foi(tmp_path):
+    """24/11/2026 : l'ETA affichait ATTEINT (7/6 journees) pendant que le labo repondait MORE_DATA (8 jours sur 20)."""
+    _etude(tmp_path, "20261117T120000000000Z", [                               # même étude, plus ancienne
+        {"hypothesis": "copy_vault_slow_inventory_replication", "status": "MORE_DATA",
+         "reason": "3 jour(s) hors echantillon < 20 requis", "required_independent_days": 20}])
+    _etude(tmp_path, "20261124T113912441906Z-retro", [                         # AUTRE étude, même hypothèse
+        {"hypothesis": "copy_vault_slow_inventory_replication", "status": "MORE_DATA",
+         "reason": "marche avant sur jours independants", "required_independent_days": 20}])
+    _etude(tmp_path, "20261124T111022604526Z", [
+        {"hypothesis": "copy_vault_slow_inventory_replication", "status": "MORE_DATA",
+         "reason": "8 jour(s) hors echantillon < 20 requis", "required_independent_days": 20},
+        {"hypothesis": "copy_vault_fast_follow_taker_fills", "status": "REJECTED", "reason": "derive sous les frais"},
+        {"hypothesis": "copy_vault_naive_mirror_taker", "status": "MORE_DATA", "reason": "l'IC 95 % contient zero"}])
+    _etude(tmp_path, "20261123T013157066783Z-ouvertures", [
+        {"hypothesis": "copy_vault_aggressive_open_drift", "status": "MORE_DATA",
+         "reason": "16 jour(s), 25643 decision(s), 163 leader(s) ; il en faut au moins 30, 200 et 10"}])
+    tous = ETA.besoins_du_labo(tmp_path)
+    retro = [x for x in tous if x["etude"] == "retro"]
+    assert len(retro) == 1 and retro[0]["restants"] is None                 # gardée à part, elle n'efface pas la base
+    b = {x["hypothese"]: x for x in tous if x["etude"] != "retro"}
+    assert (b["copy_vault_slow_inventory_replication"]["mesures"], b["copy_vault_slow_inventory_replication"]["requis"],
+            b["copy_vault_slow_inventory_replication"]["restants"]) == (8, 20, 12)          # le 24/11, pas le 17/11
+    assert b["copy_vault_slow_inventory_replication"]["date_estimee"].strftime("%d/%m") == "06/12"
+    assert (b["copy_vault_aggressive_open_drift"]["mesures"], b["copy_vault_aggressive_open_drift"]["requis"]) == (16, 30)
+    assert b["copy_vault_naive_mirror_taker"]["restants"] is None                          # jamais suppose
+    texte = "\n".join(ETA.lignes_besoins(list(b.values())))
+    assert "tranchee : REJECTED" in texte and "besoin non chiffre en jours" in texte
+
+
+def test_une_echeance_deja_passee_demande_de_relancer_l_etude_et_n_est_pas_la_prochaine_date(tmp_path):
+    """24/11/2026 : « prochaine hypothese tranchable vers le 17/11 » d'apres une etude du 12/11 jamais relancee."""
+    from datetime import datetime, timezone
+
+    _etude(tmp_path, "20261112T164759533677Z-ordres", [
+        {"hypothesis": "copy_vault_leader_order_intent", "status": "MORE_DATA",
+         "reason": "0 jour(s), 0 fill(s) ; il en faut au moins 5, 200 et 5"}])
+    maintenant = datetime(2026, 11, 24, 12, tzinfo=timezone.utc)
+    b = ETA.besoins_du_labo(tmp_path)
+    assert ETA.echeance_passee(b[0], maintenant)
+    assert "PASSEE : relancer l'etude" in "\n".join(ETA.lignes_besoins(b, maintenant))
+
+
+def test_l_ecran_ne_dit_plus_ATTEINT_quand_les_etudes_attendent_des_jours(tmp_path, monkeypatch, capsys):
+    rapport = tmp_path / "runtime" / "reports" / "sonde_horloges_20261123.json"
+    rapport.parent.mkdir(parents=True)
+    rapport.write_text(json.dumps({"appariement": {"jours_DENSES": 7}}), encoding="utf-8")
+    from datetime import datetime, timedelta, timezone
+
+    maintenant = datetime.now(timezone.utc).replace(microsecond=0)          # indépendant du jour où tourne le test
+    _etude(tmp_path, maintenant.strftime("%Y%m%dT%H%M%S") + "000000Z", [
+        {"hypothesis": "copy_vault_slow_inventory_replication", "status": "MORE_DATA",
+         "reason": "8 jour(s) hors echantillon < 20 requis", "required_independent_days": 20}])
+    monkeypatch.setattr(ETA.os, "system", lambda _commande: 0)
+    assert ETA.main(["--racine", str(tmp_path), "--une-fois"]) == 0
+    sortie = capsys.readouterr().out
+    attendu = (maintenant + timedelta(days=12)).strftime("%d/%m")
+    assert f"ETA LABO (etudes)            : prochaine hypothese tranchable vers le {attendu}" in sortie
+    assert "8 / 20  jours -> encore  12 j" in sortie
+    assert "plancher du moteur" in sortie                     # le seuil de 6 journees reste dit, mais a sa place
+
+
+def test_le_debit_se_mesure_d_abord_sur_le_ruban_du_poll():
+    """24/11/2026 : le ruban WS ne bougeait presque pas (0,0 ligne/min) ; la collecte passe par le poll REST."""
+    assert ETA.RUBANS_FILLS[0] == "runtime/data/vault_fills_poll.jsonl"

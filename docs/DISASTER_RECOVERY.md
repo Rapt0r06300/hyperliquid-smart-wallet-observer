@@ -229,8 +229,13 @@ Cette opération exige d'abord RESTORE_REPORT.json certifié, contrôle l'espace
 disque avant l'extraction, vérifie gzip/CRC et écrit des preuves SHA-256.
 Les JSONL se trouvent dans `runtime/recovery/full/usable/unpacked/`.
 Les fichiers compressés sont conservés. L'espace brut peut être de plusieurs
-**téraoctets** ; si le disque est insuffisant, le processus refuse sans
-commencer la décompression. Les résultats économiques restent non prouvés.
+**téraoctets**. Si le disque est insuffisant, le moteur bascule explicitement
+en `SAFE_SEAL_CERTIFICATION_COMPLETE` : les archives SAFE restent vérifiées et
+le pont les lit en streaming `GZIP_STREAM`, mais aucun JSONL physique n'est
+annoncé. Seul `SAFE_UNPACK_COMPLETE` avec `physical_jsonl_available=true`
+certifie une décompression physique. Dans les deux cas, les résultats
+économiques restent non prouvés tant qu'un replay paper causal complet ne les
+valide pas.
 
 
 ### Lancement direct Windows (sans argument)
@@ -243,8 +248,10 @@ annoncé si une preuve de restauration ou d'extraction manque.
 Le programme vérifie les Releases avant de récupérer les shards et reprend les
 fichiers déjà SHA-256 vérifiés. Les moteurs replay/backtest lisent les `.jsonl.gz`
 en streaming ; l'expansion en JSONL brut est facultative et peut nécessiter plusieurs
-téraoctets. Pour seulement inspecter
+téraoctets. Quand l'espace manque, le rapport expose le sceau compressé et le
+mode `GZIP_STREAM` plutôt qu'un faux succès de décompression. Pour seulement inspecter
 l'inventaire sans téléchargement, passer `--preflight-only` : cette option
-conserve son sens strict. Sur un volume insuffisant, la commande échoue sans
-prétendre avoir restauré les données. Les shards compressés restent disponibles
-sans extraction après la restauration SAFE.
+conserve son sens strict. Les champs `unpack_certified`, `unpack_complete`,
+`unpack_physical_jsonl_available` et `unpack_streamable_gzip_available` de
+`SYNC_REPORT.json` permettent de distinguer les deux états. Les shards
+compressés restent disponibles sans extraction après la restauration SAFE.

@@ -55,6 +55,12 @@ runtime/recovery/full/usable/unpacked/<release_tag>/<dataset_id>.jsonl
 runtime/recovery/full/usable/unpacked/<release_tag>/<dataset_id>.jsonl.alina.json
 ```
 
+Si `UNPACK_REPORT.json` porte `SAFE_SEAL_CERTIFICATION_COMPLETE`, le JSONL
+physique n'existe volontairement pas : `physical_jsonl_available=false` et le
+pont doit lire l'archive certifiée en `GZIP_STREAM`. La présence d'un sceau ne
+doit jamais être interprétée comme une décompression complète ; cette dernière
+est réservée à `SAFE_UNPACK_COMPLETE` avec `replay_read_mode=JSONL`.
+
 The bridge checks the final catalog SHA on restore, unpack and the active
 SQLite registry; exact active shard count; registered compressed stat and
 SHA-256; extracted JSONL SHA-256 and byte length; per-frame

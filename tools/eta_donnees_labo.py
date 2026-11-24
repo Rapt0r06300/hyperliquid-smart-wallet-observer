@@ -32,6 +32,7 @@ import json
 import os
 import sys
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 RACINE = Path(__file__).resolve().parents[1]
@@ -50,6 +51,9 @@ from hl_observer.backtesting.copy_vault_signal_alignment import (  # noqa: E402
 #: cherche, sinon on croit a une collecte morte alors qu'on regardait au mauvais endroit
 #: (mesure du 22/11/2026, premier essai de cet outil).
 RUBANS_FILLS = (
+    # 24/11/2026 : le ruban WS (`vault_fills_live`) ne bouge presque pas (0,0 ligne/min affiché) alors que le POLL
+    # REST grossit de ~2,3 Mo/min -- c'est lui la collecte (le WS rate 16,6 % des fills que le poll capte).
+    "runtime/data/vault_fills_poll.jsonl",
     "runtime/data/vault_fills_live.jsonl",
     "runtime/labo_tranches_20261121/workspace/runtime/data/vault_fills_live.jsonl",
 )
@@ -268,6 +272,109 @@ class MesureDeDebit:
                 "age_s": round(ecoule, 1), "motif": None}
 
 
+#: Au-delà, la sonde des journées denses ne décrit plus le corpus : on l'affiche PÉRIMÉE au lieu de la croire.
+AGE_MAX_SONDE_H = 24.0
+ETUDES = Path("runtime") / "reports" / "copy_vault_quant_lab" / "copiabilite"
+
+
+def _date_du_passage(nom: str) -> datetime | None:
+    try:
+        return datetime.strptime(nom[:15], "%Y%m%dT%H%M%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def besoins_du_labo(racine: Path) -> list[dict]:
+    """Ce que les ÉTUDES du labo disent leur manquer, hypothèse par hypothèse (le passage le plus récent fait foi).
+
+    24/11/2026 -- POURQUOI. L'ETA affichait « 0 min, ATTEINT (7/6 journées) » pendant que le labo répondait
+    « MORE_DATA : 8 jours hors échantillon, il en faut 20 ». Le seuil de 6 journées est le plancher de découpage du
+    moteur, pas le besoin des études. Ici, les jours MESURÉS et REQUIS sont lus dans ``resultat.json`` de chaque
+    étude ; rien n'est supposé : une hypothèse dont le besoin n'est pas chiffré en jours le dit.
+    """
+    import re
+
+    dernier: dict[str, dict] = {}
+    dossier = Path(racine) / ETUDES
+    for resultat in sorted(dossier.glob("*/resultat.json")) if dossier.is_dir() else ():
+        quand = _date_du_passage(resultat.parent.name)
+        if quand is None:
+            continue
+        try:
+            verdicts = (json.loads(resultat.read_text(encoding="utf-8")).get("report") or {}).get("verdicts")
+        except (OSError, ValueError, AttributeError):
+            continue
+        for v in verdicts if isinstance(verdicts, list) else ():
+            if not isinstance(v, dict) or not v.get("hypothesis"):
+                continue
+            raison = str(v.get("reason") or "")
+            m = re.search(r"(\d+)\s+jour", raison)
+            requis = v.get("required_independent_days")
+            if type(requis) is not int:
+                r = re.search(r"<\s*(\d+)\s+requis", raison) or re.search(r"au moins\s+(\d+)", raison)
+                requis = int(r.group(1)) if r else None
+            mesures = int(m.group(1)) if m else None
+            restants = max(0, requis - mesures) if requis is not None and mesures is not None else None
+            # une même hypothèse est mesurée par PLUSIEURS études (base, positions, rétrospectif) : chacune garde sa
+            # ligne, sinon la dernière lue efface les jours mesurés par les autres
+            genre = resultat.parent.name.split("Z-", 1)[1] if "Z-" in resultat.parent.name else "base"
+            dernier[f"{v['hypothesis']}|{genre}"] = {
+                "hypothese": v["hypothesis"], "etude": genre, "statut": str(v.get("status") or "?"), "mesures": mesures,
+                "requis": requis, "restants": restants, "passage": resultat.parent.name, "date": quand,
+                "date_estimee": (quand + timedelta(days=restants)) if restants is not None else None,
+                "raison": raison,
+            }
+    return sorted(dernier.values(), key=lambda b: (b["restants"] is None, b["restants"] or 0, b["hypothese"]))
+
+
+def echeance_passee(b: dict, maintenant: datetime | None = None) -> bool:
+    """La date estimée est déjà derrière nous : l'étude n'a pas été relancée, son compte de jours est périmé."""
+    maintenant = maintenant or datetime.now(timezone.utc)
+    return b.get("date_estimee") is not None and b["date_estimee"] < maintenant
+
+
+def lignes_besoins(besoins: list[dict], maintenant: datetime | None = None) -> list[str]:
+    if not besoins:
+        return ["  aucune etude du labo lue (" + str(ETUDES) + ") : besoin INCONNU, jamais suppose atteint"]
+    lignes = []
+    for b in besoins:
+        nom = b["hypothese"].replace("copy_vault_", "") + ("" if b.get("etude", "base") == "base" else f" [{b['etude']}]")
+        quand = b["date"].strftime("%d/%m")
+        if b["statut"] != "MORE_DATA":
+            lignes.append(f"  {nom:<44} tranchee : {b['statut']}  (etude du {quand})")
+        elif b["restants"] is None:
+            lignes.append(f"  {nom:<44} besoin non chiffre en jours  (etude du {quand})")
+        elif echeance_passee(b, maintenant):
+            lignes.append(f"  {nom:<44} {b['mesures']:>3} / {b['requis']:<3} jours au {quand} -> echeance "
+                          f"{b['date_estimee'].strftime('%d/%m')} PASSEE : relancer l'etude pour recompter")
+        else:
+            lignes.append(f"  {nom:<44} {b['mesures']:>3} / {b['requis']:<3} jours -> encore {b['restants']:>3} j"
+                          f"  vers le {b['date_estimee'].strftime('%d/%m')}  (etude du {quand})")
+    return lignes
+
+
+def _quitter_demande(secondes: float) -> bool:
+    """Attend ``secondes`` ; vrai si « q » a été tapé (console Windows). Le texte annonçait « q pour quitter »
+    sans jamais lire le clavier : seul Ctrl+C marchait."""
+    fin = time.monotonic() + secondes
+    try:
+        import msvcrt
+        console = bool(sys.stdin) and sys.stdin.isatty()
+    except (ImportError, ValueError, AttributeError):
+        console = False
+    if not console:                                   # pas de clavier (sortie redirigée, tests) : simple attente
+        time.sleep(secondes)
+        return False
+    while time.monotonic() < fin:
+        try:
+            if msvcrt.kbhit() and msvcrt.getwch().lower() == "q":
+                return True
+        except OSError:
+            pass
+        time.sleep(0.1)
+    return False
+
+
 def _secondes_restantes_aujourdhui(maintenant_ms: int | None = None) -> float:
     ms = int(time.time() * 1000) if maintenant_ms is None else int(maintenant_ms)
     return max(0.0, (JOUR_MS - (ms % JOUR_MS)) / 1000.0)
@@ -304,8 +411,11 @@ def main(argv: list[str] | None = None) -> int:
     ruban, cherches = trouver_ruban(racine)
     debit = MesureDeDebit(ruban) if ruban else MesureDeDebit(racine / RUBANS_FILLS[0])
     tours = 0
+    besoins: list[dict] = []
     while True:
         tours += 1
+        if tours == 1 or tours % 12 == 0:              # les études changent rarement : relues ~1 fois par minute
+            besoins = besoins_du_labo(racine)
         denses_acquis, source_denses, age_sonde_h = lire_sonde_denses(racine, args.sonde)
         mesure = debit.lire()
         secondes_restantes = _secondes_restantes_aujourdhui()
@@ -316,15 +426,37 @@ def main(argv: list[str] | None = None) -> int:
             aujourdhui_deja_dense=False,
             secondes_restantes_dans_la_journee=secondes_restantes)
 
+        en_attente = [b for b in besoins if b["statut"] == "MORE_DATA" and b["restants"] is not None
+                      and not echeance_passee(b)]
+        if en_attente:
+            prochaine, derniere = en_attente[0], max(en_attente, key=lambda b: b["restants"])
+            tete = [
+                f"  ETA LABO (etudes)            : prochaine hypothese tranchable vers le "
+                f"{prochaine['date_estimee'].strftime('%d/%m')} ({prochaine['hypothese'].replace('copy_vault_', '')}),",
+                f"                                 toutes vers le {derniere['date_estimee'].strftime('%d/%m')}"
+                f" -- si chaque journee reste dense",
+            ]
+        elif besoins:
+            tete = ["  ETA LABO (etudes)            : aucune hypothese chiffree en jours n'attend de donnees"]
+        else:
+            tete = ["  ETA LABO (etudes)            : INCONNU (aucune etude lue)"]
         lignes = [
             "=" * 68,
             "  ETA DONNEES LABO — combien de temps encore collecter ?",
             "=" * 68,
+            *tete,
+            "",
+            "  CE QUE LES ETUDES DU LABO DISENT LEUR MANQUER (passage le plus recent) :",
+            *lignes_besoins(besoins),
+            "",
+            "  PLANCHER DU MOTEUR (decoupage TRAIN/TEST, pas le besoin des etudes) :",
             f"  journees UTC DENSES acquises : {denses_acquis} / {args.requis} requises",
             f"  seuil de densite             : {MIN_SIGNALS_PER_DAY} signaux evaluables/jour",
             f"  source des journees          : {source_denses}",
             ("  age de cette mesure          : "
-             + (f"{age_sonde_h:.1f} h" if age_sonde_h is not None else "INCONNU")),
+             + (f"{age_sonde_h:.1f} h" if age_sonde_h is not None else "INCONNU")
+             + ("  -- PERIMEE (tools/sonde_horloges_carnets.py la refait)"
+                if age_sonde_h is not None and age_sonde_h > AGE_MAX_SONDE_H else "")),
             "  ATTENTION                    : borne HAUTE — la sonde lit les rubans par",
             "                                 regex, hors des filtres du labo (dedup,",
             "                                 certification, une_seule_connexion_par_coin).",
@@ -338,7 +470,7 @@ def main(argv: list[str] | None = None) -> int:
                 else f"INCONNU ({mesure['motif']})")),
             f"  mesure sur                   : {mesure['age_s']} s",
             "",
-            f"  ETA                          : {duree_lisible(eta['heures'])}"
+            f"  plancher du moteur           : {duree_lisible(eta['heures'])}"
             f"   [{eta['statut']}]",
         ]
         if eta.get("motif"):
@@ -350,13 +482,18 @@ def main(argv: list[str] | None = None) -> int:
                 f"  puis {eta.get('journees_calendaires_ensuite')} journee(s) calendaire(s)")
         lignes.append("")
         lignes.append("  (l'ETA RECULE si le debit tombe : une journee trop pauvre ne compte pas)")
+        lignes.append("  (dates des etudes : jours REQUIS moins jours MESURES a la date de l'etude ; relancer")
+        lignes.append("   LANCER_LAB_QUANT_COPY_VAULT.cmd copiabilite pour les remettre a jour)")
+        if not args.une_fois:
+            lignes.append("  q ou Ctrl+C pour quitter")
         if os.name == "nt":
             os.system("cls")      # noqa: S605 S607 - rafraichissement d'ecran, pas d'entree externe
         print("\n".join(lignes), flush=True)
 
         if args.une_fois or (args.tours and tours >= args.tours):
             return 0
-        time.sleep(max(0.5, float(args.intervalle)))
+        if _quitter_demande(max(0.5, float(args.intervalle))):
+            return 0
 
 
 if __name__ == "__main__":

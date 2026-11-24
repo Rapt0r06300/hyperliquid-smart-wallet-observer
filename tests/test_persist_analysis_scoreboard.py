@@ -26,6 +26,7 @@ def _scoreboard():
     return {
         "schema_version": "hypersmart.economic_family_scoreboards.v2",
         "families": {"copy_vault": {"verdict": "MORE_DATA"}},
+        "active_families": ["copy_vault"],
         "paper_read_only": True,
         "real_execution": False,
     }
@@ -69,6 +70,24 @@ def test_receipt_rejects_non_paper_scoreboard():
         build_receipt(_manifest(), scoreboard, evidence_tag="tag", repository="repo", unit_id="0")
 
 
+def test_receipt_rejects_scoreboard_from_disabled_scope():
+    scoreboard = _scoreboard()
+    scoreboard["active_families"] = [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation_v2",
+    ]
+    with pytest.raises(ValueError, match="scope"):
+        build_receipt(_manifest(), scoreboard, evidence_tag="tag", repository="repo", unit_id="0")
+
+
+def test_receipt_rejects_scoreboard_without_explicit_scope():
+    scoreboard = _scoreboard()
+    scoreboard.pop("active_families")
+    with pytest.raises(ValueError, match="missing or invalid"):
+        build_receipt(_manifest(), scoreboard, evidence_tag="tag", repository="repo", unit_id="0")
+
+
 def _full_scoreboard(copy_net, lead_net, cross_net):
     def family(net):
         return {
@@ -103,7 +122,8 @@ def test_ledger_etablit_reference_puis_ne_garde_que_les_ameliorations():
     assert first["families"]["copy_vault"]["latest"]["status"] == "REFERENCE_ETABLIE"
     assert first["families"]["copy_vault"]["champion"]["net_pnl_usd"] == -4.0
     assert first["families"]["copy_vault"]["reference_stage"] == "BACKTEST"
-    assert first["families"]["cross_venue_dislocation_v2"]["latest"]["status"] == "NON_MESURABLE"
+    assert "lead_lag" not in first["families"]
+    assert "cross_venue_dislocation_v2" not in first["families"]
 
     second = build_improvement_ledger(
         _full_scoreboard(-2.0, 0.5, -1.0),
@@ -120,9 +140,8 @@ def test_ledger_etablit_reference_puis_ne_garde_que_les_ameliorations():
     assert copy_row["latest"]["delta_vs_previous_champion_usd"] == 2.0
     assert copy_row["champion"]["net_pnl_usd"] == -2.0
 
-    lead_row = second["families"]["lead_lag"]
-    assert lead_row["latest"]["status"] == "PAS_D_AMELIORATION"
-    assert lead_row["champion"]["net_pnl_usd"] == 1.0
+    assert "lead_lag" not in second["families"]
+    assert "cross_venue_dislocation_v2" not in second["families"]
 
 
 def test_ledger_ne_compare_jamais_des_etapes_differentes():

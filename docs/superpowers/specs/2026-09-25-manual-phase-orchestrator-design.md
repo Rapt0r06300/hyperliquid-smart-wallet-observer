@@ -132,6 +132,17 @@ run before transfers and before local pruning; preflight reports
 interpret a bounded incomplete restore as a completed replay/backtest or
 permit cloud Release deletion merely from an index quality label.
 
+When `--unpack-safe` is requested, `UNPACK_REPORT.json` and the derived
+`SYNC_REPORT.json` must distinguish physical JSONL materialization from a
+compressed-byte seal. `SAFE_UNPACK_COMPLETE` is valid only with
+`physical_jsonl_available=true` and `replay_read_mode=JSONL`. The bounded
+`SAFE_SEAL_CERTIFICATION_COMPLETE` mode is valid only with
+`physical_jsonl_available=false`, `streamable_gzip_available=true` and
+`replay_read_mode=GZIP_STREAM`. A seal certifies the compressed source and its
+JSONL digest; it never claims that JSONL files exist on disk. Consumers must
+use `unpack_certified` for either admissible proof and `unpack_complete` only
+for physical JSONL availability.
+
 Git LFS is not part of the operational backup, clone or restoration path:
 no smudge/mirror/migration workflow, no LFS object as a required source.
 Legacy LFS read compatibility is disabled by default and must never be
@@ -1081,6 +1092,14 @@ All replay-compatibility receipt capture and reapplication code, including
 through `read_index` rather than expecting a root-level `shards` array. A
 missing partition or conflicting immutable receipt fails closed; no replay
 SAFE promotion or incomplete Git push is considered successful.
+
+Any consumer that embeds the aggregate into a health or analysis receipt must
+also verify `REPLAY_COMPATIBILITY_REASONS.json.source_index_sha256` against the
+same canonical `DATA_INDEX.json` bytes (and against the metrics binding when
+one is present). A missing, malformed, or different SHA is a stale-receipt
+failure; the consumer must not copy its counters into a new receipt. The
+reference implementation is `tools/generate_health_receipt.py --index`, which
+reports the binding as `VERIFIED` only after this comparison succeeds.
 
 ### BBO/L2 versus historical repair
 

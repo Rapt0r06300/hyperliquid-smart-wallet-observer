@@ -1,4 +1,4 @@
-"""Honest, separate economic scoreboards for the three active paper families.
+"""Honest economic scoreboard for the active Copy-Vault paper family.
 
 This module only summarizes evidence already written by the read-only/paper
 runtime.  Missing measurements stay ``None`` and therefore can never produce a

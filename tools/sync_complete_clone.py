@@ -786,6 +786,47 @@ def _read_safe_shard_summary(report_path: Path) -> dict[str, object]:
     return summary
 
 
+def _unpack_report_contract(unpack_report: object) -> dict[str, object]:
+    """Expose the physical and streamable SAFE-unpack states separately.
+
+    ``SAFE_SEAL_CERTIFICATION_COMPLETE`` proves the compressed bytes and their
+    JSONL digest, but it deliberately does not mean that JSONL files exist on
+    disk.  Keep the legacy ``unpack_complete`` field physical-only and publish
+    explicit flags so callers cannot mistake a seal for materialized JSONL.
+    """
+    if not isinstance(unpack_report, dict):
+        return {
+            "unpack_status": None,
+            "unpack_certified": False,
+            "unpack_complete": False,
+            "unpack_physical_jsonl_available": False,
+            "unpack_streamable_gzip_available": False,
+            "unpack_read_mode": None,
+        }
+    status = unpack_report.get("status")
+    physical = unpack_report.get("physical_jsonl_available") is True
+    streamable = unpack_report.get("streamable_gzip_available") is True
+    read_mode = unpack_report.get("replay_read_mode")
+    certified = (
+        status == "SAFE_UNPACK_COMPLETE"
+        and physical
+        and read_mode == "JSONL"
+    ) or (
+        status == "SAFE_SEAL_CERTIFICATION_COMPLETE"
+        and not physical
+        and streamable
+        and read_mode == "GZIP_STREAM"
+    )
+    return {
+        "unpack_status": status,
+        "unpack_certified": certified,
+        "unpack_complete": status == "SAFE_UNPACK_COMPLETE" and physical,
+        "unpack_physical_jsonl_available": physical,
+        "unpack_streamable_gzip_available": streamable,
+        "unpack_read_mode": read_mode,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Update canonical main and preflight SAFE/replayable "
@@ -979,9 +1020,7 @@ def main(argv: list[str] | None = None) -> int:
             "source_inventory_sha256": inventory_sha,
             "report_validation_error": report_error,
             "unpack_requested": bool(args.unpack_safe),
-            "unpack_complete": bool(
-                unpack_report and unpack_report.get("status") == "SAFE_UNPACK_COMPLETE"
-            ),
+            **_unpack_report_contract(unpack_report),
             "unpack_report": "UNPACK_REPORT.json" if unpack_report else None,
             **safe_shard_summary,
         }

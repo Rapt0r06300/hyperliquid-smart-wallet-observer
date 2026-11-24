@@ -147,6 +147,7 @@ def select_shards(
                     "shard": f"<{family}>", "reason": "hors_fenetre_ou_hors_coins",
                     "ecartes_temps": tri["ecartes_temps"], "ecartes_coin": tri["ecartes_coin"],
                 })
+    a_verifier: list[tuple[str, dict[str, Any], Path]] = []
     for entry in index.get("shards", []):
         family = entry.get("famille")
         if family not in wanted or wanted[family] not in str(entry.get("shard")):
@@ -160,7 +161,14 @@ def select_shards(
         if not path.is_file():
             excluded.append({"shard": entry["shard"], "reason": "fichier_absent"})
             continue
-        actual = _sha256_file(path)
+        a_verifier.append((family, entry, path))
+    # 24/11/2026 : le SHA-256 de chaque shard reste vérifié À L'OCTET, mais en parallèle (hashlib libère le GIL) :
+    # ~75 s par étude en série pour ~12 Go, refaits par chacune des 8 études.
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        empreintes = list(pool.map(lambda item: _sha256_file(item[2]), a_verifier))
+    for (family, entry, path), actual in zip(a_verifier, empreintes):
         if actual != entry.get("sha256"):
             excluded.append({"shard": entry["shard"], "reason": "sha256_different_de_l_index"})
             continue
@@ -224,7 +232,40 @@ def load_fills(
     return pd.concat(frames, ignore_index=True), rejects
 
 
-def load_mid_panel(shards: list[dict[str, Any]], stale_ms: int) -> cop.PricePanel:
+PANEL_CACHE_VERSION = "panneau-mids-v1"
+SPREAD_CACHE_VERSION = "demi-spreads-v1"
+
+
+def load_mid_panel(shards: list[dict[str, Any]], stale_ms: int, cache_dir: Path | None = None) -> cop.PricePanel:
+    """Panneau de mids. Avec ``cache_dir`` : le panneau d'un ENSEMBLE de shards donné (leurs SHA-256, dans l'ordre)
+    est gardé sur disque ; les études lancées à la suite le relisent au lieu de le reconstruire (4 min 33 mesurées
+    le 24/11/2026 pour 393 shards). Un seul panneau est gardé : le fichier est remplacé, jamais accumulé."""
+    cache = cle = None
+    if cache_dir is not None and all(item.get("sha256") for item in shards):
+        cle = hashlib.sha256(("|".join(item["sha256"] for item in shards)
+                              + f"|{stale_ms}|{PANEL_CACHE_VERSION}").encode("utf-8")).hexdigest()
+        cache = Path(cache_dir) / "panneau_mids.npz"
+        try:
+            with np.load(cache, allow_pickle=False) as z:
+                if str(z["cle"]) == cle:
+                    return cop.PricePanel(ts=z["ts"], px=z["px"], coins=tuple(str(c) for c in z["coins"]),
+                                          provenance=str(z["provenance"]), stale_ms=int(z["stale_ms"]))
+        except (OSError, KeyError, ValueError):
+            pass
+    panel = _construire_panneau(shards, stale_ms)
+    if cache is not None:
+        try:
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            tmp = cache.with_name(f".{cache.name}.{os.getpid()}.tmp.npz")
+            np.savez(tmp, cle=np.array(cle), ts=panel.ts, px=panel.px, coins=np.array(panel.coins, dtype=str),
+                     provenance=np.array(panel.provenance), stale_ms=np.array(panel.stale_ms))
+            os.replace(tmp, cache)
+        except OSError:
+            pass                                       # un cache qui ne s'écrit pas ne change aucun résultat
+    return panel
+
+
+def _construire_panneau(shards: list[dict[str, Any]], stale_ms: int) -> cop.PricePanel:
     def snapshots():
         for item in shards:
             with gzip.open(item["path"], "rt", encoding="utf-8") as handle:
@@ -241,28 +282,84 @@ def load_mid_panel(shards: list[dict[str, Any]], stale_ms: int) -> cop.PricePane
     return cop.build_mid_panel(snapshots(), stale_ms=stale_ms)
 
 
-def load_half_spreads(shards: list[dict[str, Any]], *, sample_every: int = 5, min_obs: int = 50) -> dict[str, float]:
+def _spreads_observes(path: str, sample_every: int) -> dict[str, list[float]]:
+    """Demi-spreads (bps) échantillonnés d'UN shard, par coin, dans l'ordre des lignes."""
+    observed: dict[str, list[float]] = {}
+    with gzip.open(path, "rt", encoding="utf-8") as handle:
+        for i, line in enumerate(handle):
+            if i % sample_every or '"bid"' not in line:
+                continue
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if row.get("venue") not in (None, "HL"):
+                continue
+            bid, ask = row.get("bid"), row.get("ask")
+            if isinstance(bid, (int, float)) and isinstance(ask, (int, float)) and ask > bid > 0:
+                observed.setdefault(str(row.get("coin")), []).append((ask - bid) / (ask + bid) * 1e4)
+    return observed
+
+
+def _spreads_d_un_shard(job: tuple[str, str, str, int]) -> str:
+    """Processus fils : écrit (une fois par SHA-256 de shard) les demi-spreads échantillonnés du shard."""
+    path, sha, cache_dir, sample_every = job
+    cache = Path(cache_dir) / "demi_spreads" / f"{SPREAD_CACHE_VERSION}-s{sample_every}-{sha}.npz"
+    if cache.is_file():
+        return str(cache)
+    observed = _spreads_observes(path, sample_every)
+    coins = sorted(observed)
+    valeurs = [np.asarray(observed[c], dtype=np.float64) for c in coins]
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    tmp = cache.with_name(f".{cache.name}.{os.getpid()}.tmp.npz")
+    np.savez(tmp, coins=np.array(coins, dtype=str), longueurs=np.array([len(v) for v in valeurs], dtype=np.int64),
+             valeurs=np.concatenate(valeurs) if valeurs else np.zeros(0, dtype=np.float64))
+    os.replace(tmp, cache)
+    return str(cache)
+
+
+def load_half_spreads(shards: list[dict[str, Any]], *, sample_every: int = 5, min_obs: int = 50,
+                      cache_dir: Path | None = None, workers: int = 4) -> dict[str, float]:
     """Demi-spread médian (bps) par coin depuis les hauts de carnet Hyperliquid observés.
 
     Sources acceptées (toutes portent ``bid`` / ``ask``) : carnets L2, cotations BBO, BBO dense
-    de la microstructure. Les lignes d'une autre venue ou sans cotation sont ignorées."""
+    de la microstructure. Les lignes d'une autre venue ou sans cotation sont ignorées.
 
-    observed: dict[str, list[float]] = {}
-    for item in shards:
-        with gzip.open(item["path"], "rt", encoding="utf-8") as handle:
-            for i, line in enumerate(handle):
-                if i % sample_every or '"bid"' not in line:
-                    continue
-                try:
-                    row = json.loads(line)
-                except ValueError:
-                    continue
-                if row.get("venue") not in (None, "HL"):
-                    continue
-                bid, ask = row.get("bid"), row.get("ask")
-                if isinstance(bid, (int, float)) and isinstance(ask, (int, float)) and ask > bid > 0:
-                    observed.setdefault(str(row.get("coin")), []).append((ask - bid) / (ask + bid) * 1e4)
-    return {coin: float(np.median(v)) for coin, v in sorted(observed.items()) if len(v) >= min_obs}
+    24/11/2026 -- CACHE PAR SHARD. Chaque étude relisait les ~11 Go de carnets (bbo, micro_bbo, book_l2) : ~15 min,
+    refaites par 7 des 8 études. Avec ``cache_dir``, les valeurs échantillonnées de chaque shard (immuable) sont
+    gardées sous son SHA-256 ; seuls les shards nouveaux sont lus. La médiane porte sur EXACTEMENT les mêmes valeurs
+    (mêmes lignes, même formule, float64) : le résultat est identique à la lecture directe."""
+
+    par_coin: dict[str, list[np.ndarray]] = {}
+    if cache_dir is not None and all(item.get("sha256") for item in shards):
+        jobs = [(item["path"], item["sha256"], str(cache_dir), int(sample_every)) for item in shards]
+        dossier = Path(cache_dir) / "demi_spreads"
+        fichiers = [str(dossier / f"{SPREAD_CACHE_VERSION}-s{int(sample_every)}-{job[1]}.npz") for job in jobs]
+        manquants = [job for job, f in zip(jobs, fichiers) if not Path(f).is_file()]
+        if manquants:                                  # seuls les shards jamais lus coûtent une lecture
+            if workers > 1 and len(manquants) > 1:
+                with ProcessPoolExecutor(max_workers=workers) as pool:
+                    list(pool.map(_spreads_d_un_shard, manquants, chunksize=4))
+            else:
+                for job in manquants:
+                    _spreads_d_un_shard(job)
+        for fichier in fichiers:
+            with np.load(fichier, allow_pickle=False) as z:
+                valeurs = z["valeurs"]                 # lu UNE fois (chaque z[...] relit le tableau dans l'archive)
+                debut = 0
+                for coin, n in zip(z["coins"].tolist(), z["longueurs"].tolist()):
+                    par_coin.setdefault(str(coin), []).append(valeurs[debut:debut + n])
+                    debut += n
+    else:
+        for item in shards:
+            for coin, v in _spreads_observes(item["path"], sample_every).items():
+                par_coin.setdefault(coin, []).append(np.asarray(v, dtype=np.float64))
+    resultat = {}
+    for coin, morceaux in sorted(par_coin.items()):
+        valeurs = np.concatenate(morceaux) if len(morceaux) > 1 else morceaux[0]
+        if len(valeurs) >= min_obs:
+            resultat[coin] = float(np.median(valeurs))
+    return resultat
 
 
 def funding_shards(shards: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
@@ -465,10 +562,10 @@ def run(root: Path, *, price: str, workers: int, config: cop.CopiabilityConfig, 
     print(f"[copiabilite] shards vérifiés : {identity['corpus_shards']} · écartés : {len(excluded)}", flush=True)
     raw, rejects = load_fills(shards["fills_forward"], root / CACHE_DIR, workers)
     print(f"[copiabilite] {len(raw):,} lignes de fills lues en {time.time() - started:.0f} s", flush=True)
-    half_spreads = load_half_spreads(spread_shards(shards))
+    half_spreads = load_half_spreads(spread_shards(shards), cache_dir=root / CACHE_DIR)
     aliases: dict[str, str] = {}
     if price == "mids":
-        panel = load_mid_panel(shards["allmids"], config.stale_price_ms)
+        panel = load_mid_panel(shards["allmids"], config.stale_price_ms, cache_dir=root / CACHE_DIR)
         panel, aliases = cop.alias_legacy_symbols(panel, raw["coin"].unique())
         if len(panel.ts):
             raw = raw[(raw["time"] >= int(panel.ts[0])) & (raw["time"] <= int(panel.ts[-1]))]
@@ -649,7 +746,7 @@ def run_retrospective(root: Path, *, lag_s: float, workers: int, write: bool = T
     fills, prepared_rejects = cop.prepare_fills(raw, config)
     for reason, count in prepared_rejects.items():
         rejects[reason] = rejects.get(reason, 0) + count
-    half_spreads = load_half_spreads(spread_shards(shards))
+    half_spreads = load_half_spreads(spread_shards(shards), cache_dir=root / CACHE_DIR)
     funding = cop.build_funding_rates(load_funding(funding_shards(shards)), panel)
     print(f"[retrospectif] {len(fills):,} fills · {fills['vault'].nunique() if len(fills) else 0} vaults · "
           f"panel {panel.px.shape} · {len(half_spreads)} demi-spreads", flush=True)
@@ -773,7 +870,7 @@ def run_positions(root: Path, *, price: str, write: bool = True) -> dict[str, An
     if price == "mids":
         panel, _ = cop.alias_legacy_symbols(panel, events["coin"].unique())
     identity["corpus_tier"] = EVIDENCE_TIER_POSITIONS
-    half_spreads = load_half_spreads(spread_shards(shards))
+    half_spreads = load_half_spreads(spread_shards(shards), cache_dir=root / CACHE_DIR)
     funding = cop.build_funding_rates(load_funding(funding_shards(shards)), panel)
     print(f"[positions] {len(events):,} changements de position · {len(seen)} vaults · "
           f"{sum(len(v) for v in seen.values()):,} instantanés · panel {panel.px.shape}", flush=True)
@@ -865,7 +962,7 @@ def run_ouvertures(root: Path, *, lag_s: float, workers: int, write: bool = True
     fills = evenements.assembler_fills(prepares[0], prepares[1], assumed_lag_ms=lag_ms)
     del prepares
     units = cop.detect_sybil_clusters(fills, cop.CopiabilityConfig())
-    half_spreads = load_half_spreads(spread_shards(shards))
+    half_spreads = load_half_spreads(spread_shards(shards), cache_dir=root / CACHE_DIR)
     print(f"[ouvertures] {len(fills):,} fills · {fills['vault'].nunique()} leaders · "
           f"{int(fills['post'].sum()):,} observés en direct · prix : {', '.join(panels)} · "
           f"{len(half_spreads)} demi-écarts", flush=True)
@@ -938,7 +1035,7 @@ def run_ordres(root: Path, *, workers: int, write: bool = True) -> dict[str, Any
         candles, identity["candles_source"] = bougies(root, shards, "5m")
         if candles is not None:
             panel = cop.build_candle_panel(candles, interval_ms=CANDLE_INTERVALS_MS["5m"])
-            half_spreads = load_half_spreads(spread_shards(shards))
+            half_spreads = load_half_spreads(spread_shards(shards), cache_dir=root / CACHE_DIR)
     report = _jsonable(intentions.run_order_intent_study(carnets, fills, config, panel=panel,
                                                          half_spread_bps=half_spreads))
     report["collection_need"] = BESOIN_ORDRES
@@ -1128,7 +1225,7 @@ def _panneau_de_prix(root: Path, shards: dict[str, list[dict[str, Any]]], *, pri
     on rend UNMEASURABLE en NOMMANT le repli explicite, au lieu de le prendre soi-même.
     """
     if price == "mids":
-        panel = load_mid_panel(shards["allmids"], stale_ms)
+        panel = load_mid_panel(shards["allmids"], stale_ms, cache_dir=root / CACHE_DIR)
         if int(len(panel.ts)) < MIN_POINTS_PANNEAU_OBSERVE:
             return None, "", {
                 "status": "UNMEASURABLE",
@@ -1305,7 +1402,7 @@ def run_replication_350(root: Path, *, price: str, write: bool = True, min_snaps
                                                identity=identity)
     if refus is not None:
         return refus
-    half_spreads = load_half_spreads(spread_shards(shards))
+    half_spreads = load_half_spreads(spread_shards(shards), cache_dir=root / CACHE_DIR)
     funding = cop.build_funding_rates(load_funding(funding_shards(shards)), panel)
     par_leader: dict[str, Any] = {}
     for compte, portefeuille in portefeuilles.items():

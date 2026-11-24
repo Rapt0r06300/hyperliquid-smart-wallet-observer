@@ -1,8 +1,10 @@
 """Point d'entrée public et explicite du laboratoire autonome Alina.
 
-Ce module ne lance rien par défaut. Il rend les briques autonomes joignables depuis
-un outil de production versionné dans le dépôt principal et fournit un diagnostic
-simple. Les vrais jobs restent déclenchés par le plan de contrôle GitHub/self-hosted.
+Ce module ne lance rien par défaut. Il rend les briques de recherche paper joignables
+depuis un outil versionné dans le dépôt principal et fournit un diagnostic simple.
+Les anciennes briques de contrôle « self-hosted » restent importables pour compatibilité
+des reçus historiques, mais leur délégation directe est volontairement bloquée : le
+runtime autorisé est GitHub-hosted, PAPER et READ-ONLY uniquement.
 """
 from __future__ import annotations
 
@@ -20,6 +22,18 @@ from hl_observer.ops import self_hosted_control
 from hl_observer.ops import self_hosted_return
 
 MAX_DATA_ROUTE = "src/hl_observer/datasets/max_data_router.py"
+EXECUTION_BOUNDARY = "github-hosted-only"
+
+
+def _reject_legacy_self_hosted_control() -> int:
+    """Refuse tout contrôle local susceptible de réactiver un worker interdit."""
+
+    print(
+        "ALINA_SELF_HOSTED_CONTROL_DISABLED "
+        "reason=github-hosted-only-paper-read-only-policy",
+        flush=True,
+    )
+    return 2
 
 
 def _check_payload() -> dict[str, object]:
@@ -37,10 +51,12 @@ def _check_payload() -> dict[str, object]:
         "max_data_route": MAX_DATA_ROUTE,
         "self_hosted_control_module": self_hosted_control.__name__,
         "self_hosted_return_module": self_hosted_return.__name__,
+        "execution_boundary": EXECUTION_BOUNDARY,
         "target_net_usd_per_day": max_data_policy.TARGET_NET_USD_PER_DAY,
         "paper_only": True,
         "real_execution": False,
-        "self_hosted_ready_in_code": True,
+        "self_hosted_ready_in_code": False,
+        "legacy_self_hosted_surface": "DISABLED_BY_POLICY",
         "compact_return_ready_in_code": True,
         "active_family_full_cold_economic_routing": True,
     }
@@ -60,7 +76,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     job.add_argument("args", nargs=argparse.REMAINDER)
     control = sub.add_parser(
         "control",
-        help="Canonise une commande GitHub en requête worker self-hosted verrouillée.",
+        help="Refusé : l'ancien contrôle self-hosted n'est pas exécutable localement.",
     )
     control.add_argument("args", nargs=argparse.REMAINDER)
     compact_return = sub.add_parser(
@@ -85,7 +101,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     if args.command == "job":
         return autonomous_research_job_router.main(args.args)
     if args.command == "control":
-        return self_hosted_control.main(args.args)
+        return _reject_legacy_self_hosted_control()
     if args.command == "return":
         return self_hosted_return.main(args.args)
     if args.command == "max-data":

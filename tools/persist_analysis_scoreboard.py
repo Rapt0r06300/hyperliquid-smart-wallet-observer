@@ -8,7 +8,10 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
-ACTIVE_FAMILIES = ("copy_vault", "lead_lag", "cross_venue_dislocation_v2")
+from hl_observer.strategies.active_scope import active_strategy_families
+
+
+ACTIVE_FAMILIES = tuple(sorted(active_strategy_families()))
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -249,6 +252,11 @@ def build_receipt(
         raise ValueError("unexpected economic scoreboard schema")
     if scoreboard.get("paper_read_only") is not True or scoreboard.get("real_execution") is not False:
         raise ValueError("scoreboard is not paper/read-only")
+    declared_active = scoreboard.get("active_families")
+    if not isinstance(declared_active, (list, tuple)):
+        raise ValueError("scoreboard active family scope is missing or invalid")
+    if list(map(str, declared_active)) != list(ACTIVE_FAMILIES):
+        raise ValueError("scoreboard active family scope is stale or outside policy")
     if not evidence_tag or not repository:
         raise ValueError("durable evidence coordinates are required")
 

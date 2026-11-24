@@ -26,6 +26,25 @@ REQUIRED = {
     "execution_ledger", "data_exploitability", "global_closure_provenance",
 }
 VALID_STATUSES = {"PROVEN", "MORE_DATA", "UNMEASURABLE", "KILL"}
+DISABLED_BY_SCOPE = "DISABLED_BY_SCOPE"
+
+
+def validate_economic_scope_statuses(receipt: dict) -> None:
+    """Reject closure receipts that materialize an out-of-scope family.
+
+    Copy-Vault is the only economic family allowed to materialize in the
+    canonical runtime.  The two historical families remain represented in a
+    closure receipt for auditability, but must carry the explicit disabled
+    marker emitted by ``build_closure_report.py``.
+    """
+    if receipt.get("copy_vault_status") not in VALID_STATUSES:
+        raise ValueError("invalid closure status: copy_vault_status")
+    for name in ("lead_lag_status", "cross_venue_status"):
+        if receipt.get(name) != DISABLED_BY_SCOPE:
+            raise ValueError(f"{name} must be DISABLED_BY_SCOPE")
+    for name in ("oos_status", "forward_status", "two_segment_resume_status"):
+        if receipt.get(name) not in VALID_STATUSES:
+            raise ValueError(f"invalid closure status: {name}")
 
 
 def canonical(value):
@@ -52,16 +71,10 @@ def main() -> int:
         raise SystemExit("invalid closure phase")
     if not isinstance(receipt["phase_epoch"], int) or receipt["phase_epoch"] < 1:
         raise SystemExit("invalid closure phase epoch")
-    for name in (
-        "copy_vault_status",
-        "lead_lag_status",
-        "cross_venue_status",
-        "oos_status",
-        "forward_status",
-        "two_segment_resume_status",
-    ):
-        if receipt[name] not in VALID_STATUSES:
-            raise SystemExit(f"invalid closure status: {name}")
+    try:
+        validate_economic_scope_statuses(receipt)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
     for name in (
         "trade_count_exact",
         "unique_trade_count_exact",

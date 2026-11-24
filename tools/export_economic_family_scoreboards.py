@@ -1,4 +1,4 @@
-"""Export honest Copy-Vault, Lead-Lag, and Cross-Venue economic scoreboards."""
+"""Export the honest economic scoreboard for the active Copy-Vault scope."""
 
 from __future__ import annotations
 

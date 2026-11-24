@@ -363,6 +363,65 @@ def test_successful_sync_writes_valid_sha_bound_checkpoint(monkeypatch, tmp_path
     assert result["registry_recorded_shards"] == 3
 
 
+def test_unpack_contract_distinguishes_seal_from_physical_jsonl():
+    module = _module()
+
+    seal_only = module._unpack_report_contract({
+        "status": "SAFE_SEAL_CERTIFICATION_COMPLETE",
+        "physical_jsonl_available": False,
+        "streamable_gzip_available": True,
+        "replay_read_mode": "GZIP_STREAM",
+    })
+    assert seal_only["unpack_certified"] is True
+    assert seal_only["unpack_complete"] is False
+    assert seal_only["unpack_physical_jsonl_available"] is False
+    assert seal_only["unpack_streamable_gzip_available"] is True
+    assert seal_only["unpack_read_mode"] == "GZIP_STREAM"
+
+    full = module._unpack_report_contract({
+        "status": "SAFE_UNPACK_COMPLETE",
+        "physical_jsonl_available": True,
+        "streamable_gzip_available": True,
+        "replay_read_mode": "JSONL",
+    })
+    assert full["unpack_certified"] is True
+    assert full["unpack_complete"] is True
+    assert full["unpack_physical_jsonl_available"] is True
+
+
+def test_unpack_contract_rejects_in_progress_report():
+    module = _module()
+    report = module._unpack_report_contract({
+        "status": "UNPACK_IN_PROGRESS_NOT_CERTIFIED",
+        "physical_jsonl_available": False,
+        "streamable_gzip_available": False,
+    })
+    assert report["unpack_certified"] is False
+    assert report["unpack_complete"] is False
+
+
+@pytest.mark.parametrize(
+    "report",
+    [
+        {
+            "status": "SAFE_SEAL_CERTIFICATION_COMPLETE",
+            "physical_jsonl_available": True,
+            "streamable_gzip_available": True,
+            "replay_read_mode": "GZIP_STREAM",
+        },
+        {
+            "status": "SAFE_UNPACK_COMPLETE",
+            "physical_jsonl_available": True,
+            "streamable_gzip_available": True,
+            "replay_read_mode": "GZIP_STREAM",
+        },
+    ],
+)
+def test_unpack_contract_rejects_inconsistent_certification(report):
+    module = _module()
+    assert module._unpack_report_contract(report)["unpack_certified"] is False
+
+
 def test_complete_status_is_rejected_without_exact_safe_materialization(tmp_path):
     module = _module()
     report = tmp_path / "RESTORE_REPORT.json"

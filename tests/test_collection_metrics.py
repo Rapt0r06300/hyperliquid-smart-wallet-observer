@@ -223,6 +223,8 @@ def test_incomplete_frame_metrics_are_not_reported_as_exact_zero(tmp_path, monke
     out = metrics.build()
 
     assert out["instant"]["all_collection_metrics_complete"] is False
+    assert out["quality_status"] == "INCOMPLETE"
+    assert "COLLECTION_METRICS_INCOMPLETE" in out["quality_reasons"]
     assert out["instant"]["units_frame_metrics_incomplete"] == 1
     assert out["instant"]["persisted_frames"] is None
     assert out["instant"]["l2_frames"] is None
@@ -279,6 +281,8 @@ def test_exact_zero_frame_metrics_remain_zero_when_explicitly_complete(
     out = metrics.build()
 
     assert out["instant"]["all_collection_metrics_complete"] is True
+    assert out["quality_status"] == "INCOMPLETE"
+    assert out["quality_reasons"] == ["SOURCE_ADMISSION_INCOMPLETE"]
     assert out["instant"]["persisted_frames"] == 0
     assert out["instant"]["l2_frames"] == 0
 
@@ -308,6 +312,8 @@ def test_safe_build_preserves_last_good_snapshot_on_failure(tmp_path, monkeypatc
     out = metrics.safe_build()
 
     assert out["status"] == "DEGRADED"
+    assert out["quality_status"] == "DEGRADED"
+    assert out["quality_reasons"] == ["METRICS_BUILD_FAILED"]
     assert out["stale"] is True
     assert out["instant"]["trades_collected_observed"] == 1234
     assert out["source"] == "last_known_good_snapshot"
@@ -327,6 +333,8 @@ def test_safe_build_without_previous_uses_unknown_not_zero(tmp_path, monkeypatch
     out = metrics.safe_build()
 
     assert out["status"] == "DEGRADED"
+    assert out["quality_status"] == "DEGRADED"
+    assert out["quality_reasons"] == ["METRICS_BUILD_FAILED"]
     assert out["stale"] is True
     assert out["instant"]["trades_collected_observed"] is None
     assert out["instant"]["coverage_complete"] is False

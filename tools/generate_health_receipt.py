@@ -4,12 +4,65 @@ from __future__ import annotations
 import argparse, hashlib, json
 from pathlib import Path
 from typing import Any
+import re
+
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 def canonical(value: Any) -> str:
     return json.dumps(value,sort_keys=True,separators=(",",":"),ensure_ascii=False)
 
 def load(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def validate_replay_reasons_binding(
+    metrics: dict[str, Any],
+    replay_reasons: dict[str, Any],
+    *,
+    index_sha256: str | None,
+) -> dict[str, Any]:
+    """Refuse a replay-reasons receipt that describes another DATA_INDEX.
+
+    The health receipt is consumed by analysis-stage gates, so copying aggregate
+    counters from an older replay report would silently make a stale dataset look
+    current.  A missing binding is accepted only when no replay receipt exists;
+    once a receipt is supplied, its SHA must be valid and comparable.
+    """
+    metrics_sha = metrics.get("source_index_sha256")
+    reasons_sha = replay_reasons.get("source_index_sha256")
+    if metrics_sha is not None:
+        metrics_sha = str(metrics_sha).lower()
+        if not SHA256_RE.fullmatch(metrics_sha):
+            raise ValueError("DATASET_HEALTH_METRICS_INDEX_SHA_INVALID")
+    if index_sha256 is not None:
+        index_sha256 = str(index_sha256).lower()
+        if not SHA256_RE.fullmatch(index_sha256):
+            raise ValueError("DATASET_HEALTH_INDEX_SHA_INVALID")
+
+    if not replay_reasons:
+        return {
+            "status": "ABSENT",
+            "source_index_sha256": index_sha256 or metrics_sha,
+        }
+
+    if reasons_sha is None:
+        raise ValueError("REPLAY_COMPATIBILITY_REASONS_INDEX_BINDING_MISSING")
+    reasons_sha = str(reasons_sha).lower()
+    if not SHA256_RE.fullmatch(reasons_sha):
+        raise ValueError("REPLAY_COMPATIBILITY_REASONS_INDEX_SHA_INVALID")
+
+    expected = index_sha256 or metrics_sha
+    if expected is None:
+        raise ValueError("REPLAY_COMPATIBILITY_REASONS_INDEX_BINDING_UNVERIFIABLE")
+    if reasons_sha != expected:
+        raise ValueError("REPLAY_COMPATIBILITY_REASONS_STALE_INDEX")
+    if metrics_sha is not None and reasons_sha != metrics_sha:
+        raise ValueError("REPLAY_COMPATIBILITY_REASONS_METRICS_SHA_MISMATCH")
+    return {"status": "VERIFIED", "source_index_sha256": reasons_sha}
 
 ANALYSIS_STAGE_BY_KIND = {
     "replay": "REPLAY",
@@ -27,11 +80,20 @@ def main() -> int:
     p.add_argument("--campaign-dir",default="catalog/campaigns")
     p.add_argument("--output",default="catalog/DATASET_HEALTH_RECEIPT.json")
     p.add_argument("--replay-reasons",default="catalog/REPLAY_COMPATIBILITY_REASONS.json")
+    p.add_argument("--index",default="catalog/DATA_INDEX.json")
     p.add_argument("--dataset-commit",required=True)
     args=p.parse_args()
     metrics=load(Path(args.metrics))
     phase=load(Path(args.phase))
-    replay_reasons=load(Path(args.replay_reasons)) if Path(args.replay_reasons).is_file() else {}
+    replay_path = Path(args.replay_reasons)
+    replay_reasons=load(replay_path) if replay_path.is_file() else {}
+    index_path = Path(args.index)
+    index_sha = _file_sha256(index_path) if index_path.is_file() else None
+    replay_binding = validate_replay_reasons_binding(
+        metrics,
+        replay_reasons if isinstance(replay_reasons, dict) else {},
+        index_sha256=index_sha,
+    )
     totals=dict(metrics.get("totals") or {})
     campaigns=[]
     for path in sorted(Path(args.campaign_dir).glob("*.json")):
@@ -124,6 +186,8 @@ def main() -> int:
         "by_symbol":metrics.get("by_symbol") or {},
         "metrics_digest":hashlib.sha256(canonical(metrics).encode()).hexdigest(),
         "replay_compatibility_reasons": {
+            "binding_status": replay_binding["status"],
+            "source_index_sha256": replay_binding["source_index_sha256"],
             "receipt_digest": replay_reasons.get("receipt_digest") if isinstance(replay_reasons,dict) else None,
             "reason_counts": replay_reasons.get("reason_counts") if isinstance(replay_reasons,dict) else {},
             "safe_not_replayable_count": replay_reasons.get("safe_not_replayable_count") if isinstance(replay_reasons,dict) else None,

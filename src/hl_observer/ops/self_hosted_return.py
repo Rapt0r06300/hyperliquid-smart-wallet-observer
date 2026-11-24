@@ -262,7 +262,12 @@ def write_return(result_dir: str | Path, payload: Mapping[str, Any]) -> tuple[Pa
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Construit le petit retour machine-lisible d'un gros run self-hosted.")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Construit le retour compact machine-lisible d'un gros run paper "
+            "(surface de compatibilité historique, sans exécution self-hosted)."
+        )
+    )
     parser.add_argument("--result-dir", required=True)
     args = parser.parse_args(argv)
     payload = build_return(args.result_dir)
