@@ -306,6 +306,7 @@ def run_copiability_study(
     config: CopiabilityConfig | None = None,
     *,
     funding_rates: Mapping[str, np.ndarray] | None = None,
+    parallele: Any = None,
 ) -> dict[str, Any]:
     """Enchaîne les instruments sur des fills **déjà préparés** et renvoie un rapport sérialisable."""
 
@@ -318,7 +319,8 @@ def run_copiability_study(
     decay = decay_curves(fills, panel, units, cfg)
     episodes = reconstruct_episodes(fills)
     episodes, mirror = mirror_copy_episodes(episodes, panel, half_spread_bps, units, cfg)
-    attribution = attribute_pnl(fills, panel, half_spread_bps, units, cfg, funding_rates=funding_rates)
+    attribution = attribute_pnl(fills, panel, half_spread_bps, units, cfg, funding_rates=funding_rates,
+                                parallele=parallele)
     k_slow = max(cfg.rebalance_minutes)
     persistence = slow_replication_persistence(attribution, k_slow, cfg)
     classification = classify_units(attribution, episodes, cfg)
@@ -450,6 +452,7 @@ def run_position_replication_study(
     max_staleness_ms: int = 900_000,
     capital_usd: float = PAPER_EQUITY_USD,
     funding_rates: Mapping[str, np.ndarray] | None = None,
+    parallele: Any = None,
 ) -> dict[str, Any]:
     """Réplication lente du PORTEFEUILLE OBSERVÉ des leaders : persiste-t-elle, coûts déduits ?
 
@@ -464,7 +467,7 @@ def run_position_replication_study(
     attribution = attribute_pnl(
         events, panel, half_spread_bps, units, cfg,
         observation_times=observation_times, max_staleness_ms=max_staleness_ms, measure_execution=False,
-        funding_rates=funding_rates,
+        funding_rates=funding_rates, parallele=parallele,
     )
     k_slow = max(cfg.rebalance_minutes)
     net = slow_replication_persistence(attribution, k_slow, cfg)
@@ -531,6 +534,7 @@ def run_retrospective_study(
     assumed_lag_ms: int,
     capital_usd: float = PAPER_EQUITY_USD,
     funding_rates: Mapping[str, np.ndarray] | None = None,
+    parallele: Any = None,
 ) -> dict[str, Any]:
     """Persistance de la réplication lente sur un historique RECONSTRUIT (fills de backfill).
 
@@ -543,7 +547,8 @@ def run_retrospective_study(
 
     cfg = config or CopiabilityConfig()
     units = detect_sybil_clusters(fills, cfg)
-    attribution = attribute_pnl(fills, panel, half_spread_bps, units, cfg, funding_rates=funding_rates)
+    attribution = attribute_pnl(fills, panel, half_spread_bps, units, cfg, funding_rates=funding_rates,
+                                parallele=parallele)
     k_slow = max(cfg.rebalance_minutes)
     net = slow_replication_persistence(attribution, k_slow, cfg)
     timing = slow_replication_persistence(attribution, k_slow, cfg, component="timing")

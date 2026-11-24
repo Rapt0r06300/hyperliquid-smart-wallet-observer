@@ -232,6 +232,21 @@ def load_fills(
     return pd.concat(frames, ignore_index=True), rejects
 
 
+def executeur_parallele(workers: int):
+    """Exécution parallèle fournie au moteur de calcul (qui reste pur, sans processus) : ``None`` = en ligne.
+
+    24/11/2026 : ``attribute_pnl`` occupait 398 s sur 408 de l'étude de base. Ses coins sont indépendants ; le
+    moteur additionne ensuite les contributions dans l'ordre d'origine, d'où un résultat identique au bit."""
+    if workers <= 1:
+        return None
+
+    def executer(initialiseur, args, fonction, taches):
+        with ProcessPoolExecutor(max_workers=workers, initializer=initialiseur, initargs=args) as pool:
+            return list(pool.map(fonction, taches, chunksize=1))
+
+    return executer
+
+
 PANEL_CACHE_VERSION = "panneau-mids-v1"
 SPREAD_CACHE_VERSION = "demi-spreads-v1"
 
@@ -578,7 +593,8 @@ def run(root: Path, *, price: str, workers: int, config: cop.CopiabilityConfig, 
         rejects[reason] = rejects.get(reason, 0) + count
     print(f"[copiabilite] {len(fills):,} fills retenus · panel {panel.px.shape} · {len(half_spreads)} demi-spreads", flush=True)
     funding = cop.build_funding_rates(load_funding(funding_shards(shards)), panel)
-    report = _jsonable(cop.run_copiability_study(fills, panel, half_spreads, config, funding_rates=funding))
+    report = _jsonable(cop.run_copiability_study(fills, panel, half_spreads, config, funding_rates=funding,
+                                                 parallele=executeur_parallele(workers)))
     run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
     result = {
         "run_id": run_id, "identity": identity, "rejects": dict(sorted(rejects.items())),
@@ -751,7 +767,7 @@ def run_retrospective(root: Path, *, lag_s: float, workers: int, write: bool = T
     print(f"[retrospectif] {len(fills):,} fills · {fills['vault'].nunique() if len(fills) else 0} vaults · "
           f"panel {panel.px.shape} · {len(half_spreads)} demi-spreads", flush=True)
     report = _jsonable(cop.run_retrospective_study(fills, panel, half_spreads, config, assumed_lag_ms=lag_ms,
-                                                   funding_rates=funding))
+                                                   funding_rates=funding, parallele=executeur_parallele(workers)))
     run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ") + "-retro"
     result = {
         "run_id": run_id, "identity": identity, "rejects": dict(sorted(rejects.items())),
@@ -875,7 +891,7 @@ def run_positions(root: Path, *, price: str, write: bool = True) -> dict[str, An
     print(f"[positions] {len(events):,} changements de position · {len(seen)} vaults · "
           f"{sum(len(v) for v in seen.values()):,} instantanés · panel {panel.px.shape}", flush=True)
     report = _jsonable(cop.run_position_replication_study(events, seen, panel, half_spreads, config,
-                                                          funding_rates=funding))
+                                                          funding_rates=funding, parallele=executeur_parallele(4)))
     couverture_positions = load_positions(shards.get("position") or [])
     print(f"[positions] famille `position` observee : {couverture_positions['lignes']:,} lignes · "
           f"{couverture_positions['vaults']} vaults · {couverture_positions['coins']} coins · "

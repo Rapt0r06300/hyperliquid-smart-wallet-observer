@@ -274,6 +274,122 @@ def _median_or_none(series: pd.Series, *, scale: float = 1.0) -> float | None:
     return float(values.median() / scale) if len(values) else None
 
 
+_COMMUNS: dict[str, Any] = {}
+
+
+def _installer_communs(communs: dict[str, Any]) -> None:
+    """Tableaux du panneau partagés par tous les couples (une fois par processus)."""
+    _COMMUNS.clear()
+    _COMMUNS.update(communs)
+
+
+def _contributions_d_un_coin(tache: dict[str, Any]) -> list[tuple[int, int, dict[str, np.ndarray]]]:
+    """Contributions journalières de chaque couple (leader, coin) d'UN coin : ``[(ordre, unité, {champ: tableau})]``.
+
+    Mêmes opérations que la version d'origine, dans le même ordre, avec trois économies sans effet sur les valeurs :
+    (1) ce qui ne dépend que du COIN est calculé une fois ; (2) les indices valides sont extraits UNE fois par couple
+    au lieu d'un masque par somme ; (3) la rotation n'est évaluée qu'aux débuts de fenêtre de rééquilibrage, seuls
+    instants où elle n'est pas nulle (ajouter 0,0 ne change pas une somme flottante)."""
+    c0 = _COMMUNS
+    ts, valid, dt_hours, day_idx, days, n_days = (c0["ts"], c0["valid"], c0["dt_hours"], c0["day_idx"], c0["days"],
+                                                  c0["n_days"])
+    rebalance_index, rebalance_bounds = c0["rebalance_index"], c0["rebalance_bounds"]
+    price = tache["price"]
+    dpx = np.diff(price)
+    base_ok = valid & np.isfinite(dpx)
+    # la rotation est valorisée au dernier prix connu (estimation de coût, pas de PnL)
+    price_known = pd.Series(price).ffill().to_numpy()
+    funding_rate, rate = tache["funding_rate"], tache["rate"]
+
+    def compresser(ok: np.ndarray) -> dict[str, Any]:
+        idx = np.flatnonzero(ok)
+        d_ok = day_idx[:-1][idx]
+        dpx_ok = dpx[idx]
+        dt_ok = dt_hours[idx]
+        out = {"idx": idx, "d_ok": d_ok, "dpx_ok": dpx_ok, "price_ok": price[:-1][idx], "dt_ok": dt_ok,
+               "ts_ok": ts[idx], "dt_sum": dt_ok.sum(),
+               "static_base": np.bincount(d_ok, weights=dpx_ok, minlength=n_days),
+               "ri_ok": {k: rebalance_index[k][:-1][idx] for k in c0["rebalance_minutes"]}}
+        if funding_rate is not None:
+            with_rate = np.isfinite(funding_rate[:-1][idx])
+            out.update(fr_wr=funding_rate[:-1][idx][with_rate], with_rate=with_rate, without=~with_rate,
+                       d_wr=d_ok[with_rate], d_wo=d_ok[~with_rate])
+        return out
+
+    commun = None
+    sortie = []
+    for couple in tache["couples"]:
+        seen_times = couple["seen_times"]
+        if seen_times is not None:                     # instantanés : ``ok`` dépend du leader
+            last = np.searchsorted(seen_times, ts, side="right") - 1
+            known = (last >= 0) & ((ts - seen_times[np.clip(last, 0, len(seen_times) - 1)]) <= c0["max_staleness_ms"])
+            c = compresser(base_ok & known[:-1])
+        else:
+            commun = commun if commun is not None else compresser(base_ok)
+            c = commun
+        tm, after, q, ref = couple["tm"], couple["after"], couple["q"], couple["ref"]
+        seen = np.maximum.accumulate(couple["obs"]) + c0["reaction_delay_ms"]
+        first_start = couple["first_start"]
+        inside = (tm >= ts[0]) & (tm <= ts[-1])
+        fill_day = np.clip(np.searchsorted(days, tm // DAY_MS), 0, n_days - 1)
+        priced = inside & np.isfinite(ref)
+        r: dict[str, np.ndarray] = {}
+        if c0["measure_execution"]:
+            r["execution_usd"] = np.bincount(fill_day[priced], weights=(q * (ref - couple["px"]))[priced],
+                                             minlength=n_days)
+        r["leader_closed_pnl_usd"] = np.bincount(fill_day[inside], weights=np.nan_to_num(couple["closed_pnl"])[inside],
+                                                 minlength=n_days)
+        r["leader_fee_usd"] = np.bincount(fill_day[inside], weights=np.nan_to_num(couple["fee"])[inside],
+                                          minlength=n_days)
+
+        def position(times: np.ndarray, initial: float, at: np.ndarray = ts) -> np.ndarray:
+            j = np.searchsorted(times, at, side="right") - 1
+            return np.where(j >= 0, after[np.clip(j, 0, len(after) - 1)], initial)
+
+        # la position vraie avant le premier fill est ``startPosition`` ; le copieur, lui, ne
+        # sait rien avant sa première observation : il ne porte aucune position (pas d'avance).
+        d_ok, dpx_ok, price_ok, dt_ok = c["d_ok"], c["dpx_ok"], c["price_ok"], c["dt_ok"]
+        p_true_ok = position(tm, first_start, c["ts_ok"])          # == p_true[:-1][ok]
+        p_seen = position(seen, 0.0)
+        p_seen_ok = p_seen[c["idx"]]                               # == p_seen[:-1][ok]
+        r["inventory_true_usd"] = np.bincount(d_ok, weights=p_true_ok * dpx_ok, minlength=n_days)
+        expo = np.abs(p_seen_ok) * price_ok * dt_ok
+        r["exposure_usd_hours"] = np.bincount(d_ok, weights=expo, minlength=n_days)
+        for k in c0["rebalance_minutes"]:
+            p_k_ok = p_seen[c["ri_ok"][k]]                         # == p_k[:-1][ok]
+            r[f"inventory_k{k}_usd"] = np.bincount(d_ok, weights=p_k_ok * dpx_ok, minlength=n_days)
+            # Diagnostic exposition / prédiction : la part « statique » est ce qu'aurait gagné la
+            # position MOYENNE de la fenêtre, tenue sans jamais bouger (pari directionnel, bêta).
+            # Le reste (inventaire - statique) vient du choix des moments. La moyenne utilise
+            # toute la fenêtre : c'est une décomposition a posteriori, pas une stratégie.
+            if c["dt_sum"] > 0:
+                mean_position = float((p_k_ok * dt_ok).sum() / c["dt_sum"])
+                r[f"static_k{k}_usd"] = mean_position * c["static_base"]
+            # Funding de la position répliquée (connu seulement là où le taux a été observé).
+            notional_hours = p_k_ok * price_ok * dt_ok
+            if "fr_wr" not in c:
+                r[f"funding_unmeasured_k{k}_usd_hours"] = np.bincount(
+                    d_ok, weights=np.abs(notional_hours), minlength=n_days)
+            else:
+                r[f"funding_k{k}_usd"] = np.bincount(
+                    c["d_wr"], weights=-notional_hours[c["with_rate"]] * c["fr_wr"], minlength=n_days)
+                r[f"funding_unmeasured_k{k}_usd_hours"] = np.bincount(
+                    c["d_wo"], weights=np.abs(notional_hours[c["without"]]), minlength=n_days)
+            # rotation : non nulle seulement aux débuts de fenêtre de rééquilibrage (p_k y change ; ailleurs
+            # |0| x prix = 0,0, ou NaN écarté) -- mêmes termes, même ordre, sans les zéros
+            b = rebalance_bounds[k]
+            turn = np.abs(p_seen[rebalance_index[k][b]] - p_seen[rebalance_index[k][b - 1]]) * price_known[b]
+            turn_ok = np.isfinite(turn)
+            by_day = np.bincount(day_idx[b][turn_ok], weights=turn[turn_ok], minlength=n_days)
+            r[f"turnover_k{k}_usd"] = by_day
+            if rate is None:
+                r[f"unmeasured_turnover_k{k}_usd"] = by_day
+            else:
+                r[f"cost_k{k}_usd"] = by_day * rate
+        sortie.append((couple["ordre"], couple["u"], r))
+    return sortie
+
+
 def attribute_pnl(
     fills: pd.DataFrame,
     panel: PricePanel,
@@ -285,6 +401,7 @@ def attribute_pnl(
     max_staleness_ms: int | None = None,
     measure_execution: bool = True,
     funding_rates: Mapping[str, np.ndarray] | None = None,
+    parallele: Any = None,
 ) -> dict[str, Any]:
     """Décompose le PnL leader et mesure la réplication causale d'inventaire, par unité et par jour.
 
@@ -343,94 +460,72 @@ def attribute_pnl(
     fills_count = np.zeros(n_units, dtype=np.int64)
     taker_notional = np.zeros(n_units)
     notional = np.zeros(n_units)
-    for (vault, coin), g in f.groupby(["vault", "coin"], sort=True):
+    # 24/11/2026 -- MÊMES CALCULS, MOINS DE PASSES, ET EN PARALLÈLE (profil : 398 s sur 408 ici, 58 ms par couple
+    # leader x coin). Rien ne change dans ce qui est calculé ni dans l'ordre des sommes (voir ``_contributions_d_un_coin``).
+    # Le processus principal garde ce qui passe par pandas (sommes de notionnel, prix de référence) et additionne les
+    # contributions DANS L'ORDRE D'ORIGINE des couples : séquentiel ou parallèle, le résultat est identique AU BIT
+    # (tests/test_attribution_rapide.py, contre la copie figée tests/_reference_attribution_copiabilite.py).
+    communs = {
+        "ts": ts, "valid": valid, "dt_hours": dt_hours, "day_idx": day_idx, "days": days, "n_days": n_days,
+        "rebalance_index": rebalance_index,
+        "rebalance_bounds": {k: np.flatnonzero(rebalance_index[k][1:] != rebalance_index[k][:-1]) + 1
+                             for k in cfg.rebalance_minutes},
+        "rebalance_minutes": tuple(cfg.rebalance_minutes), "reaction_delay_ms": cfg.reaction_delay_ms,
+        "taker_fee_bps": cfg.taker_fee_bps, "measure_execution": measure_execution,
+        "max_staleness_ms": max_staleness_ms if observation_times is not None else None,
+    }
+    instantanes = observation_times is not None and max_staleness_ms is not None
+    taches: dict[str, dict[str, Any]] = {}
+    for ordre, ((vault, coin), g) in enumerate(f.groupby(["vault", "coin"], sort=True)):
         u = unit_pos[units.get(vault, vault)]
-        ci = panel.column(coin)
-        price = panel.px[:, ci]
-        dpx = np.diff(price)
-        ok = valid & np.isfinite(dpx)
-        if observation_times is not None and max_staleness_ms is not None:
+        seen_times = None
+        if instantanes:
             seen_times = observation_times.get(vault)
             if seen_times is None or len(seen_times) == 0:
                 continue
-            last = np.searchsorted(seen_times, ts, side="right") - 1
-            known = (last >= 0) & ((ts - seen_times[np.clip(last, 0, len(seen_times) - 1)]) <= max_staleness_ms)
-            ok = ok & known[:-1]
             if vault not in hours_done:
                 hours_done.add(vault)
+                last = np.searchsorted(seen_times, ts, side="right") - 1
+                known = (last >= 0) & ((ts - seen_times[np.clip(last, 0, len(seen_times) - 1)]) <= max_staleness_ms)
                 measured = valid & known[:-1]
                 vault_hours = np.bincount(day_idx[:-1][measured], weights=dt_hours[measured], minlength=n_days)
                 unit_day_hours[u] = np.maximum(unit_day_hours[u], vault_hours)
-        # la rotation est valorisée au dernier prix connu (estimation de coût, pas de PnL)
-        price_known = pd.Series(price).ffill().to_numpy()
+        ci = panel.column(coin)
         tm = g["time"].to_numpy()
-        seen = np.maximum.accumulate(g["obs"].to_numpy()) + cfg.reaction_delay_ms
-        after = g["after"].to_numpy()
-        first_start = float(g["start_pos"].to_numpy()[0])
-        q = (g["signe"] * g["sz"]).to_numpy()
-        ref = panel.at(tm, ci)
-        inside = (tm >= ts[0]) & (tm <= ts[-1])
-        fill_day = np.clip(np.searchsorted(days, tm // DAY_MS), 0, n_days - 1)
-        priced = inside & np.isfinite(ref)
-        if measure_execution:
-            acc["execution_usd"][u] += np.bincount(
-                fill_day[priced], weights=(q * (ref - g["px"].to_numpy()))[priced], minlength=n_days
-            )
-        acc["leader_closed_pnl_usd"][u] += np.bincount(
-            fill_day[inside], weights=np.nan_to_num(g["closed_pnl"].to_numpy())[inside], minlength=n_days
-        )
-        acc["leader_fee_usd"][u] += np.bincount(
-            fill_day[inside], weights=np.nan_to_num(g["fee"].to_numpy())[inside], minlength=n_days
-        )
-
-        def position(times: np.ndarray, initial: float) -> np.ndarray:
-            j = np.searchsorted(times, ts, side="right") - 1
-            return np.where(j >= 0, after[np.clip(j, 0, len(after) - 1)], initial)
-
-        # la position vraie avant le premier fill est ``startPosition`` ; le copieur, lui, ne
-        # sait rien avant sa première observation : il ne porte aucune position (pas d'avance).
-        p_true, p_seen = position(tm, first_start), position(seen, 0.0)
-        d = day_idx[:-1]
-        acc["inventory_true_usd"][u] += np.bincount(d[ok], weights=(p_true[:-1] * dpx)[ok], minlength=n_days)
-        expo = np.abs(p_seen[:-1]) * price[:-1] * dt_hours
-        acc["exposure_usd_hours"][u] += np.bincount(d[ok], weights=expo[ok], minlength=n_days)
-        hs = half_spread_bps.get(coin)
-        rate = None if hs is None or not math.isfinite(hs) else (cfg.taker_fee_bps + hs) * 1e-4
-        for k in cfg.rebalance_minutes:
-            p_k = p_seen[rebalance_index[k]]
-            acc[f"inventory_k{k}_usd"][u] += np.bincount(d[ok], weights=(p_k[:-1] * dpx)[ok], minlength=n_days)
-            # Diagnostic exposition / prédiction : la part « statique » est ce qu'aurait gagné la
-            # position MOYENNE de la fenêtre, tenue sans jamais bouger (pari directionnel, bêta).
-            # Le reste (inventaire - statique) vient du choix des moments. La moyenne utilise
-            # toute la fenêtre : c'est une décomposition a posteriori, pas une stratégie.
-            weight = dt_hours[ok]
-            if weight.sum() > 0:
-                mean_position = float((p_k[:-1][ok] * weight).sum() / weight.sum())
-                acc[f"static_k{k}_usd"][u] += mean_position * np.bincount(d[ok], weights=dpx[ok], minlength=n_days)
-            # Funding de la position répliquée (connu seulement là où le taux a été observé).
-            notional_hours = p_k[:-1] * price[:-1] * dt_hours
-            funding_rate = None if funding_rates is None else funding_rates.get(coin)
-            if funding_rate is None:
-                acc[f"funding_unmeasured_k{k}_usd_hours"][u] += np.bincount(
-                    d[ok], weights=np.abs(notional_hours)[ok], minlength=n_days)
-            else:
-                with_rate = ok & np.isfinite(funding_rate[:-1])
-                acc[f"funding_k{k}_usd"][u] += np.bincount(
-                    d[with_rate], weights=(-notional_hours * funding_rate[:-1])[with_rate], minlength=n_days)
-                without = ok & ~np.isfinite(funding_rate[:-1])
-                acc[f"funding_unmeasured_k{k}_usd_hours"][u] += np.bincount(
-                    d[without], weights=np.abs(notional_hours)[without], minlength=n_days)
-            turn = np.abs(np.diff(p_k)) * price_known[1:]
-            turn_ok = np.isfinite(turn)
-            by_day = np.bincount(day_idx[1:][turn_ok], weights=turn[turn_ok], minlength=n_days)
-            acc[f"turnover_k{k}_usd"][u] += by_day
-            if rate is None:
-                acc[f"unmeasured_turnover_k{k}_usd"][u] += by_day
-            else:
-                acc[f"cost_k{k}_usd"][u] += by_day * rate
-        fills_count[u] += len(g)
-        notional[u] += float(g["notional"].sum())
-        taker_notional[u] += float(g.loc[g["crossed"] == 1.0, "notional"].sum())
+        tache = taches.get(coin)
+        if tache is None:
+            hs = half_spread_bps.get(coin)
+            tache = taches[coin] = {
+                "coin": coin, "price": panel.px[:, ci],
+                "funding_rate": None if funding_rates is None else funding_rates.get(coin),
+                "rate": None if hs is None or not math.isfinite(hs) else (cfg.taker_fee_bps + hs) * 1e-4,
+                "couples": []}
+        tache["couples"].append({
+            "ordre": ordre, "u": u, "tm": tm, "obs": g["obs"].to_numpy(), "after": g["after"].to_numpy(),
+            "first_start": float(g["start_pos"].to_numpy()[0]), "q": (g["signe"] * g["sz"]).to_numpy(),
+            "ref": panel.at(tm, ci), "px": g["px"].to_numpy(), "closed_pnl": g["closed_pnl"].to_numpy(),
+            "fee": g["fee"].to_numpy(), "seen_times": seen_times,
+            "n": len(g), "notional": float(g["notional"].sum()),
+            "taker": float(g.loc[g["crossed"] == 1.0, "notional"].sum()),
+        })
+    resultats: list[tuple[int, int, dict[str, np.ndarray]]] = []
+    liste = list(taches.values())
+    if parallele is not None and sum(len(t["couples"]) for t in liste) >= 200:
+        # ``parallele(initialiseur, args, fonction, taches)`` est FOURNI par l'appelant (l'outil d'étude) : ce module
+        # reste un calcul pur, sans processus ni réseau (tests/test_copy_vault_copiability.py le vérifie)
+        for morceau in parallele(_installer_communs, (communs,), _contributions_d_un_coin, liste):
+            resultats.extend(morceau)
+    else:
+        _installer_communs(communs)
+        for tache in liste:
+            resultats.extend(_contributions_d_un_coin(tache))
+    infos = {c["ordre"]: c for t in liste for c in t["couples"]}
+    for ordre, u, contributions in sorted(resultats, key=lambda r: r[0]):       # l'ORDRE d'origine des couples
+        for champ, valeur in contributions.items():
+            acc[champ][u] += valeur
+        fills_count[u] += infos[ordre]["n"]
+        notional[u] += infos[ordre]["notional"]
+        taker_notional[u] += infos[ordre]["taker"]
     hours_total = float(day_hours.sum())
     leaders = []
     for i, name in enumerate(unit_names):
