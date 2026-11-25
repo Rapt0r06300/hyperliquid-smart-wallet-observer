@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+from types import SimpleNamespace
 from pathlib import Path
 
+import pytest
+
 from hl_observer.collection.native_venue_market import NativeMarketSnapshot
+from hl_observer.collection.tick_dataset import TickEnvelope
 from hl_observer.ops.collecteur_registry import (
     COLLECTEURS_CORE,
     COLLECTEURS_HARVEST,
@@ -13,6 +18,7 @@ from tools.collecter_native_venues import (
     envelope_from_snapshot,
     snapshot_summary,
 )
+from tools import collecter_native_venues as native_module
 
 
 def test_native_venues_is_harvest_not_core() -> None:
@@ -120,4 +126,123 @@ def test_native_heartbeat_exposes_per_channel_counts() -> None:
     assert "channel_counts: dict[str, dict[str, int]]" in text
     assert 'venue_counts[channel] = int(venue_counts.get(channel, 0)) + 1' in text
     assert '"channel_counts": {' in text
+
+
+@pytest.mark.parametrize("reject_queue_event", [False, True])
+def test_native_enqueue_records_each_envelope_once(
+    monkeypatch, tmp_path, capsys, reject_queue_event
+) -> None:
+    class FakeCoordinator:
+        def __init__(self, *, on_snapshot, **_kwargs):
+            self.on_snapshot = on_snapshot
+            self.bybit_client = SimpleNamespace(
+                last_instrument_metadata=(),
+                rest_base_url="https://api.bybit.com",
+            )
+            self.emitted = False
+
+        def discover(self):
+            return ["BTCUSDT"]
+
+        def refresh_clock_sync(self):
+            return None
+
+        def symbols_for(self, venue):
+            return ("BTCUSDT",) if venue == "bybit" else ()
+
+        async def run_bybit(self):
+            if not self.emitted:
+                self.emitted = True
+                now_ms = 1_700_000_000_000
+                self.on_snapshot(TickEnvelope(
+                    source_id="bybit_public_readonly",
+                    channel="orderbook_snapshot",
+                    instrument="BTCUSDT",
+                    event_kind="L2_SNAPSHOT",
+                    raw_payload='{"test":"real-shape"}',
+                    received_ts_ms=now_ms,
+                    exchange_ts_ms=now_ms,
+                ))
+            await asyncio.sleep(60)
+
+        async def run_clock_sync(self):
+            await asyncio.sleep(60)
+
+        def health(self, *, now_ms):
+            return {"checked_at_ms": now_ms}
+
+    class FakeWriter:
+        def __init__(self, *_args, **_kwargs):
+            self.rows = []
+
+        def append_batch(self, rows):
+            self.rows.extend(rows)
+            return len(rows)
+
+        def rotate_all(self):
+            return None
+
+        def stats(self):
+            return {"rows": len(self.rows)}
+
+    writer = FakeWriter()
+    heartbeats = []
+
+    class RejectingQueue:
+        max_estimated_bytes = 1
+        estimated_bytes = 0
+
+        def __init__(self, **_kwargs):
+            pass
+
+        def __len__(self):
+            return 0
+
+        def append(self, envelope, *, on_drop):
+            on_drop(envelope)
+            return False
+
+        def pop_batch(self, **_kwargs):
+            return []
+
+    if reject_queue_event:
+        monkeypatch.setattr(
+            native_module, "BoundedTickEnvelopeQueue", RejectingQueue
+        )
+    monkeypatch.setattr(native_module, "RecordingNativeVenueCoordinator", FakeCoordinator)
+    monkeypatch.setattr(native_module, "PartitionedTickDatasetWriter", lambda *a, **k: writer)
+    monkeypatch.setattr(native_module, "build_bundle", lambda *a, **k: {})
+    monkeypatch.setattr(
+        native_module,
+        "_atomic_json",
+        lambda _path, payload, **_kwargs: heartbeats.append(payload),
+    )
+    monkeypatch.setattr(native_module.HB, "battre", lambda *a, **k: None)
+    monkeypatch.setattr(native_module, "fetch_bybit_funding_settlements", _async_empty)
+
+    result = asyncio.run(native_module._run(
+        tmp_path,
+        max_symbols=1,
+        stale_after_ms=1_000,
+        duration_s=0.01,
+        universe_refresh_s=0,
+        enabled_venues=("bybit",),
+    ))
+
+    assert result == 0
+    assert len(writer.rows) == (0 if reject_queue_event else 1)
+    assert heartbeats
+    final = heartbeats[-1]
+    assert final["required_venues_ready"] is (not reject_queue_event)
+    assert final["channel_counts"]["bybit"].get("orderbook_snapshot", 0) == (
+        0 if reject_queue_event else 1
+    )
+    assert final["last_event_ms"]["bybit"] == (
+        0 if reject_queue_event else 1_700_000_000_000
+    )
+    assert "bybit reconnect #1" not in capsys.readouterr().out
+
+
+async def _async_empty(*_args, **_kwargs):
+    return []
 

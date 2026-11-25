@@ -231,7 +231,7 @@ async def _run(
     universe_changes = 0
     marker0 = (root / MARQUEUR).read_text(encoding="utf-8").strip() if (root / MARQUEUR).exists() else ""
 
-    def enqueue(envelope: TickEnvelope) -> None:
+    def enqueue(envelope: TickEnvelope) -> bool:
         nonlocal dropped, oversized_dropped
 
         def mark_dropped(_envelope: TickEnvelope) -> None:
@@ -241,6 +241,7 @@ async def _run(
         accepted = queue.append(envelope, on_drop=mark_dropped)
         if not accepted:
             oversized_dropped += 1
+            return False
         venue = envelope.source_id.split("_", 1)[0].lower()
         if venue in channel_counts:
             channel = str(envelope.channel or "")
@@ -254,8 +255,7 @@ async def _run(
                     int(last_exchange_ts[venue]),
                     int(envelope.exchange_ts_ms),
                 )
-        queue.append(envelope)
-
+        return True
     writer = PartitionedTickDatasetWriter(
         root / TICK_DATASET_DIR,
         rotate_bytes=max(8 * 1024 * 1024, int(rotate_bytes)),
@@ -264,8 +264,7 @@ async def _run(
 
     class QueueTickWriter:
         def append(self, envelope: TickEnvelope) -> int:
-            enqueue(envelope)
-            return 1
+            return int(enqueue(envelope))
 
     queue_tick_writer = QueueTickWriter()
 
@@ -302,7 +301,7 @@ async def _run(
             lot_filter = raw.get("lotSizeFilter")
             price = dict(price_filter) if isinstance(price_filter, Mapping) else {}
             lot = dict(lot_filter) if isinstance(lot_filter, Mapping) else {}
-            enqueue(
+            accepted = enqueue(
                 TickEnvelope(
                     source_id="bybit_public_rest",
                     channel="instrument_metadata",
@@ -334,7 +333,7 @@ async def _run(
                     },
                 )
             )
-            emitted += 1
+            emitted += int(accepted)
         return emitted
     registry = await asyncio.to_thread(coordinator.discover)
     enqueue_bybit_instrument_metadata()
