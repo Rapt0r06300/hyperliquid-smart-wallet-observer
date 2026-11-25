@@ -102,6 +102,8 @@ def test_native_runner_publishes_canonical_harvest_heartbeat() -> None:
     assert '"native-venues"' in text
     assert 'venue for venue in ("bybit", "okx") if venue in enabled_venues' in text
     assert '"required_venues_ready"' in text
+    assert '"queue_estimated_bytes"' in text
+    assert '"queue_oversized_drops"' in text
     assert "counts.get(venue, 0) > 0" in text
     assert "last_event_ms.get(venue, 0) > 0" in text
     assert "final_health = coordinator.health" in text

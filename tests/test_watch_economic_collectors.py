@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -181,6 +182,78 @@ def test_watchdog_allows_extra_attached_collector(tmp_path: Path, monkeypatch) -
     )
     assert log["status"] == "STARTING"
     assert log["missing"] == []
+
+
+def test_watchdog_degrade_un_processif_actif_mais_heartbeat_donnees_fige(
+    tmp_path: Path, monkeypatch, capsys,
+) -> None:
+    now_s = 1_800_000_000.0
+    heartbeat = tmp_path / "runtime/data/bbo_heartbeat.json"
+    heartbeat.parent.mkdir(parents=True)
+    heartbeat.write_text('{"ts": 1800000000}', encoding="utf-8")
+    os.utime(heartbeat, (now_s - 600, now_s - 600))
+    names = ["bbo-collector", "userfills-live", "copy-vault-checkpoints"]
+    monkeypatch.setattr(WATCH.time, "time", lambda: now_s)
+    monkeypatch.setattr(
+        WATCH, "renew_bounded_collection_lease",
+        lambda *_args, **_kwargs: {"renewed": True, "reason": "OK"},
+    )
+
+    WATCH.run_watchdog(
+        tmp_path,
+        interval_s=30.0,
+        duration_s=60.0,
+        requested_names=names,
+        ensure_fn=lambda _root, requested, **_kwargs: {
+            "actifs": {name: 100 + index for index, name in enumerate(requested)},
+            "manquants": [],
+            "lease": {"lease_id": "lease-test"},
+            "protocols": {
+                "userfills-live": WATCH.UNBOUND_L2_SOURCE_PROTOCOL,
+                "copy-vault-checkpoints": WATCH.CHECKPOINT_COLLECTOR_PROTOCOL,
+            },
+            "paper_read_only": True,
+        },
+        monotonic_fn=iter((0.0, 0.0)).__next__,
+        max_passes=1,
+    )
+
+    journal = tmp_path / "runtime/logs/economic-collector-watchdog.jsonl"
+    log = json.loads(journal.read_text(encoding="utf-8"))
+    assert log["status"] == "DEGRADED"
+    assert log["stream_heartbeats"]["bbo-collector"]["status"] == "STALE"
+    assert "bbo-collector" in capsys.readouterr().out
+
+
+def test_heartbeat_health_reads_file_age_without_opening_payload(tmp_path: Path) -> None:
+    heartbeat = tmp_path / "runtime/data/bbo_heartbeat.json"
+    heartbeat.parent.mkdir(parents=True)
+    # The collector payload can be large; health inspection must only stat the file.
+    heartbeat.write_bytes(b"{" + b" " * (2 * 1024 * 1024))
+    os.utime(heartbeat, (1_799_999_990.0, 1_799_999_990.0))
+
+    result = WATCH.collector_heartbeat_health(
+        tmp_path, ["bbo-collector"], now_s=1_800_000_000.0,
+    )
+
+    assert result["bbo-collector"]["status"] == "FRESH"
+    assert result["bbo-collector"]["age_s"] == 10.0
+    assert result["bbo-collector"]["threshold_s"] >= 120
+
+
+def test_heartbeat_health_distinguishes_missing_and_future_files(tmp_path: Path) -> None:
+    future = tmp_path / "runtime/research_lab/heartbeats/allmids-collector.json"
+    future.parent.mkdir(parents=True)
+    future.write_text("{}", encoding="utf-8")
+    os.utime(future, (1_800_000_060.0, 1_800_000_060.0))
+
+    result = WATCH.collector_heartbeat_health(
+        tmp_path, ["bbo-collector", "allmids-collector"], now_s=1_800_000_000.0,
+    )
+
+    assert result["bbo-collector"]["status"] == "MISSING"
+    assert result["allmids-collector"]["status"] == "FUTURE"
+    assert result["allmids-collector"]["future_by_s"] == 60.0
 
 
 def test_watchdog_log_rotation_is_bounded_and_keeps_recent_records(tmp_path: Path, monkeypatch) -> None:

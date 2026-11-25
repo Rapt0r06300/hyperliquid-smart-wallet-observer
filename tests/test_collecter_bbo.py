@@ -6,6 +6,7 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 RACINE = Path(__file__).resolve().parents[1]
 
@@ -15,6 +16,72 @@ def _mod():
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
     return m
+
+
+def _queued_envelope(payload, *, channel="trades", instrument="BTC"):
+    return SimpleNamespace(
+        raw_payload=payload,
+        provenance={"access": "read_only"},
+        parsed_summary={},
+        channel=channel,
+        instrument=instrument,
+    )
+
+
+def test_bbo_diagnostic_interval_uses_monotonic_elapsed_time():
+    m = _mod()
+    assert m._interval_due(1_000_000_000, 0, 1.0)
+    assert not m._interval_due(1_999_999_999, 1_000_000_000, 1.0)
+    assert m._interval_due(2_000_000_000, 1_000_000_000, 1.0)
+
+
+def test_bbo_raw_queue_bounds_retained_bytes_and_keeps_newest_events():
+    m = _mod()
+    queue = m.BoundedTickEnvelopeQueue(max_items=10, max_estimated_bytes=12_000)
+    dropped = []
+    events = [_queued_envelope(f'{{"trade":{index},"pad":"' + "x" * 4_000 + '"}')
+              for index in range(3)]
+
+    for event in events:
+        queue.append(event, on_drop=dropped.append)
+
+    assert dropped == events[:2]
+    assert len(queue) == 1
+    assert queue.estimated_bytes <= queue.max_estimated_bytes
+    assert queue.pop_batch(max_items=10, max_estimated_bytes=12_000) == [events[-1]]
+    assert queue.estimated_bytes == 0
+
+
+def test_bbo_raw_queue_rejects_single_event_over_byte_budget():
+    m = _mod()
+    queue = m.BoundedTickEnvelopeQueue(max_items=10, max_estimated_bytes=5_000)
+    dropped = []
+    event = _queued_envelope("x" * 5_000)
+
+    accepted = queue.append(event, on_drop=dropped.append)
+
+    assert not accepted
+    assert dropped == [event]
+    assert len(queue) == 0
+    assert queue.estimated_bytes == 0
+
+
+def test_bbo_raw_queue_batch_limit_releases_only_the_drained_estimate():
+    m = _mod()
+    queue = m.BoundedTickEnvelopeQueue(max_items=10, max_estimated_bytes=30_000)
+    dropped = []
+    events = [_queued_envelope("x" * 1_000), _queued_envelope("y" * 1_000)]
+    for event in events:
+        queue.append(event, on_drop=dropped.append)
+    initial_bytes = queue.estimated_bytes
+
+    batch = queue.pop_batch(max_items=10, max_estimated_bytes=6_000)
+
+    assert batch == [events[0]]
+    assert len(queue) == 1
+    assert 0 < queue.estimated_bytes < initial_bytes
+    assert queue.pop_batch(max_items=10, max_estimated_bytes=6_000) == [events[1]]
+    assert queue.estimated_bytes == 0
 
 
 def test_mapping_exact_refuse_le_non_mappable():

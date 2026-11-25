@@ -17,7 +17,6 @@ import json
 import os
 import sys
 import time
-from collections import deque
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -32,6 +31,7 @@ from hl_observer.collection.native_funding_history import (
     fetch_okx_funding_settlements,
 )
 from hl_observer.collection.partitioned_tick_dataset import PartitionedTickDatasetWriter
+from hl_observer.collection.bounded_tick_queue import BoundedTickEnvelopeQueue
 from hl_observer.collection.tick_dataset import TickEnvelope
 from hl_observer.datasets.v2_pipeline import build_bundle
 from hl_observer.realtime.feed_quality import FeedEventKind
@@ -41,6 +41,8 @@ HEARTBEAT = Path("runtime") / "data" / "native_venues_heartbeat.json"
 TICK_DATASET_DIR = Path("runtime") / "data" / "market_ticks"
 MARQUEUR = Path("runtime") / "data" / "lanceur_session_marqueur.txt"
 QUEUE_MAX = 100_000
+QUEUE_MAX_BYTES = 256 * 1024 * 1024
+QUEUE_BATCH_MAX_BYTES = 32 * 1024 * 1024
 STREAM_NAME = "native_venues_market_ticks"
 VENUES = ("bybit", "okx", "gate", "bitget")
 DEFAULT_UNIVERSE_REFRESH_S = 900.0
@@ -199,8 +201,12 @@ async def _run(
     symbol_shard_index: int = 0,
     rotate_bytes: int = 512 * 1024 * 1024,
 ) -> int:
-    queue: deque[TickEnvelope] = deque()
+    queue = BoundedTickEnvelopeQueue(
+        max_items=QUEUE_MAX,
+        max_estimated_bytes=QUEUE_MAX_BYTES,
+    )
     dropped = 0
+    oversized_dropped = 0
     written = 0
     enabled_venues = tuple(venue for venue in VENUES if venue in set(enabled_venues))
     if not enabled_venues:
@@ -226,10 +232,15 @@ async def _run(
     marker0 = (root / MARQUEUR).read_text(encoding="utf-8").strip() if (root / MARQUEUR).exists() else ""
 
     def enqueue(envelope: TickEnvelope) -> None:
-        nonlocal dropped
-        if len(queue) >= QUEUE_MAX:
-            queue.popleft()
+        nonlocal dropped, oversized_dropped
+
+        def mark_dropped(_envelope: TickEnvelope) -> None:
+            nonlocal dropped
             dropped += 1
+
+        accepted = queue.append(envelope, on_drop=mark_dropped)
+        if not accepted:
+            oversized_dropped += 1
         venue = envelope.source_id.split("_", 1)[0].lower()
         if venue in channel_counts:
             channel = str(envelope.channel or "")
@@ -418,7 +429,10 @@ async def _run(
         while True:
             await asyncio.sleep(0.25)
             if queue:
-                batch = [queue.popleft() for _ in range(min(5_000, len(queue)))]
+                batch = queue.pop_batch(
+                    max_items=5_000,
+                    max_estimated_bytes=QUEUE_BATCH_MAX_BYTES,
+                )
                 written += writer.append_batch(batch)
 
             now = time.time()
@@ -482,7 +496,10 @@ async def _run(
                     "universe_refresh_interval_s": universe_refresh_s,
                     "records_written": written,
                     "queue_depth": len(queue),
+                    "queue_estimated_bytes": queue.estimated_bytes,
+                    "queue_estimated_byte_limit": queue.max_estimated_bytes,
                     "queue_drops": dropped,
+                    "queue_oversized_drops": oversized_dropped,
                     "reconnects": reconnects,
                     "last_event_ms": last_event_ms,
                     "last_exchange_ts": last_exchange_ts,
@@ -535,7 +552,10 @@ async def _run(
             except Exception as exc:
                 funding_history_errors["okx"] = f"{type(exc).__name__}: {exc}"[:500]
         while queue:
-            batch = [queue.popleft() for _ in range(min(5_000, len(queue)))]
+            batch = queue.pop_batch(
+                max_items=5_000,
+                max_estimated_bytes=QUEUE_BATCH_MAX_BYTES,
+            )
             written += writer.append_batch(batch)
         await asyncio.to_thread(writer.rotate_all)
         collector_version = (
@@ -570,7 +590,10 @@ async def _run(
             "universe_refresh_interval_s": universe_refresh_s,
             "records_written": written,
             "queue_depth": len(queue),
+            "queue_estimated_bytes": queue.estimated_bytes,
+            "queue_estimated_byte_limit": queue.max_estimated_bytes,
             "queue_drops": dropped,
+            "queue_oversized_drops": oversized_dropped,
             "reconnects": reconnects,
             "last_event_ms": last_event_ms,
             "last_exchange_ts": last_exchange_ts,

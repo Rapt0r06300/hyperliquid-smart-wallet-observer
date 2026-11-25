@@ -28,6 +28,10 @@ RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "tools"))
 sys.path.insert(0, str(RACINE / "src"))
 import heartbeat_collecteur as HB  # noqa: E402
+from hl_observer.collection.bounded_tick_queue import (  # noqa: E402
+    BoundedTickEnvelopeQueue,
+    estimate_tick_envelope_bytes as _estimated_tick_envelope_bytes,
+)
 
 from hl_observer.config.cross_venue_instruments import (  # noqa: E402
     ATOMIC_BBO_SOURCE_MODE,
@@ -68,7 +72,19 @@ SHARDS_DIR = Path("runtime") / "data" / "bbo_shards"
 ARCHIVE_DIR = Path("runtime") / "data" / "bbo_shards_archive"   # historique PRÉSERVÉ (jamais supprimé, Flo 25/07)
 SHARD_OCTETS = 80 * 1024 * 1024
 MAX_SHARDS = 60                    # ~60 shards gz (~0,6-1 Go compresses, plusieurs jours) puis purge FIFO
-TICK_QUEUE_MAX = 100_000           # protege la socket; toute eviction est comptee et degrade la qualite
+TICK_QUEUE_MAX = 100_000           # plafond d'événements; toute éviction dégrade la qualité
+TICK_QUEUE_MAX_BYTES = 256 * 1024 * 1024  # borne mémoire estimée, en plus du nombre d'événements
+TICK_QUEUE_BATCH_MAX_BYTES = 32 * 1024 * 1024
+FEED_QUALITY_PUBLISH_INTERVAL_S = 1.0
+BBO_HEARTBEAT_PUBLISH_INTERVAL_S = 2.0
+
+
+def _interval_due(now_ns: int, last_ns: int, interval_s: float) -> bool:
+    """Use monotonic time for bounded diagnostic publication cadence."""
+    if last_ns <= 0:
+        return True
+    return now_ns - last_ns >= int(max(0.0, float(interval_s)) * 1_000_000_000)
+
 
 #: LIQUIDATION_LIVE_COVERAGE_V1 (25/07). Le HL WS bbo couvre N'IMPORTE QUEL coin (memes inclus) ; la
 #: jointure Binance est ignorée si le coin n'y est pas. On garde donc un BBO/L2 synchronisé sur les coins
@@ -682,7 +698,10 @@ async def _boucle(
         root / "runtime" / "data" / "canonical_events" / "canonical_market_events.jsonl",
         enabled=os.environ.get("ALINA_CANONICAL_EVENT_LEDGER", "0") == "1",
     )
-    raw_queue: deque[TickEnvelope] = deque()
+    raw_queue = BoundedTickEnvelopeQueue(
+        max_items=TICK_QUEUE_MAX,
+        max_estimated_bytes=TICK_QUEUE_MAX_BYTES,
+    )
     hl_asset_ctx: dict[str, dict[str, Any]] = {}
     lead_lag_checkpoint_queue: asyncio.Queue[LeadLagCheckpointRequest] = asyncio.Queue(
         maxsize=128
@@ -732,7 +751,8 @@ async def _boucle(
              "binance_bbo_last_error": "",
              "binance_trade_ws_url": WS_BINANCE_MARKET,
              "binance_trade_last_error": "",
-             "raw_records_written": 0, "raw_queue_drops": 0, "parse_errors_hl": 0,
+             "raw_records_written": 0, "raw_queue_drops": 0, "raw_queue_oversized": 0,
+             "parse_errors_hl": 0,
              "canonical_events_written": 0, "canonical_events_rejected": 0,
              "certified_atomic_bbo_written": 0,
              "lead_lag_checkpoint_requests": 0,
@@ -743,6 +763,12 @@ async def _boucle(
              "lead_lag_checkpoint_last_error": "",
              "dernier_hl_ns": 0, "dernier_bin_ns": 0, "debut_mono_ns": time.monotonic_ns()}
     heartbeat_canonique = {"dernier_ecrit": 0, "dernier_ts_ns": 0}
+    publication_diagnostics: dict[str, Any] = {
+        "quality_ns": 0,
+        "heartbeat_ns": 0,
+        "feed_snapshots": {},
+        "quality_payload": {"ready_feeds": 0, "total_feeds": len(quality_gates)},
+    }
     marqueur0 = MARQUEUR.read_text(encoding="utf-8").strip() if MARQUEUR.exists() else ""
 
     def next_sequence(channel: str, coin: str) -> int:
@@ -752,13 +778,21 @@ async def _boucle(
         return value
 
     def queue_raw(envelope: TickEnvelope) -> None:
-        if len(raw_queue) >= TICK_QUEUE_MAX:
-            dropped = raw_queue.popleft()
+        def mark_dropped(dropped: TickEnvelope) -> None:
             stats["raw_queue_drops"] += 1
             gate = quality_gates.get((dropped.channel, dropped.instrument))
             if gate is not None:
                 gate.mark_gap(reason="LOCAL_RAW_QUEUE_OVERFLOW")
-        raw_queue.append(envelope)
+
+        accepted = raw_queue.append(envelope, on_drop=mark_dropped)
+        if not accepted:
+            stats["raw_queue_oversized"] += 1
+
+    def take_raw_batch() -> list[TickEnvelope]:
+        return raw_queue.pop_batch(
+            max_items=5_000,
+            max_estimated_bytes=TICK_QUEUE_BATCH_MAX_BYTES,
+        )
 
     def queue_hyperliquid_instrument_metadata() -> int:
         if not isinstance(hl_meta, Mapping):
@@ -1272,7 +1306,10 @@ async def _boucle(
                                     channel="bbo",
                                     instrument=coin_name,
                                     event_kind=FeedEventKind.UPDATE,
-                                    raw_payload=message,
+                                    # Keep the already-decoded wire frame as text. Retaining its
+                                    # Python dict for every queued trade/BBO event multiplies RAM;
+                                    # TickEnvelope accepts the original frame without schema loss.
+                                    raw_payload=raw,
                                     exchange_ts_ms=(
                                         int(q["ts_ex"]) if q.get("ts_ex") else None
                                     ),
@@ -1369,7 +1406,7 @@ async def _boucle(
                                     channel="trades",
                                     instrument=coin_name,
                                     event_kind=FeedEventKind.EVENT,
-                                    raw_payload=message,
+                                    raw_payload=raw,
                                     exchange_ts_ms=(
                                         int(t["ts_ex"]) if t.get("ts_ex") else None
                                     ),
@@ -1551,12 +1588,13 @@ async def _boucle(
                         certified,
                     )
             if tape:                                           # flush de la TAPE brute (lead-lag fin)
-                CF.append_jsonl(root / TAPE, list(tape))
+                tape_batch = list(tape)
                 tape.clear()
+                await asyncio.to_thread(CF.append_jsonl, root / TAPE, tape_batch)
                 if sceller_shard(root):                        # scelle un shard gz immuable si la tape est pleine
                     stats["shards_scelles"] += 1
             if raw_queue:
-                batch = [raw_queue.popleft() for _ in range(min(5_000, len(raw_queue)))]
+                batch = take_raw_batch()
                 durable_records = await asyncio.to_thread(
                     dataset.append_batch_records,
                     batch,
@@ -1575,71 +1613,103 @@ async def _boucle(
                     canonical_writer.append,
                     canonical_events,
                 )
-            now_wall_ms = int(time.time() * 1000)
-            feed_snapshots = {
-                f"hyperliquid:{channel}:{coin}": gate.snapshot(
-                    now_ms=now_wall_ms
-                ).as_dict()
-                for (channel, coin), gate in quality_gates.items()
-            }
-            quality_payload = {
-                "schema_version": "hypersmart.feed_quality.v1",
-                "generated_at_ms": now_wall_ms,
-                "feeds": feed_snapshots,
-                "ready_feeds": sum(
-                    1 for snapshot in feed_snapshots.values() if snapshot["ready"]
-                ),
-                "total_feeds": len(feed_snapshots),
-                "raw_queue_depth": len(raw_queue),
-                "raw_queue_drops": stats["raw_queue_drops"],
-                "lead_lag_causal_checkpoints": {
-                    "pending": lead_lag_checkpoint_queue.qsize(),
-                    "requests": stats["lead_lag_checkpoint_requests"],
-                    "captures": stats["lead_lag_checkpoint_captures"],
-                    "failures": stats["lead_lag_checkpoint_failures"],
-                    "drops": stats["lead_lag_checkpoint_drops"],
-                    "last_latency_ms": stats["lead_lag_checkpoint_last_latency_ms"],
-                    "last_error": stats["lead_lag_checkpoint_last_error"],
-                    "endpoint": "/info",
-                    "access": "read_only",
-                },
-                "binance_deep_l2": {
-                    **binance_depth_collector.health(),
-                    "latest_symbols": len(binance_l2_latest),
-                },
-                "binance_market_context": binance_market_context_collector.health(),
-                "dataset": dataset.stats(),
-                "canonical_events": {
-                    "path": str(canonical_writer.path),
-                    "written": canonical_writer.written,
-                    "duplicates": canonical_writer.duplicates,
-                    "rejected_by_quality_gate": stats["canonical_events_rejected"],
-                },
-                "read_only": True,
-                "real_execution": False,
-            }
-            CF.ecrire_atomique(
-                root / FEED_QUALITY,
-                json.dumps(quality_payload, ensure_ascii=False),
-            )
             duree_s = (now_ns - stats["debut_mono_ns"]) / 1e9
-            hb = {"ts": time.time(), "duree_continue_s": round(duree_s, 1), **stats,
-                  "taux_rejet": round(stats["rejets"] / max(1, stats["ecrits"] + stats["rejets"]), 4),
-                  # 22/11/2026 : `taux_rejet` ne compte que les paires BBO atomiques. Le 22/11 il valait
-                  # 0.0 pendant que 76 251 evenements canoniques sur 90 269 (84 %) etaient refuses par la
-                  # porte de qualite. Ce second taux dit ce que l'autre taisait ; `None` = rien a juger.
-                  "taux_rejet_canonique": (
-                      round(stats["canonical_events_rejected"]
-                            / (stats["canonical_events_written"] + stats["canonical_events_rejected"]), 4)
-                      if (stats["canonical_events_written"] + stats["canonical_events_rejected"]) > 0 else None),
-                  "raw_queue_depth": len(raw_queue),
-                  "feed_quality_ready": quality_payload["ready_feeds"],
-                  "feed_quality_total": quality_payload["total_feeds"],
-                  "binance_clock_sync": binance_depth_collector.clock_evidence(),
-                  "binance_deep_l2": binance_depth_collector.health(),
-                  "tick_dataset": dataset.stats()}
-            CF.ecrire_atomique(root / HEARTBEAT, json.dumps(hb, ensure_ascii=False))
-            if now_ns - heartbeat_canonique["dernier_ts_ns"] >= 2_000_000_000:
+            if _interval_due(
+                now_ns,
+                publication_diagnostics["quality_ns"],
+                FEED_QUALITY_PUBLISH_INTERVAL_S,
+            ):
+                now_wall_ms = int(time.time() * 1000)
+                feed_snapshots = {
+                    f"hyperliquid:{channel}:{coin}": gate.snapshot(
+                        now_ms=now_wall_ms
+                    ).as_dict()
+                    for (channel, coin), gate in quality_gates.items()
+                }
+                quality_payload = {
+                    "schema_version": "hypersmart.feed_quality.v1",
+                    "generated_at_ms": now_wall_ms,
+                    "feeds": feed_snapshots,
+                    "ready_feeds": sum(
+                        1 for snapshot in feed_snapshots.values() if snapshot["ready"]
+                    ),
+                    "total_feeds": len(feed_snapshots),
+                    "raw_queue_depth": len(raw_queue),
+                    "raw_queue_estimated_bytes": raw_queue.estimated_bytes,
+                    "raw_queue_estimated_byte_limit": raw_queue.max_estimated_bytes,
+                    "raw_queue_drops": stats["raw_queue_drops"],
+                    "raw_queue_oversized": stats["raw_queue_oversized"],
+                    "lead_lag_causal_checkpoints": {
+                        "pending": lead_lag_checkpoint_queue.qsize(),
+                        "requests": stats["lead_lag_checkpoint_requests"],
+                        "captures": stats["lead_lag_checkpoint_captures"],
+                        "failures": stats["lead_lag_checkpoint_failures"],
+                        "drops": stats["lead_lag_checkpoint_drops"],
+                        "last_latency_ms": stats["lead_lag_checkpoint_last_latency_ms"],
+                        "last_error": stats["lead_lag_checkpoint_last_error"],
+                        "endpoint": "/info",
+                        "access": "read_only",
+                    },
+                    "binance_deep_l2": {
+                        **binance_depth_collector.health(),
+                        "latest_symbols": len(binance_l2_latest),
+                    },
+                    "binance_market_context": binance_market_context_collector.health(),
+                    "dataset": dataset.stats(),
+                    "canonical_events": {
+                        "path": str(canonical_writer.path),
+                        "written": canonical_writer.written,
+                        "duplicates": canonical_writer.duplicates,
+                        "rejected_by_quality_gate": stats["canonical_events_rejected"],
+                    },
+                    "read_only": True,
+                    "real_execution": False,
+                }
+                await asyncio.to_thread(
+                    CF.ecrire_atomique,
+                    root / FEED_QUALITY,
+                    json.dumps(quality_payload, ensure_ascii=False),
+                )
+                publication_diagnostics["feed_snapshots"] = feed_snapshots
+                publication_diagnostics["quality_payload"] = quality_payload
+                publication_diagnostics["quality_ns"] = now_ns
+
+            if _interval_due(
+                now_ns,
+                publication_diagnostics["heartbeat_ns"],
+                BBO_HEARTBEAT_PUBLISH_INTERVAL_S,
+            ):
+                feed_snapshots = publication_diagnostics["feed_snapshots"]
+                quality_payload = publication_diagnostics["quality_payload"]
+                hb = {"ts": time.time(), "duree_continue_s": round(duree_s, 1), **stats,
+                      "taux_rejet": round(stats["rejets"] / max(1, stats["ecrits"] + stats["rejets"]), 4),
+                      # 22/11/2026 : `taux_rejet` ne compte que les paires BBO atomiques. Le 22/11 il valait
+                      # 0.0 pendant que 76 251 evenements canoniques sur 90 269 (84 %) etaient refuses par la
+                      # porte de qualite. Ce second taux dit ce que l'autre taisait ; `None` = rien a juger.
+                      "taux_rejet_canonique": (
+                          round(stats["canonical_events_rejected"]
+                                / (stats["canonical_events_written"] + stats["canonical_events_rejected"]), 4)
+                          if (stats["canonical_events_written"] + stats["canonical_events_rejected"]) > 0 else None),
+                      "raw_queue_depth": len(raw_queue),
+                      "raw_queue_estimated_bytes": raw_queue.estimated_bytes,
+                      "raw_queue_estimated_byte_limit": raw_queue.max_estimated_bytes,
+                      "feed_quality_ready": quality_payload["ready_feeds"],
+                      "feed_quality_total": quality_payload["total_feeds"],
+                      "binance_clock_sync": binance_depth_collector.clock_evidence(),
+                      "binance_deep_l2": binance_depth_collector.health(),
+                      "tick_dataset": dataset.stats()}
+                await asyncio.to_thread(
+                    CF.ecrire_atomique,
+                    root / HEARTBEAT,
+                    json.dumps(hb, ensure_ascii=False),
+                )
+                publication_diagnostics["heartbeat_ns"] = now_ns
+
+            if _interval_due(
+                now_ns,
+                heartbeat_canonique["dernier_ts_ns"],
+                BBO_HEARTBEAT_PUBLISH_INTERVAL_S,
+            ):
                 total_ecrit = int(stats["canonical_events_written"])
                 delta_ecrit = max(0, total_ecrit - int(heartbeat_canonique["dernier_ecrit"]))
                 exchange_timestamps = [
@@ -1716,7 +1786,7 @@ async def _boucle(
                 f"{type(exc).__name__}: {exc}"
             )[:500]
         while raw_queue:
-            batch = [raw_queue.popleft() for _ in range(min(5_000, len(raw_queue)))]
+            batch = take_raw_batch()
             durable_records = await asyncio.to_thread(
                 dataset.append_batch_records,
                 batch,
@@ -1854,8 +1924,10 @@ __all__ = ["symbole_binance", "extraire_symboles_hyperliquid", "charger_meta_hyp
            "resoudre_symboles_hyperliquid", "parser_bbo_hl", "parser_l2_hl", "parser_active_asset_ctx_hl", "parser_trades_hl",
            "parser_bookticker_binance", "parser_aggtrade_binance", "dispatch_lead_lag_trade",
            "MagasinBBO", "mesurer_lead_lag", "sceller_shard", "resume",
+           "BoundedTickEnvelopeQueue", "_estimated_tick_envelope_bytes",
            "AGE_MAX_MS", "FENETRE_SYNCHRO_MS", "GAP_MS", "SHARD_OCTETS", "MAX_SHARDS",
-           "SORTIE", "ATOMIC_BBO_TAPE", "FEED_QUALITY", "TICK_DATASET_DIR", "TICK_QUEUE_MAX"]
+           "SORTIE", "ATOMIC_BBO_TAPE", "FEED_QUALITY", "TICK_DATASET_DIR", "TICK_QUEUE_MAX",
+           "TICK_QUEUE_MAX_BYTES", "TICK_QUEUE_BATCH_MAX_BYTES"]
 
 
 if __name__ == "__main__":                                 # 🔴 MANQUAIT : sans ce garde, le script

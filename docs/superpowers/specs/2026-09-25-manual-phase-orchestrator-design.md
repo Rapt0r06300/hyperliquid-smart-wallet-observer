@@ -989,6 +989,8 @@ Each collector shard must expose live health including:
 - normalized rows/second;
 - writer throughput;
 - queue occupancy and high-water mark;
+- estimated queued bytes and byte budget, alongside event count;
+- explicit diagnostic refresh cadence; snapshot serialization and atomic writes must not block the event-receive loop;
 - event-loop or processing lag;
 - CPU/memory/disk usage where available;
 - publish duration;
@@ -998,7 +1000,7 @@ The planner must size symbol/channel shards from observed throughput and venue l
 
 A shard that experiences queue loss, persistent processing lag, or rate-limit pressure is automatically reduced/split for the next unit.
 
-Queue overflow is a quality incident. Any stream with unaccounted collector-side drops cannot be certified continuous.
+All in-memory collector queues must be bounded by both event count and a documented byte budget. Queue overflow is a quality incident: count and byte pressure, oversized-event rejects, and evictions must remain observable, mark the affected stream degraded, and prevent certification of continuity. An estimated queue-byte gauge is not an RSS measurement and must be labeled accordingly. Diagnostic refresh throttling must never throttle raw event capture or conceal drops.
 
 ### Replay-grade timestamps and clock discipline
 
@@ -14440,3 +14442,16 @@ Contrôle réel en lecture seule le 25/11/2026 à 00:04:58 : watchdog frais (2 s
 `CopyVaultCheckpointTail.poll_once()` réutilise maintenant `coverage_receipt()` pour le nombre d'incidents et l'état `replay_evidence_complete`. Une rotation et son `reconnect_backfill_blocked` sont une seule cause; les `invalid_rejected`, expirations, débordements et interruptions restent des motifs qui empêchent la preuve. Un compteur `writer_outages` présent mais non entier invalide le reçu. Le heartbeat transporte l'état du reçu et les compteurs détaillés; l'ETA ne transforme pas un reçu `UNMEASURABLE` sans nombre en zéro gap.
 
 Rectification de l'observation du début de journée : sur l'état persistant relu en lecture seule, `input_rotations=7`, `reconnect_backfill_blocked=7`, `checkpoints_expired=1159`, `invalid_rejected=479`, `writer_outages=11`, débordements=0. Le reçu canonique donne **1 656 incidents empêchant la preuve**; les incidents de continuité sans les rejets invalides sont **1 177**. L'ancien heartbeat actif affiche encore 1 184 car il double les 7 rotations et omet les 479 rejets invalides. `+3` mesure le delta depuis le premier relevé de CE watchdog pour le bail, pas depuis le début de collecte. Le processus actif n'a pas été redémarré; ses valeurs historiques ne sont pas réécrites.
+
+### 2026-11-25 — Fraîcheur du flux distincte de la présence du processus
+
+Un wrapper/PID et un bail valides prouvent seulement que le superviseur voit un processus. Ils ne prouvent pas que le collecteur écrit encore ses données. Le watchdog et `ETA_COLLECTE` inspectent désormais, par `stat` uniquement, les fichiers heartbeat des collecteurs persistants déclarés dans le registre canonique. Les tâches ponctuelles, le verrou `userfills_live.lock` et le heartbeat Copy-Vault à contrat spécifique sont exclus de ce contrôle générique. Le seuil tolère au moins 120 secondes et au plus 900 secondes selon la cadence déclarée.
+
+Quand le protocole causal est prêt mais qu'un heartbeat attendu est ancien, absent, illisible ou daté dans le futur, le watchdog passe à `DEGRADED`; l'ETA affiche séparément le nombre de processus et les battements récents, puis nomme les flux à vérifier. L'ETA recalcule les âges à chaque rafraîchissement depuis les mtimes, sans attendre le prochain cycle watchdog et sans lire les payloads volumineux. Un heartbeat récent confirme uniquement que son fichier évolue : il ne prouve ni l'arrivée d'événements valides, ni la continuité sans gap, ni l'admission SAFE.
+
+Contrôle ponctuel local en lecture seule : 20/20 processus présents, mais seulement 3/5 heartbeats de données surveillés récents; le heartbeat du collecteur BBO était figé depuis environ 10 h et celui du collecteur Multi-venues depuis environ 7,8 h. L'ETA affiche `DEGRADE` malgré les 20 PID présents. Aucun collecteur n'a été arrêté ou relancé; les anciennes valeurs de heartbeat restent intactes.
+
+
+Précision de périmètre : « heartbeat du collecteur BBO figé » ne signifie pas que toute donnée BBO avait cessé. `copy_vault_bbo_lane.jsonl`, écrit par `tools/collecter_l2_lane.py`, continuait de grossir au contrôle; le heartbeat et `bbo_tape.jsonl` de `bbo-collector`, eux, étaient anciens. Le tableau nomme donc le collecteur concerné, sans conclure à l'absence de tous les flux BBO.
+
+Le wrapper `run_bounded_collector.py` ajoute aussi `data_heartbeat`, son âge, son seuil et son chemin à son journal périodique; ce diagnostic est passif et ne redémarre ni n'arrête le worker.

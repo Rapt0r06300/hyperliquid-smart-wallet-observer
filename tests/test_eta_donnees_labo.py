@@ -508,6 +508,39 @@ def test_suivi_collecteurs_distingue_processus_actifs_et_gaps_causaux(tmp_path):
     assert "+3" in texte
 
 
+def test_eta_signale_un_heartbeat_fige_puis_redevient_actif_sans_redemarrer_watchdog(tmp_path):
+    now_ms = 1_800_000_000_000
+    heartbeat = tmp_path / "runtime" / "data" / "bbo_heartbeat.json"
+    heartbeat.parent.mkdir(parents=True)
+    heartbeat.write_text('{"ts":1800000000}', encoding="utf-8")
+    os.utime(heartbeat, (now_ms / 1000 - 600, now_ms / 1000 - 600))
+    _ecrire_suivi_collecteurs(tmp_path, {
+        "ts_ms": now_ms - 5_000,
+        "status": "ACTIVE",
+        "requested": ["bbo-collector", "worker"],
+        "active": ["bbo-collector", "worker"],
+        "missing": [],
+        "lease_renewal": "OK",
+        "causal_protocol_status": "OK",
+        "paper_read_only": True,
+        "real_execution": False,
+    })
+
+    stale = ETA.lire_suivi_collecteurs(tmp_path, maintenant_ms=now_ms)
+
+    assert stale["code"] == "DEGRADE"
+    assert stale["flux_figes"] == ["bbo-collector"]
+    lignes = "\n".join(ETA._lignes_suivi_collecteurs(stale))
+    assert "FLUX DONNÉES" in lignes
+    assert "collecteur BBO — aucun signal depuis (10 min)" in lignes
+
+    os.utime(heartbeat, (now_ms / 1000 - 10, now_ms / 1000 - 10))
+    fresh = ETA.lire_suivi_collecteurs(tmp_path, maintenant_ms=now_ms)
+
+    assert fresh["code"] == "ACTIF"
+    assert fresh["flux_figes"] == []
+
+
 def test_suivi_collecteurs_perime_ne_confirme_pas_une_activite_actuelle(tmp_path):
     now_ms = 1_800_000_000_000
     _ecrire_suivi_collecteurs(tmp_path, {

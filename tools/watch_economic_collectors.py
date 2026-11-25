@@ -22,6 +22,10 @@ from hl_observer.ops.bounded_collection import (  # noqa: E402
     ensure_bounded_collectors,
     renew_bounded_collection_lease,
 )
+from hl_observer.ops.collector_heartbeat import (  # noqa: E402
+    collector_heartbeat_health,
+    stale_collector_heartbeats,
+)
 from hl_observer.backtesting.copy_vault_protocol import (  # noqa: E402
     CHECKPOINT_COLLECTOR_PROTOCOL,
     UNBOUND_L2_SOURCE_PROTOCOL,
@@ -419,6 +423,15 @@ def run_watchdog(
                 if protocol_status in {"ATTENTE HEARTBEATS", "EN COURS"}
                 else "DEGRADED"
             )
+            stream_heartbeats = collector_heartbeat_health(
+                root, active_map.keys(), now_s=time.time(),
+            )
+            stale_streams = stale_collector_heartbeats(stream_heartbeats)
+            # Process/lease liveness is not data-stream liveness. Once the
+            # causal protocol is ready, a missing or frozen registered data
+            # heartbeat must make the overall collector state visibly degraded.
+            if status == "ACTIVE" and stale_streams:
+                status = "DEGRADED"
             evidence_health = _checkpoint_evidence_health(
                 root, active_map, now_ms=int(time.time() * 1000)
             )
@@ -436,6 +449,7 @@ def run_watchdog(
                 "causal_evidence_gaps_since_start": trous_depuis_le_depart(
                     str(lease_id or ""), evidence_health["reported_gaps"]),
                 "causal_evidence_detail": detail_des_trous(root),
+                "stream_heartbeats": stream_heartbeats,
                 "observed_protocols": {
                     "userfills-live": fills_protocol or None,
                     "copy-vault-checkpoints": checkpoint_protocol or None,
@@ -460,6 +474,20 @@ def run_watchdog(
                 ),
                 flush=True,
             )
+            if stream_heartbeats:
+                frais = sum(
+                    row.get("status") == "FRESH"
+                    for row in stream_heartbeats.values()
+                )
+                suffixe = (
+                    " | heartbeat non frais: " + ", ".join(stale_streams)
+                    if stale_streams else ""
+                )
+                print(
+                    "  [FLUX] %d/%d heartbeats de données frais%s"
+                    % (frais, len(stream_heartbeats), suffixe),
+                    flush=True,
+                )
             if evidence_health["status"] == "GAPS_REPORTED":
                 print(
                     "  [PREUVE COPY-VAULT] %d gaps signales; collector actif ne vaut pas preuve SAFE"

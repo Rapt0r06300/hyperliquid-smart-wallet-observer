@@ -21,6 +21,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from hl_observer.ops.collector_lease import validate_lease  # noqa: E402
+from hl_observer.ops.collector_heartbeat import (  # noqa: E402
+    collector_heartbeat_health,
+)
 
 _LOG_MAX_BYTES = 4 * 1024 * 1024
 _LOG_BACKUPS = 3
@@ -175,6 +178,27 @@ def _next_restart_backoff(
     return min(maximum, max(initial, previous_s * 2.0))
 
 
+def _data_heartbeat_summary(
+    root: Path,
+    name: str,
+    *,
+    now_s: float | None = None,
+) -> str:
+    """Describe stream-heartbeat freshness without reading its payload or affecting the child."""
+    row = collector_heartbeat_health(root, (name,), now_s=now_s).get(name)
+    if row is None:
+        return "data_heartbeat=NOT_MONITORED"
+    age_s = row.get("age_s")
+    age = f"age_s={age_s:.1f}" if isinstance(age_s, (int, float)) else "age_s=unknown"
+    future = row.get("future_by_s")
+    if isinstance(future, (int, float)):
+        age += f" future_by_s={future:.1f}"
+    return (
+        f"data_heartbeat={row.get('status', 'UNKNOWN')} {age} "
+        f"threshold_s={row.get('threshold_s')} path={row.get('path')}"
+    )
+
+
 def run(
     *,
     root: Path,
@@ -270,8 +294,12 @@ def run(
                     now = time.monotonic()
                     if now >= next_heartbeat:
                         output.write_text(
-                            "[heartbeat] pid=%s elapsed_s=%.1f lease_valid=true\n"
-                            % (child.pid, now - started_at)
+                            "[heartbeat] pid=%s elapsed_s=%.1f lease_valid=true %s\n"
+                            % (
+                                child.pid,
+                                now - started_at,
+                                _data_heartbeat_summary(root, name, now_s=time.time()),
+                            )
                         )
                         next_heartbeat = now + _HEARTBEAT_INTERVAL_S
                     time.sleep(1.0)

@@ -48,6 +48,10 @@ from hl_observer.backtesting import diagnostic_signal as DS  # noqa: E402
 from hl_observer.backtesting.copy_vault_signal_alignment import (  # noqa: E402
     MIN_SIGNALS_PER_DAY,
 )
+from hl_observer.ops.collector_heartbeat import (  # noqa: E402
+    collector_heartbeat_health,
+    stale_collector_heartbeats,
+)
 
 #: Le ruban de fills vit a la racine OU dans le workspace du labo selon la campagne.
 #: On cherche, et on DIT lequel a servi : un "ruban illisible" doit nommer ce qu'il a
@@ -171,6 +175,20 @@ def lire_suivi_collecteurs(
     else:
         return inconnu("statut watchdog non reconnu")
 
+    # Relit uniquement les mtimes des heartbeats configurés pour les workers
+    # actuellement actifs. Ainsi l'ETA voit un flux figé dès le rafraîchissement
+    # suivant, même si le watchdog tourne encore avec une ancienne version.
+    stream_heartbeats = (
+        collector_heartbeat_health(
+            racine, actifs_source, now_s=now_ms / 1000.0,
+        )
+        if code in {"ACTIF", "DEGRADE", "DEMARRAGE"}
+        else {}
+    )
+    flux_figes = stale_collector_heartbeats(stream_heartbeats)
+    if code == "ACTIF" and flux_figes:
+        code = "DEGRADE"
+
     return {
         "code": code,
         "statut_source": statut_source,
@@ -183,6 +201,8 @@ def lire_suivi_collecteurs(
         "detail": details,
         "protocole": str(protocole or "INCONNU"),
         "bail": str(bail or "INCONNU"),
+        "stream_heartbeats": stream_heartbeats,
+        "flux_figes": flux_figes,
     }
 
 
@@ -204,12 +224,61 @@ def _lignes_suivi_collecteurs(suivi: dict | None) -> list[str]:
     elif code == "ERREUR":
         etat = f"ERREUR superviseur — {suivi.get('motif') or 'cycle non confirmé'}"
     elif code in {"DEGRADE", "DEMARRAGE"}:
-        etat = (
-            f"{suivi.get('actifs', 0)}/{suivi.get('demandes', 0)} actifs, "
-            f"{suivi.get('manquants', 0)} manquants ({code.lower()})"
-        )
+        if code == "DEGRADE" and suivi.get("flux_figes"):
+            etat = (
+                f"{suivi.get('actifs', 0)}/{suivi.get('demandes', 0)} processus actifs, "
+                "flux de données à vérifier"
+            )
+        else:
+            etat = (
+                f"{suivi.get('actifs', 0)}/{suivi.get('demandes', 0)} actifs, "
+                f"{suivi.get('manquants', 0)} manquants ({code.lower()})"
+            )
     else:
         etat = f"INCONNU — {suivi.get('motif') or 'état non vérifiable'}"
+
+    lignes = [f"| COLLECTEURS : {etat}"]
+    flux_figes = suivi.get("flux_figes")
+    heartbeats = suivi.get("stream_heartbeats")
+    if isinstance(heartbeats, dict) and heartbeats:
+        frais = sum(
+            isinstance(row, dict) and row.get("status") == "FRESH"
+            for row in heartbeats.values()
+        )
+        ligne_flux = f"| FLUX DONNÉES : {frais}/{len(heartbeats)} signaux récents"
+        details_flux = []
+        libelles = {
+            "STALE": "aucun signal depuis",
+            "MISSING": "aucun fichier de signal",
+            "UNREADABLE": "signal illisible",
+            "FUTURE": "horodatage à vérifier",
+        }
+        if isinstance(flux_figes, list):
+            for nom in flux_figes:
+                row = heartbeats.get(nom)
+                if not isinstance(nom, str) or not isinstance(row, dict):
+                    continue
+                label = {
+                    "bbo-collector": "collecteur BBO",
+                    "native-venues": "collecteur Multi-venues",
+                    "l2-leaders": "Carnets L2",
+                    "allmids-collector": "Prix Hyperliquid",
+                    "lab-microstructure": "Microstructure labo",
+                    "dydx-live": "dYdX",
+                }.get(nom, nom)
+                detail = libelles.get(str(row.get("status")), "signal non confirmé")
+                age_flux = row.get("age_s")
+                if isinstance(age_flux, (int, float)) and not isinstance(age_flux, bool):
+                    if age_flux >= 3600:
+                        detail += f" ({age_flux / 3600:.1f} h)"
+                    elif age_flux >= 60:
+                        detail += f" ({age_flux / 60:.0f} min)"
+                    else:
+                        detail += f" ({age_flux:.0f} s)"
+                details_flux.append(f"{label} — {detail}")
+        if details_flux:
+            ligne_flux += " | à vérifier : " + ", ".join(details_flux)
+        lignes.append(ligne_flux)
 
     gaps = suivi.get("gaps_causaux")
     if type(gaps) is int:
@@ -223,7 +292,8 @@ def _lignes_suivi_collecteurs(suivi: dict | None) -> list[str]:
     bail = suivi.get("bail")
     if bail and bail != "OK":
         etat += f" | bail: {bail}"
-    return [f"| COLLECTEURS : {etat}"]
+    lignes[0] = f"| COLLECTEURS : {etat}"
+    return lignes
 
 
 def _lignes_detail_suivi_collecteurs(suivi: dict | None) -> list[str]:
