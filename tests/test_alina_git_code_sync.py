@@ -18,8 +18,8 @@ from tools import alina_git_code_sync as sync_module
 from tools.alina_git_code_sync import (
     SyncBlocked,
     Synchronizer,
-    _commit_subject,
     _classify_git_failure,
+    _commit_subject,
     _git_operation_label,
     _mutex,
     _redact_sensitive_text,
@@ -248,6 +248,19 @@ def test_commit_subject_names_canonical_replay_receipt_gate() -> None:
     ], "replay_receipt replay_not_completed") == (
         "fix(copy-vault): require canonical replay receipt (2 paths)"
     )
+
+
+def test_commit_subject_classifies_hot_native_stream_fairness_as_collection() -> None:
+    subject = _commit_subject(
+        [
+            "src/hl_observer/collection/native_venue_coordinator.py",
+            "tests/test_native_venue_coordinator.py",
+            "docs/superpowers/specs/2026-09-25-manual-phase-orchestrator-design.md",
+        ],
+        "+HOT_STREAM_YIELD_EVERY_MESSAGES = 128\n"
+        "+WebSocket consumers cooperatively yield so timeout and recovery tasks run.\n",
+    )
+    assert subject == "fix(collection): yield on hot websocket streams (3 paths)"
 
 
 def test_commit_subject_names_the_sync_engine_change() -> None:
@@ -734,16 +747,19 @@ def test_write_report_keeps_last_receipt_and_bounded_history(
 
 def test_launcher_uses_tracked_canonical_engine_and_preserves_failure_status() -> None:
     launcher = Path("POUSSER-GITHUB.cmd").read_text(encoding="utf-8")
+    lifecycle = Path("tools/launcher_lifecycle.cmd").read_text(encoding="utf-8")
     assert "ALINA_ENGINE_REQUIRED_BUILD=2026-11-12-compact-fresh-index-v15" in launcher
     assert r"tools\alina_git_code_sync.py" in launcher
     assert r"tools\sync_complete_clone.py" in launcher
+    assert r"tools\launcher_lifecycle.cmd" in launcher
+    assert r"launcher_lifecycle.py" in lifecycle
     assert "ast.parse(" in launcher
     assert "download_source" not in launcher
     assert "ALINA_LOCAL_ENGINE_SHA256" not in launcher
     assert 'set "RC=%ERRORLEVEL%"' in launcher
     assert "exit /b %RC%" in launcher
     assert "fsmonitor--daemon" in launcher
-    assert "IsNullOrWhiteSpace($_.CommandLine)" in launcher
+    assert "IsNullOrWhiteSpace($p.CommandLine)" in launcher
 
 
 @pytest.mark.parametrize("verb", ["fetch", "push"])

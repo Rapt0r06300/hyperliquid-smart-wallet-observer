@@ -506,6 +506,19 @@ def _commit_subject(paths: list[str], diff_text: str = "") -> str:
             f"({len(normalized)} paths)"
         )
 
+    native_stream_paths = (
+        any(path == "src/hl_observer/collection/native_venue_coordinator.py" for path in normalized)
+        and any(path == "tests/test_native_venue_coordinator.py" for path in normalized)
+    )
+    if native_stream_paths and any(marker in diff_signal for marker in (
+        "hot_stream_yield_every_messages",
+        "cooperatively yield",
+        "hot buffered stream",
+    )):
+        return _semantic_subject(
+            "fix", "collection", "yield on hot websocket streams", len(normalized)
+        )
+
     if sync_engine_paths and (
         not diff_signal
         or any(marker in diff_signal for marker in ("remote_sha", "github sha", "pushed_head"))
