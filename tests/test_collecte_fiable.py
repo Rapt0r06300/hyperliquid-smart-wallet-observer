@@ -88,6 +88,48 @@ def test_ecrire_atomique_propage_un_verrou_persistant_sans_tmp(tmp_path, monkeyp
     assert not list(tmp_path.glob(".snap.json.*.tmp"))
 
 
+def test_remplacer_avec_reprises_recupere_un_verrou_transitoire(tmp_path, monkeypatch):
+    source = tmp_path / "snapshot.tmp"
+    destination = tmp_path / "snapshot.json"
+    source.write_text('{"nouveau": true}', encoding="utf-8")
+    destination.write_text('{"ancien": true}', encoding="utf-8")
+    remplacements = 0
+    vrai_replace = C.os.replace
+
+    def replace_transitoire(src, dst):
+        nonlocal remplacements
+        remplacements += 1
+        if remplacements < 3:
+            raise PermissionError(13, "verrou transitoire")
+        vrai_replace(src, dst)
+
+    monkeypatch.setattr(C.os, "replace", replace_transitoire)
+    C.remplacer_avec_reprises(source, destination, tentatives=3, delai_s=0)
+
+    assert remplacements == 3
+    assert destination.read_text(encoding="utf-8") == '{"nouveau": true}'
+    assert not source.exists()
+
+
+def test_remplacer_avec_reprises_propage_verrou_persistant_et_conserve_source(
+    tmp_path, monkeypatch
+):
+    source = tmp_path / "snapshot.tmp"
+    destination = tmp_path / "snapshot.json"
+    source.write_text('{"nouveau": true}', encoding="utf-8")
+    destination.write_text('{"ancien": true}', encoding="utf-8")
+
+    def replace_verrouille(_source, _destination):
+        raise PermissionError(13, "verrou persistant")
+
+    monkeypatch.setattr(C.os, "replace", replace_verrouille)
+    with pytest.raises(PermissionError, match="verrou persistant"):
+        C.remplacer_avec_reprises(source, destination, tentatives=2, delai_s=0)
+
+    assert destination.read_text(encoding="utf-8") == '{"ancien": true}'
+    assert source.read_text(encoding="utf-8") == '{"nouveau": true}'
+
+
 # ─────────────── politesse réseau ───────────────
 
 def test_backoff_grandit_et_reste_borne():

@@ -118,6 +118,17 @@ def test_native_runner_publishes_canonical_harvest_heartbeat() -> None:
     assert "final_health = coordinator.health" in text
     assert '"coordinator_health": final_health' in text
 
+
+def test_native_collector_batches_mutable_manifests_without_skipping_durable_event_fsync():
+    text = Path("tools/collecter_native_venues.py").read_text(encoding="utf-8")
+    writer_source = Path(
+        "src/hl_observer/collection/tick_dataset.py"
+    ).read_text(encoding="utf-8")
+    assert "MANIFEST_FLUSH_RECORDS = 128" in text
+    assert "flush_every=MANIFEST_FLUSH_RECORDS" in text
+    assert "os.fsync(handle.fileno())" in writer_source
+    assert "self._records_since_manifest >= self.flush_every" in writer_source
+
 def test_native_final_heartbeat_preserves_coordinator_health() -> None:
     text = Path("tools/collecter_native_venues.py").read_text(encoding="utf-8")
     assert "final_health = coordinator.health(" in text
@@ -252,12 +263,10 @@ def test_native_enqueue_records_each_envelope_once(
 
     assert result == 0
     assert coordinator_instances[0].loop_ticks >= 50
-    expected_states = (
-        ["RUNNING", "STOPPING", "STOPPED"]
-        if reject_queue_event
-        else ["STOPPING", "STOPPED"]
-    )
+    expected_states = ["RUNNING", "STOPPING", "STOPPED"]
     assert [row["state"] for row in heartbeats] == expected_states
+    assert heartbeats[0]["writer_batch_pending"] is (not reject_queue_event)
+    assert heartbeats[0]["writer_batch_records"] == (0 if reject_queue_event else 1)
     assert len(writer.rows) == (0 if reject_queue_event else 1)
     assert heartbeats
     final = heartbeats[-1]
@@ -268,6 +277,14 @@ def test_native_enqueue_records_each_envelope_once(
     assert final["last_event_ms"]["bybit"] == (
         0 if reject_queue_event else 1_700_000_000_000
     )
+    assert final["queue_drops_by_venue"] == (
+        {"bybit": 1} if reject_queue_event else {}
+    )
+    assert final["queue_drops_by_channel"].get("bybit", {}) == (
+        {"orderbook_snapshot": 1} if reject_queue_event else {}
+    )
+    assert final["pid"] > 0
+    assert final["collection_run_id"]
     assert "bybit reconnect #1" not in capsys.readouterr().out
     assert "partitions" not in final["dataset"]
     assert final["dataset"]["partition_details_included"] is False

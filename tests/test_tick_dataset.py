@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 
+import hl_observer.collection.tick_dataset as tick_dataset_module
 from hl_observer.collection.tick_dataset import (
     SCHEMA_VERSION,
     TickDatasetWriter,
@@ -93,3 +94,61 @@ def test_tick_dataset_rotation_is_replayable_and_keeps_all_records(tmp_path) -> 
     assert metadata["sha256"] == hashlib.sha256(data_path.read_bytes()).hexdigest()
     assert metadata["event_count"] == 1
     assert metadata["bytes"] == data_path.stat().st_size
+
+
+def test_tick_dataset_retries_transient_manifest_replace_lock(tmp_path, monkeypatch) -> None:
+    writer = TickDatasetWriter(tmp_path / "ticks", rotate_bytes=1_000_000)
+    real_replace = tick_dataset_module.os.replace
+    attempts = 0
+
+    def replace_with_one_transient_lock(source, destination):
+        nonlocal attempts
+        if str(destination) == str(writer.manifest_path) and attempts == 0:
+            attempts += 1
+            raise PermissionError(13, "temporary Windows sharing violation")
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(tick_dataset_module.os, "replace", replace_with_one_transient_lock)
+
+    writer.append(
+        TickEnvelope(
+            source_id="gate_public_ws",
+            channel="bbo",
+            instrument="ARK_USDT",
+            event_kind=FeedEventKind.EVENT,
+            raw_payload={"bid": "1", "ask": "2"},
+            exchange_ts_ms=1_000,
+            received_ts_ms=1_001,
+        )
+    )
+
+    assert attempts == 1
+    assert writer.manifest_path.exists()
+    assert len(list(writer.iter_records())) == 1
+
+
+def test_tick_dataset_flush_every_uses_accumulated_records_not_modulo(tmp_path) -> None:
+    writer = TickDatasetWriter(
+        tmp_path / "ticks",
+        rotate_bytes=1_000_000,
+        flush_every=4,
+    )
+    events = [
+        TickEnvelope(
+            source_id="gate_public_ws",
+            channel="trades",
+            instrument="BTC_USDT",
+            event_kind=FeedEventKind.EVENT,
+            raw_payload={"trade_id": index},
+            exchange_ts_ms=1_000 + index,
+            received_ts_ms=1_010 + index,
+        )
+        for index in range(6)
+    ]
+
+    writer.append_batch(events[:3])
+    assert not writer.manifest_path.exists()
+    writer.append_batch(events[3:])
+
+    assert writer.manifest_path.exists()
+    assert len(list(writer.iter_records())) == 6

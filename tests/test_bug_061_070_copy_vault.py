@@ -113,6 +113,15 @@ def test_bug069_margin_and_quote_currency_must_match_usdt_contract() -> None:
     assert reason == "QUOTE_CURRENCY_MISMATCH"
 
 
+def test_okx_public_api_may_omit_quote_ccy_when_inst_id_and_settlement_prove_usdt():
+    missing = _metadata()
+    missing.pop("quoteCcy")
+    empty = _metadata(quoteCcy="")
+
+    assert validate_okx_linear_usdt_swap(missing) == (True, "OK")
+    assert validate_okx_linear_usdt_swap(empty) == (True, "OK")
+
+
 def test_bug070_delisted_instrument_is_excluded_from_discovery() -> None:
     payload = {"data": [_metadata(state="delisted"), _metadata()]}
     assert parse_okx_swap_instruments(payload) == [("BTC", "BTC-USDT-SWAP")]

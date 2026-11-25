@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from hl_observer.collection.collecte_fiable import remplacer_avec_reprises
 from hl_observer.realtime.feed_quality import FeedEventKind
 
 SCHEMA_VERSION = "hypersmart.tick.v1"
@@ -215,6 +216,7 @@ class TickDatasetWriter:
         self.bytes_written = 0
         self.shards_written = 0
         self._current_records = 0
+        self._records_since_manifest = 0
         self._first_received_ts_ms: int | None = None
         self._last_received_ts_ms: int | None = None
 
@@ -269,11 +271,13 @@ class TickDatasetWriter:
         count = len(batch)
         self.records_written += count
         self._current_records += count
+        self._records_since_manifest += count
         self.bytes_written += len(encoded.encode("utf-8"))
         if self.current_path.stat().st_size >= self.rotate_bytes:
             self.rotate()
-        elif self.records_written % self.flush_every == 0:
+        elif self._records_since_manifest >= self.flush_every:
             self._write_manifest()
+            self._records_since_manifest = 0
         return records
 
     def rotate(self) -> Path | None:
@@ -288,7 +292,7 @@ class TickDatasetWriter:
         with self.current_path.open("rb") as source, gzip.open(temporary_path, "wb") as target:
             while chunk := source.read(1024 * 1024):
                 target.write(chunk)
-        os.replace(temporary_path, final_path)
+        remplacer_avec_reprises(temporary_path, final_path)
         shard_manifest = {
             "schema_version": "alina.tick_shard_manifest.v2",
             "stream_name": self.stream_name,
@@ -307,7 +311,7 @@ class TickDatasetWriter:
             json.dumps(shard_manifest, ensure_ascii=False, indent=2, sort_keys=True),
             encoding="utf-8",
         )
-        os.replace(temporary_sidecar, sidecar)
+        remplacer_avec_reprises(temporary_sidecar, sidecar)
 
         self.current_path.write_text("", encoding="utf-8")
         self.shards_written += 1
@@ -315,6 +319,7 @@ class TickDatasetWriter:
         self._first_received_ts_ms = None
         self._last_received_ts_ms = None
         self._write_manifest()
+        self._records_since_manifest = 0
         return final_path
 
     def iter_records(self) -> Iterator[dict[str, Any]]:
@@ -376,7 +381,7 @@ class TickDatasetWriter:
             json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True),
             encoding="utf-8",
         )
-        os.replace(temporary, self.manifest_path)
+        remplacer_avec_reprises(temporary, self.manifest_path)
 
 
 __all__ = ["SCHEMA_VERSION", "TickDatasetWriter", "TickEnvelope"]

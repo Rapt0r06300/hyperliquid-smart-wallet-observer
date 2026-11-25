@@ -204,6 +204,7 @@ class PartitionedTickDatasetWriter:
                                 self._last_l2_sequence[key] = seq
                     buffered.append(indexed)
                 flush_segment()
+
         if any(record is None for record in output):
             raise RuntimeError("partitioned writer failed to persist the full batch")
         return [record for record in output if record is not None]

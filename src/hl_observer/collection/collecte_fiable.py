@@ -63,6 +63,35 @@ class CacheDedup:
 
 # ─────────────────────────────── écriture atomique / append sûr ───────────────────────────────
 
+def remplacer_avec_reprises(
+    source: str | Path,
+    destination: str | Path,
+    *,
+    tentatives: int = 8,
+    delai_s: float = 0.025,
+) -> None:
+    """Replace atomiquement en tolérant un verrou Windows transitoire.
+
+    Les erreurs autres que PermissionError restent immédiates. Si le verrou
+    persiste, l'erreur finale remonte à l'appelant : un collecteur ne doit pas
+    annoncer une publication durable alors que son manifeste n'a pas été publié.
+    Le fichier source temporaire est conservé après échec pour permettre une
+    récupération explicite par l'appelant.
+    """
+    nombre_tentatives = max(1, int(tentatives))
+    attente = max(0.0, float(delai_s))
+    derniere_erreur: PermissionError | None = None
+    for essai in range(nombre_tentatives):
+        try:
+            os.replace(source, destination)
+            return
+        except PermissionError as exc:
+            derniere_erreur = exc
+            if essai + 1 < nombre_tentatives and attente:
+                time.sleep(attente * (essai + 1))
+    assert derniere_erreur is not None
+    raise derniere_erreur
+
 def append_jsonl(chemin: str | Path, enrs: Sequence[dict], *, fsync: bool = True) -> int:
     """Append JSONL avec flush (+fsync) : une écriture coupée ne laisse pas un fichier à moitié.
     Rend le nombre de lignes écrites. Crée le dossier au besoin."""
@@ -115,17 +144,12 @@ def ecrire_atomique(
             except OSError:
                 _noter("collection/collecte_fiable.py:ecrire_atomique_fsync")
 
-        derniere_erreur: PermissionError | None = None
-        for essai in range(nombre_tentatives):
-            try:
-                os.replace(tmp, p)
-                return
-            except PermissionError as exc:
-                derniere_erreur = exc
-                if essai + 1 < nombre_tentatives and attente:
-                    time.sleep(attente * (essai + 1))
-        assert derniere_erreur is not None
-        raise derniere_erreur
+        remplacer_avec_reprises(
+            tmp,
+            p,
+            tentatives=nombre_tentatives,
+            delai_s=attente,
+        )
     finally:
         try:
             tmp.unlink(missing_ok=True)

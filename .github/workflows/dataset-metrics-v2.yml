@@ -56,7 +56,7 @@ jobs:
       - name: Validate dataset policy
         run: |
           python tools/check_dataset_quality.py
-          python -m pip install --disable-pip-version-check pytest
+          python -m pip install --disable-pip-version-check pytest==9.0.3 pytest-timeout==2.4.0
           python -m pytest -q tests/test_dataset_metrics.py tests/test_dataset_policy.py tests/test_collection_metrics.py tests/test_build_replay_compatibility_reasons.py
       - name: Publish metrics
         shell: bash

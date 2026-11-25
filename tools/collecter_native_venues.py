@@ -43,6 +43,7 @@ MARQUEUR = Path("runtime") / "data" / "lanceur_session_marqueur.txt"
 QUEUE_MAX = 100_000
 QUEUE_MAX_BYTES = 256 * 1024 * 1024
 QUEUE_BATCH_MAX_BYTES = 32 * 1024 * 1024
+MANIFEST_FLUSH_RECORDS = 128
 STREAM_NAME = "native_venues_market_ticks"
 VENUES = ("bybit", "okx", "gate", "bitget")
 DEFAULT_UNIVERSE_REFRESH_S = 900.0
@@ -207,6 +208,8 @@ async def _run(
         max_estimated_bytes=QUEUE_MAX_BYTES,
     )
     dropped = 0
+    dropped_by_venue: dict[str, int] = {}
+    dropped_by_channel: dict[str, dict[str, int]] = {}
     oversized_dropped = 0
     written = 0
     enabled_venues = tuple(venue for venue in VENUES if venue in set(enabled_venues))
@@ -240,6 +243,13 @@ async def _run(
         def mark_dropped(_envelope: TickEnvelope) -> None:
             nonlocal dropped
             dropped += 1
+            venue = str(getattr(_envelope, "source_id", "") or "").split(
+                "_", 1
+            )[0].lower() or "unknown"
+            channel = str(getattr(_envelope, "channel", "") or "unknown")
+            dropped_by_venue[venue] = dropped_by_venue.get(venue, 0) + 1
+            venue_channels = dropped_by_channel.setdefault(venue, {})
+            venue_channels[channel] = venue_channels.get(channel, 0) + 1
 
         accepted = queue.append(envelope, on_drop=mark_dropped)
         if not accepted:
@@ -262,8 +272,14 @@ async def _run(
     writer = PartitionedTickDatasetWriter(
         root / TICK_DATASET_DIR,
         rotate_bytes=max(8 * 1024 * 1024, int(rotate_bytes)),
-        flush_every=1,
+        # Each JSONL batch is still fsynced. The mutable partition manifest is
+        # metadata, so update it every 128 records; rotation always seals it.
+        flush_every=MANIFEST_FLUSH_RECORDS,
     )
+    write_batch_task: asyncio.Task[int] | None = None
+    write_batch_started_ns: int | None = None
+    write_batch_records = 0
+    last_dataset_stats = writer.stats(include_partitions=False)
 
     class QueueTickWriter:
         def append(self, envelope: TickEnvelope) -> int:
@@ -430,12 +446,23 @@ async def _run(
     try:
         while True:
             await asyncio.sleep(0.25)
-            if queue:
+            if write_batch_task is not None and write_batch_task.done():
+                completed_write = write_batch_task
+                write_batch_task = None
+                write_batch_started_ns = None
+                write_batch_records = 0
+                written += int(completed_write.result())
+                last_dataset_stats = writer.stats(include_partitions=False)
+            if write_batch_task is None and queue:
                 batch = queue.pop_batch(
                     max_items=5_000,
                     max_estimated_bytes=QUEUE_BATCH_MAX_BYTES,
                 )
-                written += await asyncio.to_thread(writer.append_batch, batch)
+                write_batch_records = len(batch)
+                write_batch_started_ns = time.monotonic_ns()
+                write_batch_task = asyncio.create_task(
+                    asyncio.to_thread(writer.append_batch, batch)
+                )
 
             now = time.time()
             marker_path = root / MARQUEUR
@@ -487,6 +514,8 @@ async def _run(
                     root / HEARTBEAT,
                     {
                         "schema_version": "alina.native_venues_heartbeat.v1",
+                        "pid": os.getpid(),
+                        "collection_run_id": collection_run_id,
                         "ts": now,
                         "duration_s": round(now - started, 3),
                         "state": "STOPPING" if stop_reason else "RUNNING",
@@ -505,7 +534,23 @@ async def _run(
                         "queue_estimated_bytes": queue.estimated_bytes,
                         "queue_estimated_byte_limit": queue.max_estimated_bytes,
                         "queue_drops": dropped,
+                        "queue_drops_by_venue": dict(sorted(dropped_by_venue.items())),
+                        "queue_drops_by_channel": {
+                            venue: dict(sorted(channels.items()))
+                            for venue, channels in sorted(dropped_by_channel.items())
+                        },
                         "queue_oversized_drops": oversized_dropped,
+                        "writer_batch_pending": write_batch_task is not None,
+                        "writer_batch_records": write_batch_records,
+                        "writer_batch_age_s": (
+                            round(
+                                max(0, now_mono_ns - write_batch_started_ns)
+                                / 1_000_000_000,
+                                3,
+                            )
+                            if write_batch_started_ns is not None
+                            else 0.0
+                        ),
                         "reconnects": reconnects,
                         "last_event_ms": last_event_ms,
                         "last_exchange_ts": last_exchange_ts,
@@ -520,7 +565,9 @@ async def _run(
                             for venue in required
                         ),
                         "coordinator_health": health,
-                        "dataset": writer.stats(include_partitions=False),
+                        # Do not inspect mutable writer dictionaries while the
+                        # disk thread may be creating partition writers.
+                        "dataset": last_dataset_stats,
                         "read_only": True,
                         "real_execution": False,
                     },
@@ -534,6 +581,12 @@ async def _run(
             if not task.done():
                 task.cancel()
         await asyncio.gather(*current_tasks, return_exceptions=True)
+        if write_batch_task is not None:
+            written += int(await asyncio.shield(write_batch_task))
+            write_batch_task = None
+            write_batch_started_ns = None
+            write_batch_records = 0
+            last_dataset_stats = writer.stats(include_partitions=False)
         funding_end_wall_ms = int(time.time() * 1000)
         if "bybit" in enabled_venues:
             try:
@@ -584,6 +637,8 @@ async def _run(
         final_health = coordinator.health(now_ms=int(time.time() * 1000))
         final = {
             "schema_version": "alina.native_venues_heartbeat.v1",
+            "pid": os.getpid(),
+            "collection_run_id": collection_run_id,
             "ts": time.time(),
             "duration_s": round(time.time() - started, 3),
             "state": "STOPPED",
@@ -601,7 +656,15 @@ async def _run(
             "queue_estimated_bytes": queue.estimated_bytes,
             "queue_estimated_byte_limit": queue.max_estimated_bytes,
             "queue_drops": dropped,
+            "queue_drops_by_venue": dict(sorted(dropped_by_venue.items())),
+            "queue_drops_by_channel": {
+                venue: dict(sorted(channels.items()))
+                for venue, channels in sorted(dropped_by_channel.items())
+            },
             "queue_oversized_drops": oversized_dropped,
+            "writer_batch_pending": False,
+            "writer_batch_records": 0,
+            "writer_batch_age_s": 0.0,
             "reconnects": reconnects,
             "last_event_ms": last_event_ms,
             "last_exchange_ts": last_exchange_ts,
