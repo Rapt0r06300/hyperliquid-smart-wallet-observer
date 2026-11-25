@@ -39,6 +39,7 @@ from hl_observer.collection.okx_market_data import OkxMarketState, OkxPublicClie
 from hl_observer.markets.ccxt_universe import load_native_collection_candidates
 
 SCHEMA_VERSION = "alina.native_venue_coordinator.v1"
+HOT_STREAM_YIELD_EVERY_MESSAGES = 128
 
 
 class NativeVenueCoordinator:
@@ -621,11 +622,16 @@ class NativeVenueCoordinator:
             return
         self._active_symbols["bybit"] = tuple(symbols)
         self._configure_capture_profile("bybit", symbols)
+        messages_since_yield = 0
         try:
             async with asyncio.timeout(self.venue_session_s):
                 async for payload in self.bybit_client.messages(symbols):
                     now = int(time.time() * 1000)
                     self.ingest_bybit(self._with_clock_sync(payload, "bybit"), now_ms=now)
+                    messages_since_yield += 1
+                    if messages_since_yield >= HOT_STREAM_YIELD_EVERY_MESSAGES:
+                        messages_since_yield = 0
+                        await asyncio.sleep(0)
         except TimeoutError:
             return
         finally:
@@ -637,11 +643,16 @@ class NativeVenueCoordinator:
             return
         self._active_symbols["okx"] = tuple(symbols)
         self._configure_capture_profile("okx", symbols)
+        messages_since_yield = 0
         try:
             async with asyncio.timeout(self.venue_session_s):
                 async for payload in self.okx_client.messages(symbols):
                     now = int(time.time() * 1000)
                     self.ingest_okx(self._with_clock_sync(payload, "okx"), now_ms=now)
+                    messages_since_yield += 1
+                    if messages_since_yield >= HOT_STREAM_YIELD_EVERY_MESSAGES:
+                        messages_since_yield = 0
+                        await asyncio.sleep(0)
         except TimeoutError:
             return
         finally:
@@ -721,6 +732,7 @@ class NativeVenueCoordinator:
             for contract in symbols
         }
         anchor_last_attempt = {contract: time.monotonic() for contract in symbols}
+        messages_since_yield = 0
         try:
             async with asyncio.timeout(self.venue_session_s):
                 async for payload in self.gate_client.messages(symbols):
@@ -740,6 +752,10 @@ class NativeVenueCoordinator:
                             cached["_alina_transport"] = dict(transport)
                         pending_deltas[contract].append((cached, now))
                     self.ingest_gate(enriched, now_ms=now)
+                    messages_since_yield += 1
+                    if messages_since_yield >= HOT_STREAM_YIELD_EVERY_MESSAGES:
+                        messages_since_yield = 0
+                        await asyncio.sleep(0)
                     state = self._gate_states.get(contract)
                     if (state is not None and state.quality == "EXPLOITABLE"
                             and not state.rest_anchor_pending
@@ -783,6 +799,7 @@ class NativeVenueCoordinator:
             return
         self._active_symbols["bitget"] = tuple(symbols)
         self._configure_capture_profile("bitget", symbols)
+        messages_since_yield = 0
         try:
             async with asyncio.timeout(self.venue_session_s):
                 async for payload in self.bitget_client.messages(symbols):
@@ -791,6 +808,10 @@ class NativeVenueCoordinator:
                         self._with_clock_sync(payload, "bitget"),
                         now_ms=now,
                     )
+                    messages_since_yield += 1
+                    if messages_since_yield >= HOT_STREAM_YIELD_EVERY_MESSAGES:
+                        messages_since_yield = 0
+                        await asyncio.sleep(0)
         except TimeoutError:
             return
         finally:

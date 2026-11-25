@@ -825,6 +825,8 @@ A shard whose durable checkpoint age or required-stream silence exceeds policy i
 
 The watchdog reacts to **data liveness**, not merely GitHub workflow status.
 
+WebSocket consumers must bound uninterrupted frame processing and cooperatively yield to their event loop so heartbeat, writer, timeout, and recovery tasks can run during a hot buffered stream. Yields preserve frame order and must not discard or synthesize observations.
+
 ### Automatic continuation is the default
 
 After the user switches Alina to `COLLECT`, no further "continue", "restart", or "launch the collectors again" instruction is required.

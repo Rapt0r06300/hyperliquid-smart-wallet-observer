@@ -611,6 +611,7 @@ def test_gate_rest_anchor_replays_sequenced_ws_delta() -> None:
 
 def test_gate_replays_ws_deltas_buffered_before_rest_response() -> None:
     from threading import Event
+
     from hl_observer.collection.tick_dataset import TickEnvelope
     from hl_observer.realtime.feed_quality import FeedEventKind
 
@@ -762,3 +763,77 @@ def test_gate_and_bitget_streams_apply_clock_sync_before_ingest() -> None:
     assert seen["gate"]["_alina_transport"]["clock_probe_rtt_ms"] == 2.0
     assert seen["bitget"]["_alina_transport"]["clock_offset_ms"] == -3.0
     assert seen["bitget"]["_alina_transport"]["clock_probe_rtt_ms"] == 4.0
+
+
+def test_hot_venue_streams_yield_to_health_tasks_without_dropping_frames() -> None:
+    class BurstStream:
+        def __init__(self, payload, total: int = 512) -> None:
+            self.payload = payload
+            self.total = total
+            self.yielded = 0
+
+        async def messages(self, _symbols):
+            for _ in range(self.total):
+                self.yielded += 1
+                yield self.payload
+
+    async def scenario() -> None:
+        streams = {
+            "bybit": BurstStream({"topic": "orderbook.50.BTCUSDT"}),
+            "okx": BurstStream({"arg": {"channel": "books5", "instId": "BTC-USDT-SWAP"}}),
+            "gate": BurstStream({
+                "channel": "futures.trades",
+                "event": "update",
+                "result": {"contract": "BTC_USDT"},
+            }),
+            "bitget": BurstStream({"arg": {"channel": "trade", "instId": "BTCUSDT"}}),
+        }
+        coordinator = NativeVenueCoordinator(
+            bybit_client=streams["bybit"],
+            okx_client=streams["okx"],
+            gate_client=streams["gate"],
+            bitget_client=streams["bitget"],
+            ccxt_snapshot_path=None,
+        )
+        coordinator.registry = {
+            "BTC": {
+                "bybit": "BTCUSDT",
+                "okx": "BTC-USDT-SWAP",
+                "gate": "BTC_USDT",
+                "bitget": "BTCUSDT",
+            },
+        }
+        coordinator._with_clock_sync = lambda payload, _venue: payload
+        ingested = {venue: 0 for venue in streams}
+        for venue in streams:
+            def record(_payload, *, _venue=venue, **_kwargs):
+                ingested[_venue] += 1
+
+            setattr(coordinator, f"ingest_{venue}", record)
+
+        async def check_stream(venue: str, stream: BurstStream) -> None:
+            finished = asyncio.Event()
+            observed_midstream = [False]
+
+            async def collect() -> None:
+                await getattr(coordinator, f"run_{venue}")()
+                finished.set()
+
+            async def health_probe() -> None:
+                while not finished.is_set():
+                    if 0 < stream.yielded < stream.total:
+                        observed_midstream[0] = True
+                    await asyncio.sleep(0)
+
+            collector_task = asyncio.create_task(collect())
+            probe_task = asyncio.create_task(health_probe())
+            await collector_task
+            await probe_task
+
+            assert observed_midstream[0], f"{venue} hot stream starved health task"
+            assert ingested[venue] == stream.total
+
+        for venue, stream in streams.items():
+            await check_stream(venue, stream)
+
+    asyncio.run(scenario())
