@@ -708,6 +708,9 @@ def test_git_capability_check_fails_without_push_porcelain(tmp_path: Path) -> No
 def test_push_help_is_not_reported_as_a_real_publication() -> None:
     assert "sans publication" in _git_operation_label(["push", "-h"])
     assert "Publier" in _git_operation_label(["push", "origin", "HEAD"])
+    assert _git_operation_label([
+        "-c", "core.whitespace=cr-at-eol", "diff", "--cached", "--check",
+    ]) == "Comparer les fichiers suivis par Git"
 
 
 def test_write_report_keeps_last_receipt_and_bounded_history(
@@ -1357,6 +1360,24 @@ def test_wip_can_be_saved_locally_without_upload(repos):
     assert git(origin, "rev-parse", "main") == before
     assert git(local, "show", "HEAD:src/unfinished.py") == "def broken(:"
     assert git(local, "rev-parse", "HEAD") != before
+
+
+def test_wip_crlf_code_does_not_report_trailing_whitespace(repos, capsys):
+    local, _, origin = repos
+    before = git(origin, "rev-parse", "main")
+    code = local / "src" / "windows_line_endings.py"
+    code.parent.mkdir(parents=True, exist_ok=True)
+    code.write_bytes(b"first = 1\r\nsecond = 2\r\n")
+
+    rc, receipt = run_sync(local, wip=True)
+
+    output = capsys.readouterr().out
+    assert rc == 0 and receipt["status"] == "LOCAL_CHECKPOINT_ONLY"
+    assert "[ATTENTION] Espaces non conformes dans un WIP" not in output
+    assert git(origin, "rev-parse", "main") == before
+    assert git(local, "show", "HEAD:src/windows_line_endings.py") == (
+        "first = 1\nsecond = 2"
+    )
 
 
 def test_wip_code_checkpoint_ignores_protected_local_bytes(repos):

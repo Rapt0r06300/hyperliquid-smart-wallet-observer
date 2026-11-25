@@ -911,7 +911,10 @@ _DRY_RUN_DIFF_LOT = 150
 
 def _git_operation_label(args: list[str]) -> str:
     """Return a safe, user-facing description without echoing raw arguments."""
-    verb = args[0] if args else ""
+    verb_index = 0
+    while verb_index < len(args) and args[verb_index] in {"-c", "-C"}:
+        verb_index += 2
+    verb = args[verb_index] if verb_index < len(args) else ""
     if verb == "rev-parse":
         return "Verifier le depot et son HEAD"
     if verb == "branch":
@@ -2653,7 +2656,10 @@ class Synchronizer:
             )
         for path in staged:
             self._check_file_payload(path, self.root / path)
-        if self.command("diff", "--cached", "--check", check=False).returncode:
+        if self.command(
+            "-c", "core.whitespace=cr-at-eol", "diff", "--cached", "--check",
+            check=False,
+        ).returncode:
             self.say("[ATTENTION] Espaces non conformes dans un WIP, code preserve.")
 
     @contextlib.contextmanager
