@@ -97,6 +97,43 @@ def test_store_exposes_all_fresh_venues_to_cross_venue_and_lead_lag() -> None:
     assert all(row["mid"] > 0 for row in rows)
 
 
+def test_candidate_coins_checks_each_snapshot_once_and_excludes_stale_rows(monkeypatch) -> None:
+    store = MultiVenueMarketStore(stale_after_ms=100)
+    rows = [
+        ("bybit", "BTC", 9_990),
+        ("okx", "BTC", 9_990),
+        ("bybit", "ETH", 9_990),
+        ("okx", "ETH", 9_000),
+        ("bybit", "SOL", 9_990),
+        ("gate", "SOL", 9_990),
+    ]
+    for venue, coin, receive_ts_ms in rows:
+        store.put(NativeMarketSnapshot.build(
+            venue=venue,
+            coin=coin,
+            exchange_symbol=coin,
+            bid=100.0,
+            ask=100.1,
+            exchange_ts_ms=receive_ts_ms,
+            receive_ts_ms=receive_ts_ms,
+            now_ms=receive_ts_ms,
+            stale_after_ms=100,
+        ))
+
+    checks = 0
+    original = NativeMarketSnapshot.with_freshness
+
+    def counted(self, *, now_ms, stale_after_ms):
+        nonlocal checks
+        checks += 1
+        return original(self, now_ms=now_ms, stale_after_ms=stale_after_ms)
+
+    monkeypatch.setattr(NativeMarketSnapshot, "with_freshness", counted)
+
+    assert store.candidate_coins(now_ms=10_000, min_venues=2) == ["BTC", "SOL"]
+    assert checks == len(rows)
+
+
 def test_synchronized_pairs_require_receive_alignment_and_clean_integrity() -> None:
     store = MultiVenueMarketStore(stale_after_ms=5_000)
     left = NativeMarketSnapshot.build(

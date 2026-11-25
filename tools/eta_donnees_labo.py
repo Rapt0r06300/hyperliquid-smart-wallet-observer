@@ -522,6 +522,8 @@ def _eta_moteur_affiche(eta: dict, age_sonde_h: float | None) -> str:
     """N'affiche une durée que si le calcul possède une mesure admissible et fraîche."""
     if age_sonde_h is None:
         return "INCONNU — aucune sonde de densité"
+    if not math.isfinite(age_sonde_h) or age_sonde_h < 0:
+        return "INCONNU — horodatage de sonde invalide"
     if age_sonde_h > AGE_MAX_SONDE_H:
         return f"INCONNU — sonde périmée depuis {age_sonde_h:.1f} h"
     statut = eta.get("statut")
@@ -534,6 +536,28 @@ def _eta_moteur_affiche(eta: dict, age_sonde_h: float | None) -> str:
     if statut == "INFINI":
         return "INFINI — débit causal nul"
     return "INCONNU — pas de débit de signaux évaluables"
+
+
+def _progression_densite_affiche(
+    denses_acquis: int, requis: int, age_sonde_h: float | None
+) -> tuple[float | None, str]:
+    """Lie le pourcentage et son âge pour qu'une ancienne mesure ne paraisse pas live."""
+    if age_sonde_h is None:
+        return None, f"INCONNUE — dernière mesure {denses_acquis}/{requis}, âge inconnu"
+    if not math.isfinite(age_sonde_h) or age_sonde_h < 0:
+        return None, "INCONNUE — horodatage de sonde invalide"
+    if age_sonde_h > AGE_MAX_SONDE_H:
+        return None, (
+            f"PÉRIMÉE — dernière mesure {denses_acquis}/{requis} jours, "
+            f"âge {age_sonde_h:.1f} h"
+        )
+    pourcent = pourcentage_progression(denses_acquis, requis)
+    if pourcent is None:
+        return None, f"INCONNUE — mesure {denses_acquis}/{requis}, dénominateur invalide"
+    return pourcent, (
+        f"{pourcent:.1f} % — {denses_acquis}/{requis} jours denses "
+        f"(sonde âgée de {age_sonde_h:.1f} h)"
+    )
 
 
 def etat_flux(ruban: Path | None, mesure: dict, *, maintenant: float | None = None) -> dict:
@@ -1070,13 +1094,23 @@ def lignes_dashboard_simple(
 ) -> list[str]:
     """Vue opérateur courte : une personne doit comprendre l'essentiel en 5 secondes."""
     etude = progression_etude(besoins)
+    intervalle_affiche = max(0.5, float(intervalle_s))
+    actifs = int(mesure.get("active_sources") or 0)
+    total_fichiers = int(mesure.get("source_count") or 0)
+    recents = int(mesure.get("recent_sources") or 0)
     clair = {
         "ACTIF": (
-            f"EN DIRECT — {mesure.get('active_sources', 0)} fichiers ont grandi sur "
-            f"{mesure.get('source_count', 0)} suivis; ce chiffre n’est pas plafonné à 10"
+            f"ACTIF — {actifs}/{total_fichiers} ont grossi en {intervalle_affiche:.1f} s "
+            "(fichiers observés, pas collecteurs)"
         ),
-        "EN_ATTENTE": "EN ATTENTE — aucune nouvelle écriture mesurée sur ce cycle",
-        "SANS_NOUVELLE": "SANS NOUVELLE — aucun fichier observé n'a grossi récemment",
+        "EN_ATTENTE": (
+            f"ATTENTE — 0/{total_fichiers} grossi en {intervalle_affiche:.1f} s; "
+            f"{recents}/{total_fichiers} modifiés <5 min"
+        ),
+        "SANS_NOUVELLE": (
+            f"AUCUNE ÉCRITURE <5 min sur {total_fichiers} fichiers; "
+            "collecteurs non vérifiés"
+        ),
         "INCONNU": "INCONNU — les fichiers ne sont pas vérifiables",
     }.get(etat.get("code"), "INCONNU — état non reconnu")
     debit = (
@@ -1105,7 +1139,10 @@ def lignes_dashboard_simple(
         "restauration SAFE non certifiée",
     )
     if sources and sources.get("restore_verified"):
-        safe = f"{sources['safe_shards']:,} shards / {_octets_lisibles(sources['safe_bytes'])}"
+        safe = (
+            f"{sources['safe_shards']:,} shards / "
+            f"{_octets_lisibles(sources['safe_bytes'])} (snapshot vérifié)"
+        )
     else:
         safe = f"INCONNU — {raison_restore}"
     unpacked = (
@@ -1143,24 +1180,26 @@ def lignes_dashboard_simple(
         )
     else:
         coffre = f"INCONNU | {age_coffre}"
-    sonde_age = "inconnue" if age_sonde_h is None else f"{age_sonde_h:.1f} h"
+    moteur_pct, progression_txt = _progression_densite_affiche(
+        denses_acquis, requis, age_sonde_h
+    )
     sonde_source = Path(source_denses).name if source_denses else "INCONNUE"
     return [
         "+" + "=" * 76 + "+",
-        f"| COPY-VAULT — SUIVI EN DIRECT | cycle {tours} | {time.strftime('%H:%M:%S')} |",
+        f"| COPY-VAULT — SUIVI ACTUALISÉ | cycle {tours} | {time.strftime('%H:%M:%S')} |",
         "+" + "-" * 76 + "+",
         f"| ÉTAT              : {clair}",
-        f"| DÉBIT FICHIERS    : {debit} (tous observés) | mise à jour {max(0.5, float(intervalle_s)):.1f} s",
+        f"| DÉBIT FICHIERS    : {debit} (pas des signaux) | mise à jour {intervalle_affiche:.1f} s",
         f"| PROCHAINE ÉTAPE   : {prochaine}",
         f"| TEMPS MINIMUM     : {eta_etude} (si chaque journée reste dense)",
-        f"| ETA MOTEUR        : {moteur} | ancienne mesure: {denses_acquis}/{requis} jours",
+        f"| ETA MOTEUR        : {moteur}",
         f"| SAFE RESTAURÉ     : {safe}",
         f"| EXTRACTION        : {unpacked}",
         f"| GITHUB            : {release}",
         f"| COFFRE            : {coffre}",
         *_lignes_suivi_collecteurs(suivi_collecteurs),
-        f"| SONDE DENSITÉ    : âge {sonde_age} | rapport {sonde_source} | écran {max(0.5, float(intervalle_s)):.1f} s",
-        "| AIDE              : un fichier téléchargé ne compte pas avant replay; q=quitter; --detail=diag",
+        f"| SONDE DENSITÉ     : {progression_txt} | rapport {sonde_source}",
+        "| AIDE              : SAFE = snapshot; téléchargement seul ≠ jour dense; q=quitter; --detail=diag",
         "+" + "=" * 76 + "+",
     ]
 
@@ -1182,8 +1221,9 @@ def lignes_resume(
     source_denses: str | None = None,
 ) -> list[str]:
     """Bloc opérateur court placé avant le détail scientifique historique."""
-    sonde_fiable = age_sonde_h is not None and age_sonde_h <= AGE_MAX_SONDE_H
-    moteur_pct = pourcentage_progression(denses_acquis, requis) if sonde_fiable else None
+    moteur_pct, progression_txt = _progression_densite_affiche(
+        denses_acquis, requis, age_sonde_h
+    )
     etude = progression_etude(besoins)
     etat_clair = {
         "ACTIF": (
@@ -1201,18 +1241,12 @@ def lignes_resume(
         else f"INCONNU ({mesure.get('motif') or 'mesure en cours'})"
     )
     eta_txt = _eta_moteur_affiche(eta, age_sonde_h)
-    sonde_txt = "inconnue" if age_sonde_h is None else f"{age_sonde_h:.1f} h"
     sonde_source = Path(source_denses).name if source_denses else "INCONNUE"
-    progression_txt = (
-        f"{moteur_pct:.1f} %"
-        if moteur_pct is not None
-        else f"INCONNUE (dernière valeur {denses_acquis}/{requis}, sonde périmée)"
-    )
     return [
         "+" + "=" * 72 + "+",
-        f"| ETA COLLECTE COPY-VAULT | {'EN DIRECT' if etat['code'] == 'ACTIF' else etat['code']:<10} | cycle {tours:<4} | {time.strftime('%H:%M:%S')} |",
+        f"| ETA COLLECTE COPY-VAULT | SUIVI ACTUALISÉ | cycle {tours:<4} | {time.strftime('%H:%M:%S')} |",
         "+" + "-" * 72 + "+",
-        f"| PROGRESSION MOTEUR  : [{barre_progression(moteur_pct)}] {progression_txt} ({denses_acquis}/{requis} dernières journées)",
+        f"| PROGRESSION MOTEUR  : [{barre_progression(moteur_pct)}] {progression_txt}",
         f"| EN CLAIR            : {etat_clair}",
         f"| PROCHAIN STADE      : {etude['texte']}",
         f"| ETA MINIMUM ACTUEL  : {etude['eta_live']} (si chaque journée reste dense)",
@@ -1226,7 +1260,7 @@ def lignes_resume(
         *_lignes_detail_suivi_collecteurs(suivi_collecteurs),
         f"| À SAVOIR            : {mesure.get('source_count', 0)} fichiers locaux surveillés; les archives et shards imbriqués sont hors de ce débit",
         f"| ÉTAT DU RUBAN       : {etat['detail']} | dernière écriture : {etat.get('age_s', '?')} s",
-        f"| SONDE DENSITÉ       : âge {sonde_txt} | rapport : {sonde_source} | écran {max(0.5, float(intervalle_s)):.1f} s",
+        f"| SONDE DENSITÉ       : rapport {sonde_source} | rafraîchissement écran {max(0.5, float(intervalle_s)):.1f} s",
         "+" + "=" * 72 + "+",
         "  Lecture seule : le résumé indique des observations, il ne démarre ni n'arrête rien.",
         "",

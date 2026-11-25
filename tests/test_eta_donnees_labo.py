@@ -417,11 +417,12 @@ def test_dashboard_court_separe_safe_extraction_et_github_sans_ligne_trop_longue
     texte = "\n".join(lignes)
 
     assert any("SAFE RESTAURÉ" in ligne and "1,792,577" in ligne for ligne in lignes)
+    assert any("SAFE RESTAURÉ" in ligne and "snapshot vérifié" in ligne for ligne in lignes)
     assert any("EXTRACTION" in ligne and "15,456" in ligne and "NON VÉRIFIÉS" in ligne for ligne in lignes)
     assert any("GITHUB" in ligne and "21,400" in ligne for ligne in lignes)
     assert any("COFFRE" in ligne and "31,601 fichiers" in ligne for ligne in lignes)
     assert max(map(len, lignes)) <= 100
-    assert "fichier téléchargé ne compte pas avant replay" in texte
+    assert "téléchargement seul ≠ jour dense" in texte
     assert "q=quitter" in texte and "--detail=diag" in texte
 
 
@@ -499,7 +500,7 @@ def test_le_resume_operateur_montre_vivant_progression_debit_et_eta(tmp_path):
                   "restants": 12, "hypothese": "copy_vault_demo"}],
     )
     texte = "\n".join(lignes)
-    assert "EN DIRECT" in texte
+    assert "SUIVI ACTUALISÉ" in texte
     assert "50.0 %" in texte
     assert "12.5 lignes/min" in texte
     assert "7/94 fichiers locaux suivis ont grandi entre les deux relevés" in texte
@@ -661,7 +662,7 @@ def test_suivi_collecteurs_refuse_un_etat_non_paper_read_only(tmp_path):
 def test_dashboard_court_affiche_separement_processus_et_croissance_fichiers():
     lignes = ETA.lignes_dashboard_simple(
         tours=1,
-        mesure={"motif": "PREMIERE_MESURE", "active_sources": 7, "source_count": 94},
+        mesure={"motif": "PREMIERE_MESURE", "active_sources": 5, "source_count": 95},
         etat={"code": "ACTIF"},
         denses_acquis=0,
         requis=6,
@@ -675,8 +676,10 @@ def test_dashboard_court_affiche_separement_processus_et_croissance_fichiers():
     )
 
     texte = "\n".join(lignes)
-    assert "7 fichiers ont grandi sur 94 suivis" in texte
-    assert "ce chiffre n’est pas plafonné à 10" in texte
+    ligne_etat = next(ligne for ligne in lignes if "| ÉTAT" in ligne)
+    assert "ACTIF — 5/95 ont grossi en 2.0 s" in ligne_etat
+    assert "fichiers observés, pas collecteurs" in ligne_etat
+    assert len(ligne_etat) <= 100
     assert "COLLECTEURS" in texte and "20/20 actifs" in texte
     assert "écarts signalés: 1 184" in texte
     assert "+3 depuis lancement du suivi" in texte
@@ -705,7 +708,7 @@ def test_dashboard_affiche_le_rapport_sonde_reel_et_non_le_nombre_de_fichiers():
     ligne_sonde = next(ligne for ligne in lignes if "SONDE DENSITÉ" in ligne)
     assert "sonde_horloges_20261124.json" in ligne_sonde
     assert "94 fichiers" not in ligne_sonde
-    assert "écran 2.0 s" in ligne_sonde
+    assert "mise à jour 2.0 s" in "\n".join(lignes)
 
 
 def test_resume_detaille_explique_la_composition_des_ecarts_de_preuve():
@@ -787,9 +790,13 @@ def test_le_dashboard_par_defaut_est_court_et_garde_les_sources_reelles(tmp_path
     )
     texte = "\n".join(lignes)
     assert len(lignes) <= 16
-    assert "EN DIRECT" in texte
-    assert "2 fichiers ont grandi sur 7 suivis" in texte
-    assert "ce chiffre n’est pas plafonné à 10" in texte
+    assert "SUIVI ACTUALISÉ" in texte
+    ligne_etat = next(ligne for ligne in lignes if "| ÉTAT" in ligne)
+    assert "ACTIF — 2/7 ont grossi en 2.0 s" in ligne_etat
+    assert "fichiers observés, pas collecteurs" in ligne_etat
+    assert len(ligne_etat) <= 100
+    assert "PÉRIMÉE — dernière mesure 3/6 jours, âge 30.0 h" in texte
+    assert "ETA MOTEUR        : INCONNU — sonde périmée depuis 30.0 h" in texte
     assert "12.5 lignes/min" in texte
     assert "collecter encore 12 j 00 h 00 min 00 s" in texte
     assert "2 JSONL physiques selon le reçu" in texte
@@ -806,6 +813,16 @@ def test_un_flux_absent_reste_inconnu_et_ne_devient_pas_arrete():
 def test_barre_progression_est_ascii_et_bornee():
     assert ETA.barre_progression(50, largeur=10) == "#####....."
     assert ETA.barre_progression(None, largeur=4) == "????"
+
+
+def test_sonde_de_densite_future_ou_non_finie_ne_produit_pas_de_progression():
+    for age in (-0.1, float("nan"), float("inf")):
+        pct, detail = ETA._progression_densite_affiche(2, 6, age)
+        assert pct is None
+        assert "horodatage de sonde invalide" in detail
+        assert ETA._eta_moteur_affiche(
+            {"statut": "EN_COURS", "heures": 12.0}, age
+        ) == "INCONNU — horodatage de sonde invalide"
 
 
 # ------------------------------------------------------- le debit refuse sans mentir

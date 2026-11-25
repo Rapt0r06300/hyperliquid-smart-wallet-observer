@@ -253,8 +253,23 @@ class MultiVenueMarketStore:
         return sorted((row for row in rows if row.exploitable), key=lambda row: row.venue)
 
     def candidate_coins(self, *, now_ms: int, min_venues: int = 2) -> list[str]:
-        coins = sorted({coin for _venue, coin in self._snapshots})
-        return [coin for coin in coins if len(self.healthy(coin, now_ms=now_ms)) >= int(min_venues)]
+        required_venues = int(min_venues)
+        if required_venues <= 0:
+            return sorted({coin for _venue, coin in self._snapshots})
+
+        healthy_venues: dict[str, set[str]] = {}
+        candidates: set[str] = set()
+        for (venue, coin), snapshot in self._snapshots.items():
+            if not snapshot.with_freshness(
+                now_ms=now_ms,
+                stale_after_ms=self.stale_after_ms,
+            ).exploitable:
+                continue
+            venues = healthy_venues.setdefault(coin, set())
+            venues.add(venue)
+            if len(venues) >= required_venues:
+                candidates.add(coin)
+        return sorted(candidates)
 
     def cross_source_prices(self, coin: str, *, now_ms: int) -> list[CrossSourcePrice]:
         return [
