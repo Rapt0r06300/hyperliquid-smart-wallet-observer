@@ -24,6 +24,33 @@ def test_detects_random_market_value(tmp_path):
     assert any(x.rule == "RANDOM_MARKET_VALUE" for x in findings)
 
 
+def test_scan_fails_closed_when_directory_walk_is_incomplete(tmp_path, monkeypatch):
+    import hl_observer.security.fake_data_scanner as scanner
+
+    (tmp_path / "ok.py").write_text("VALUE = 1\n", encoding="utf-8")
+    original_walk = scanner.os.walk
+
+    def incomplete_walk(path, *args, **kwargs):
+        onerror = kwargs["onerror"]
+        onerror(PermissionError("simulated unreadable source tree", 13, str(path)))
+        yield from original_walk(path, *args, **kwargs)
+
+    monkeypatch.setattr(scanner.os, "walk", incomplete_walk)
+    findings = scan_for_fake_data([tmp_path])
+    assert any(item.rule == "SCAN_INCOMPLETE" for item in findings)
+
+
+def test_scan_fails_closed_when_source_file_cannot_be_read(tmp_path, monkeypatch):
+    import hl_observer.security.fake_data_scanner as scanner
+
+    source_file = tmp_path / "ok.py"
+    source_file.write_text("VALUE = 1\n", encoding="utf-8")
+    def denied(_path):
+        raise PermissionError("simulated unreadable source")
+    monkeypatch.setattr(scanner.tokenize, "open", denied)
+    findings = scan_for_fake_data([source_file])
+    assert any(item.rule == "SCAN_INCOMPLETE" for item in findings)
+
 def test_random_without_market_term_not_flagged(tmp_path):
     f = _write(
         tmp_path, "ok.py",

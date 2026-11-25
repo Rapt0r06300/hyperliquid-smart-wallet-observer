@@ -10,9 +10,10 @@ import hashlib
 import json
 import os
 import zipfile
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
 from urllib.parse import quote
 
 import requests
@@ -51,7 +52,7 @@ class SafeShard:
     @classmethod
     def from_index_row(
         cls, row: Mapping[str, Any], *, repository_default: str | None = None
-    ) -> "SafeShard":
+    ) -> SafeShard:
         status = str(row.get("quality_status") or "").upper()
         if status != "SAFE":
             raise DatasetV2Error(f"non-SAFE shard refused: {status or 'MISSING'}")
@@ -171,9 +172,10 @@ def _read_public_index_json(
     raw = response.content
     # Verify immutable partition bytes before parsing untrusted JSON. Corrupt
     # bytes (including malformed JSON) must fail the SHA-bound integrity gate.
-    if expected_size is not None and expected_sha256 is not None:
-        if len(raw) != expected_size or hashlib.sha256(raw).hexdigest() != expected_sha256:
-            raise DatasetV2Error(f"{label} SHA-256/size mismatch")
+    if (expected_size is not None and expected_sha256 is not None
+            and (len(raw) != expected_size
+                 or hashlib.sha256(raw).hexdigest() != expected_sha256)):
+        raise DatasetV2Error(f"{label} SHA-256/size mismatch")
     try:
         payload = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -194,8 +196,9 @@ def _load_remote_partitioned_index(
 ) -> dict[str, Any]:
     """Read every partition and refuse missing/tampered/duplicate rows.
 
-    Each part path is fixed, sizes and bytes are verified independently, and
-    exact logical row order is pinned by the canonical root's shards_sha256.
+    Each part path is either a legacy sequence name or the sequence plus its
+    content SHA-256. Sizes and bytes are verified independently, and exact
+    logical row order is pinned by the canonical root's shards_sha256.
     Ref changes during downloading can only yield a hash failure, never a
     partially certified SAFE selection. Pin a commit SHA for stable OOS runs.
     """
@@ -214,15 +217,18 @@ def _load_remote_partitioned_index(
     for number, desc in enumerate(parts, 1):
         if not isinstance(desc, Mapping):
             raise DatasetV2Error("invalid V2 partition descriptor")
-        relative = f"data-index-parts/part-{number:06d}.json"
         expected_size, expected_rows = desc.get("bytes"), desc.get("row_count")
         digest = desc.get("sha256")
-        if (desc.get("path") != relative
-                or type(expected_size) is not int
+        if (type(expected_size) is not int
                 or not 0 < expected_size <= limit
                 or type(expected_rows) is not int or expected_rows <= 0
                 or not isinstance(digest, str) or len(digest) != 64
                 or any(c not in "0123456789abcdef" for c in digest)):
+            raise DatasetV2Error("invalid V2 partition path or integrity descriptor")
+        legacy_path = f"data-index-parts/part-{number:06d}.json"
+        immutable_path = f"data-index-parts/part-{number:06d}-{digest}.json"
+        relative = desc.get("path")
+        if relative not in (legacy_path, immutable_path):
             raise DatasetV2Error("invalid V2 partition path or integrity descriptor")
         url = f"{RAW_ROOT}/{repository}/{ref}/catalog/{relative}"
         payload, _raw = _read_public_index_json(

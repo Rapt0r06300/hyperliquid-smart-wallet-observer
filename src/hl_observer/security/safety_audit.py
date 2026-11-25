@@ -133,23 +133,75 @@ def _contains_python_exchange_endpoint(text: str) -> bool:
         ):
             docstring_ids.add(id(body[0].value))
 
-    def constant_string(node: ast.AST) -> str | None:
+    def combine(parts: list[set[str]]) -> set[str]:
+        combined = {""}
+        for choices in parts:
+            if not choices:
+                choices = {""}
+            if len(combined) * len(choices) > 64:
+                return set()
+            combined = {prefix + suffix for prefix in combined for suffix in choices}
+        return combined
+
+    def expression_strings(
+        node: ast.AST,
+        constants: dict[str, set[str]],
+        *,
+        depth: int = 0,
+    ) -> set[str]:
+        if depth > 24:
+            return set()
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            return node.value
+            return {node.value}
+        if isinstance(node, ast.Name):
+            return set(constants.get(node.id, ()))
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-            left = constant_string(node.left)
-            right = constant_string(node.right)
-            if left is not None and right is not None:
-                return left + right
+            left = expression_strings(node.left, constants, depth=depth + 1) or {""}
+            right = expression_strings(node.right, constants, depth=depth + 1) or {""}
+            return combine([left, right])
         if isinstance(node, ast.JoinedStr):
-            # Conservative: a dynamic field between constant fragments may
-            # still construct the forbidden route at runtime.
-            return "".join(
-                part.value
-                for part in node.values
-                if isinstance(part, ast.Constant) and isinstance(part.value, str)
-            )
-        return None
+            parts: list[set[str]] = []
+            for part in node.values:
+                if isinstance(part, ast.Constant) and isinstance(part.value, str):
+                    parts.append({part.value})
+                elif isinstance(part, ast.FormattedValue):
+                    parts.append(expression_strings(
+                        part.value, constants, depth=depth + 1,
+                    ) or {""})
+                else:
+                    return set()
+            return combine(parts)
+        return set()
+
+    # Resolve simple module-level string constants for a few bounded passes.
+    # This catches ROUTE='exchange'; PATH='/' + ROUTE; URL=BASE + PATH without
+    # executing imports, descriptors, environment access, or arbitrary Python.
+    assignments: list[tuple[list[str], ast.AST]] = []
+    for statement in tree.body:
+        if isinstance(statement, ast.Assign):
+            names = [target.id for target in statement.targets if isinstance(target, ast.Name)]
+            if names:
+                assignments.append((names, statement.value))
+        elif isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name):
+            assignments.append(([statement.target.id], statement.value))
+    constants: dict[str, set[str]] = {}
+    for _ in range(min(8, len(assignments) + 1)):
+        changed = False
+        for names, value in assignments:
+            values = expression_strings(value, constants)
+            if not values:
+                continue
+            for name in names:
+                existing = constants.setdefault(name, set())
+                merged = existing | values
+                if len(merged) > 32:
+                    constants.pop(name, None)
+                    continue
+                if merged != existing:
+                    constants[name] = merged
+                    changed = True
+        if not changed:
+            break
 
     for node in ast.walk(tree):
         if (
@@ -159,14 +211,11 @@ def _contains_python_exchange_endpoint(text: str) -> bool:
             and _is_exchange_path(node.value)
         ):
             return True
-        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-            combined = constant_string(node)
-            if combined is not None and _is_exchange_path(combined):
-                return True
-        if isinstance(node, ast.JoinedStr):
-            combined = constant_string(node)
-            if combined is not None and _is_exchange_path(combined):
-                return True
+        if isinstance(node, (ast.BinOp, ast.JoinedStr)) and any(
+            _is_exchange_path(value)
+            for value in expression_strings(node, constants)
+        ):
+            return True
     return False
 
 
@@ -228,6 +277,7 @@ def _enumerate_safety_files(root: str | Path) -> tuple[list[Path], list[Path]]:
     root = Path(root).resolve()
     scannable: list[Path] = []
     operational: list[Path] = []
+    traversal_errors: list[OSError] = []
 
     def excluded_child(relative_dir: tuple[str, ...], name: str) -> bool:
         relative_child = relative_dir + (name,)
@@ -240,7 +290,9 @@ def _enumerate_safety_files(root: str | Path) -> tuple[list[Path], list[Path]]:
             )
         )
 
-    for dirpath, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
+    for dirpath, dirnames, filenames in os.walk(
+        root, topdown=True, followlinks=False, onerror=traversal_errors.append,
+    ):
         current = Path(dirpath)
         try:
             relative_dir = current.relative_to(root).parts
@@ -264,6 +316,18 @@ def _enumerate_safety_files(root: str | Path) -> tuple[list[Path], list[Path]]:
             )
             if in_runtime_root:
                 operational.append(path)
+
+    if traversal_errors:
+        first = traversal_errors[0]
+        failed_path = getattr(first, "filename", None)
+        try:
+            location = Path(failed_path).resolve().relative_to(root).as_posix()
+        except (TypeError, ValueError, OSError):
+            location = "unknown path"
+        raise OSError(
+            f"incomplete safety inventory ({len(traversal_errors)} traversal "
+            f"error(s)); first unreadable path: {location}"
+        ) from first
 
     operational.sort(key=lambda path: path.as_posix().casefold())
     return scannable, operational
@@ -399,7 +463,13 @@ def run_safety_audit(root: str | Path = ".") -> SafetyAuditResult:
     checks: dict[str, bool] = {}
     findings: list[str] = []
 
-    scannable_files, source_files = _enumerate_safety_files(project_root)
+    inventory_complete = True
+    try:
+        scannable_files, source_files = _enumerate_safety_files(project_root)
+    except OSError as exc:
+        inventory_complete = False
+        scannable_files, source_files = [], []
+        findings.append(f"operational source enumeration incomplete: {exc}")
     source_file_set = set(source_files)
     source_files_seen: set[Path] = set()
     source_read_errors: list[Path] = []
@@ -436,7 +506,11 @@ def run_safety_audit(root: str | Path = ".") -> SafetyAuditResult:
             secret_findings.append(finding)
 
     missing_source_files = source_file_set - source_files_seen
-    source_scan_complete = not source_read_errors and not missing_source_files
+    source_scan_complete = (
+        inventory_complete and not source_read_errors and not missing_source_files
+    )
+    checks["operational_source_inventory_complete"] = inventory_complete
+    checks["operational_source_scan_complete"] = source_scan_complete
     if source_read_errors:
         findings.extend(
             f"could not read operational source: {path.relative_to(project_root)}"

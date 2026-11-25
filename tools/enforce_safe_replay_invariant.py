@@ -11,12 +11,12 @@ from pathlib import Path
 from typing import Any, Mapping
 
 try:
-    from tools.partitioned_data_index import read_index
     from tools.index_run_manifest import _publish_canonical_index
+    from tools.partitioned_data_index import index_file_sha256, read_index
     from tools.repair_stale_safe_classifications import _archive_prior_manifest
 except ModuleNotFoundError:
-    from partitioned_data_index import read_index
     from index_run_manifest import _publish_canonical_index
+    from partitioned_data_index import index_file_sha256, read_index
     from repair_stale_safe_classifications import _archive_prior_manifest
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -163,6 +163,7 @@ def migrate(*, dry_run: bool = False) -> dict[str,int]:
         "partial_count":partial,
         "stale_count":stale,
         "reject_count":reject,
+        "source_index_sha256":index_file_sha256(INDEX),
     }
     _write(REGISTRY,registry)
     for source,target,_updated in pending:

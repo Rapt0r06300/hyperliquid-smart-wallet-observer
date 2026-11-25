@@ -127,6 +127,46 @@ def test_tick_dataset_retries_transient_manifest_replace_lock(tmp_path, monkeypa
     assert len(list(writer.iter_records())) == 1
 
 
+def test_tick_dataset_manifest_interval_throttles_and_refreshes(tmp_path, monkeypatch) -> None:
+    clock = [10_000_000_000]
+    monkeypatch.setattr(tick_dataset_module.time, "monotonic_ns", lambda: clock[0])
+    writer = TickDatasetWriter(
+        tmp_path / "ticks",
+        rotate_bytes=1_000_000,
+        flush_every=100_000,
+        manifest_interval_s=5.0,
+    )
+
+    def event(index: int) -> TickEnvelope:
+        return TickEnvelope(
+            source_id="gate_public_ws",
+            channel="trades",
+            instrument="BTC_USDT",
+            event_kind=FeedEventKind.EVENT,
+            raw_payload={"trade_id": index},
+            exchange_ts_ms=1_000 + index,
+            received_ts_ms=1_010 + index,
+            written_ts_ms=1_020 + index,
+        )
+
+    writer.append_batch([event(0), event(1)])
+    first = json.loads(writer.manifest_path.read_text(encoding="utf-8"))
+    assert first["current_records"] == 2
+
+    clock[0] += 4_000_000_000
+    writer.append_batch([event(2), event(3)])
+    still_first = json.loads(writer.manifest_path.read_text(encoding="utf-8"))
+    assert still_first["current_records"] == 2
+    assert len(list(writer.iter_records())) == 4
+
+    clock[0] += 1_000_000_000
+    writer.append_batch([event(4), event(5)])
+    refreshed = json.loads(writer.manifest_path.read_text(encoding="utf-8"))
+    assert refreshed["current_records"] == 6
+    assert refreshed["manifest_interval_s"] == 5.0
+    assert len(list(writer.iter_records())) == 6
+
+
 def test_tick_dataset_flush_every_uses_accumulated_records_not_modulo(tmp_path) -> None:
     writer = TickDatasetWriter(
         tmp_path / "ticks",

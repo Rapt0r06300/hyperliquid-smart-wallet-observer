@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Safe code-only reconciliation of local main with canonical GitHub main.
 
-No force push, reset, clean, stash, deletion of Git locks, or shard downloads.
-On conflicts, preserve both histories and fail closed after an automatic
-checkpoint of publishable local code. Run only on the canonical main branch.
+No force push, reset, clean, stash, or shard downloads. A stale index lock is
+quarantined only after a bounded Git process census. On conflicts, preserve
+both histories and fail closed after a local checkpoint of publishable code.
+Run only on the canonical main branch.
 """
 from __future__ import annotations
 
@@ -19,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Literal
@@ -196,7 +198,7 @@ MIN_GIT_VERSION = (2, 30)
 MUTEX_WAIT_SECONDS = 20.0
 MUTEX_POLL_SECONDS = 0.25
 RECEIPT_HISTORY_LIMIT = 20
-GIT_SYNC_ENGINE_BUILD = "2026-11-12-compact-fresh-index-v15"
+GIT_SYNC_ENGINE_BUILD = "2026-11-25-protected-overlay-v21"
 # Des fichiers ont ete deplaces hors de la racine du depot. Un deplacement
 # est publiable uniquement si les deux chemins se normalisent vers le blob
 # HEAD exact du fichier source. Sans cette inscription, la suppression a la
@@ -754,10 +756,8 @@ def _atomic_json_write(destination: Path, payload: object) -> None:
         temporary = None
     finally:
         if temporary is not None:
-            try:
+            with contextlib.suppress(FileNotFoundError):
                 temporary.unlink()
-            except FileNotFoundError:
-                pass
 
 
 def _verify_push_porcelain(
@@ -1121,12 +1121,419 @@ def _remaining_process_ids(root: Path, parent_pid: int) -> list[int]:
         return [parent_pid]
 
 
+STALE_INDEX_LOCK_MIN_AGE_SECONDS = 300.0
+STALE_INDEX_LOCK_WAIT_SECONDS = 20.0
+STALE_INDEX_LOCK_POLL_SECONDS = 1.0
+STALE_INDEX_LOCK_SETTLE_SECONDS = 1.0
+STALE_INDEX_LOCK_PROCESS_START_MARGIN_SECONDS = 2.0
+
+
 def _index_lock_path(root: Path) -> Path | None:
     """Return the ordinary repository index lock without following a worktree file."""
     git_path = root / ".git"
-    if git_path.is_dir():
+    if git_path.is_dir() and not git_path.is_symlink():
         return git_path / "index.lock"
     return None
+
+
+def _query_git_processes() -> list[dict[str, str]]:
+    """Read the Windows process table; failure is deliberately not interpreted as clear."""
+    if os.name != "nt":
+        raise OSError("La verification des processus Git exige Windows.")
+    command = (
+        "$ErrorActionPreference='Stop'; "
+        "$rows=@(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop "
+        "| Where-Object { $_.Name -match '^(git(?:-remote-[^.]+|-lfs)?\\.exe)$' } "
+        "| ForEach-Object { [pscustomobject]@{pid=[string]$_.ProcessId; "
+        "name=[string]$_.Name; "
+        "command_line=[string]$_.CommandLine; "
+        "creation_time_utc=[string]$_.CreationDate.ToUniversalTime().ToString('o')} }); "
+        "ConvertTo-Json -InputObject $rows -Compress"
+    )
+    completed = subprocess.run(
+        ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=12, check=False,
+    )
+    if completed.returncode != 0:
+        raise OSError("Inventaire CIM des processus Git en echec.")
+    try:
+        parsed = json.loads(completed.stdout.strip() or "[]")
+    except json.JSONDecodeError as exc:
+        raise OSError("Inventaire CIM des processus Git illisible.") from exc
+    if isinstance(parsed, dict):
+        parsed = [parsed]
+    if not isinstance(parsed, list) or any(not isinstance(row, dict) for row in parsed):
+        raise OSError("Inventaire CIM des processus Git de forme invalide.")
+    return [
+        {
+            "pid": str(row.get("pid") or ""),
+            "name": str(row.get("name") or ""),
+            "command_line": str(row.get("command_line") or ""),
+            "creation_time_utc": str(row.get("creation_time_utc") or ""),
+        }
+        for row in parsed
+    ]
+
+
+def _git_process_nonblocking_reason(
+    process: dict[str, str], *, lock_mtime_ns: int | None = None,
+) -> str | None:
+    """Explain when a Git process cannot own this particular lock file."""
+    name = str(process.get("name") or "").casefold()
+    command_line = str(process.get("command_line") or "")
+    if name == "git.exe" and re.search(
+        r"(?:^|\s)fsmonitor--daemon(?:\s|$)", command_line, re.IGNORECASE,
+    ):
+        return "fsmonitor_daemon"
+    raw_creation_time = str(process.get("creation_time_utc") or "").strip()
+    if raw_creation_time and lock_mtime_ns is not None:
+        try:
+            created = datetime.fromisoformat(raw_creation_time)
+        except ValueError:
+            created = None
+        if created is not None and created.tzinfo is not None:
+            lock_mtime = lock_mtime_ns / 1_000_000_000
+            if created.timestamp() > (
+                lock_mtime + STALE_INDEX_LOCK_PROCESS_START_MARGIN_SECONDS
+            ):
+                # Git creates index.lock exclusively; a process created after
+                # this unchanged file's mtime cannot be its owner. If it tries
+                # to refresh the index after quarantine, the post-move process
+                # census and new-lock check still fail closed.
+                return "started_after_lock"
+    # Missing or malformed CIM creation time remains a possible writer.
+    return None
+
+
+def _git_process_may_hold_index_lock(
+    process: dict[str, str], *, lock_mtime_ns: int | None = None,
+) -> bool:
+    """Fail closed unless this process is proven unable to own this lock."""
+    return _git_process_nonblocking_reason(
+        process, lock_mtime_ns=lock_mtime_ns,
+    ) is None
+
+
+def _index_lock_signature(path: Path) -> tuple[int, int, int, int]:
+    stat = path.stat(follow_symlinks=False)
+    if path.is_symlink() or not path.is_file():
+        raise OSError("index.lock n'est pas un fichier regulier.")
+    return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns
+
+
+def _write_lock_repair_receipt(
+    root: Path,
+    *,
+    status: str,
+    message: str,
+    started_at: datetime,
+    started_monotonic: float,
+    lock_age_seconds: float | None,
+    lock_signature: tuple[int, int, int, int] | None,
+    blockers: list[dict[str, str]] | None = None,
+    non_blocking_processes: list[dict[str, str]] | None = None,
+) -> None:
+    """Publish a compact, fresh diagnostic without replacing LAST_SYNC."""
+    resolved_root = root.resolve()
+    runtime = resolved_root / "runtime"
+    reports = runtime / "reports"
+    destination = reports / "git-sync"
+    if any(path.is_symlink() for path in (runtime, reports, destination)):
+        raise OSError("repertoire de rapport symbolique; reçu non écrit")
+    destination.mkdir(parents=True, exist_ok=True)
+    finished_at = datetime.now(UTC)
+    run_id = finished_at.strftime("%Y%m%dT%H%M%S.%fZ") + f"-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    payload = {
+        "schema": "alina.git_index_lock_repair.v1",
+        "engine_build": GIT_SYNC_ENGINE_BUILD,
+        "run_id": run_id,
+        "mode": "STALE_INDEX_LOCK_REPAIR",
+        "status": status,
+        "started_at_utc": started_at.isoformat(),
+        "finished_at_utc": finished_at.isoformat(),
+        "duration_ms": max(0, round((time.monotonic() - started_monotonic) * 1000)),
+        "progress_percent": 0.0 if status == "NO_GO" else 100.0,
+        "error": message if status == "NO_GO" else None,
+        "git_index_lock_detected": lock_signature is not None,
+        "git_index_lock_age_seconds": (
+            round(lock_age_seconds, 3) if lock_age_seconds is not None else None
+        ),
+        "git_index_lock_signature": list(lock_signature) if lock_signature else None,
+        "blocking_processes": [
+            {"pid": str(row.get("pid") or ""), "name": str(row.get("name") or "Git")}
+            for row in (blockers or [])
+        ],
+        "non_blocking_processes": non_blocking_processes or [],
+        "git_commands": [],
+        "shard_downloads": False,
+        "force_push": False,
+        "reset_or_clean": False,
+        "receipt_path": "runtime/reports/git-sync/LOCK_REPAIR.json",
+    }
+    _atomic_json_write(destination / "LOCK_REPAIR.json", payload)
+
+
+def repair_stale_index_lock(
+    root: Path,
+    *,
+    process_census=None,
+    now=None,
+    sleep=None,
+    max_wait_seconds: float = STALE_INDEX_LOCK_WAIT_SECONDS,
+    poll_interval_seconds: float = STALE_INDEX_LOCK_POLL_SECONDS,
+    settle_seconds: float = STALE_INDEX_LOCK_SETTLE_SECONDS,
+    emit=print,
+) -> int:
+    """Remove only a demonstrably stale index.lock; never disturb active Git."""
+    started_at = datetime.now(UTC)
+    started_monotonic = time.monotonic()
+    process_census = process_census or _query_git_processes
+    now = now or time.time
+    sleep = sleep or time.sleep
+    lock_path = _index_lock_path(root)
+    non_blocking_processes_by_key: dict[tuple[str, str], dict[str, str]] = {}
+
+    def classify_processes(
+        processes: list[dict[str, str]], lock_mtime_ns: int,
+    ) -> list[dict[str, str]]:
+        blockers = []
+        for row in processes:
+            reason = _git_process_nonblocking_reason(
+                row, lock_mtime_ns=lock_mtime_ns,
+            )
+            if reason is None:
+                blockers.append(row)
+                continue
+            summary = {
+                "pid": str(row.get("pid") or ""),
+                "name": str(row.get("name") or "Git"),
+                "reason": reason,
+            }
+            non_blocking_processes_by_key[(summary["pid"], reason)] = summary
+        return blockers
+
+    def finish(
+        code: int,
+        message: str,
+        *,
+        blockers: list[dict[str, str]] | None = None,
+        lock_age_seconds: float | None = None,
+        lock_signature: tuple[int, int, int, int] | None = None,
+        receipt_status: str | None = None,
+    ) -> int:
+        emit(message)
+        with contextlib.suppress(OSError):
+            _write_lock_repair_receipt(
+                root,
+                status=receipt_status or (
+                    "NO_GO" if code else ("LOCK_REMOVED" if lock_signature else "NO_LOCK")
+                ),
+                message=message,
+                started_at=started_at,
+                started_monotonic=started_monotonic,
+                lock_age_seconds=lock_age_seconds,
+                lock_signature=lock_signature,
+                blockers=blockers,
+                non_blocking_processes=sorted(
+                    non_blocking_processes_by_key.values(),
+                    key=lambda row: (row["pid"], row["reason"]),
+                ),
+            )
+        return code
+
+    if lock_path is None:
+        return finish(2, "[NO_GO] .git real non trouve; verrou non inspecte.")
+    if not lock_path.exists():
+        return finish(0, "[VERROU] Aucun index.lock a reparer.")
+    try:
+        initial_signature = _index_lock_signature(lock_path)
+        initial_age = now() - (initial_signature[3] / 1_000_000_000)
+    except OSError as exc:
+        return finish(2, f"[NO_GO] Impossible d'inspecter index.lock: {exc}")
+    if initial_age < STALE_INDEX_LOCK_MIN_AGE_SECONDS:
+        return finish(
+            2,
+            f"[NO_GO] index.lock recent ({max(0.0, initial_age):.0f}s); "
+            "verrou conserve pour ne pas interrompre Git.",
+            lock_age_seconds=initial_age,
+            lock_signature=initial_signature,
+        )
+
+    deadline = time.monotonic() + max(0.0, max_wait_seconds)
+    announced_wait = False
+    while True:
+        try:
+            processes = process_census()
+        except (OSError, subprocess.SubprocessError, ValueError) as exc:
+            return finish(
+                2, f"[NO_GO] Processus Git non verifiables; verrou conserve ({exc}).",
+                lock_age_seconds=initial_age, lock_signature=initial_signature,
+            )
+        if not isinstance(processes, list) or any(
+            not isinstance(row, dict) for row in processes
+        ):
+            return finish(
+                2, "[NO_GO] Inventaire Git mal forme; verrou conserve.",
+                lock_age_seconds=initial_age, lock_signature=initial_signature,
+            )
+        blockers = classify_processes(processes, initial_signature[3])
+        if not blockers:
+            break
+        if not announced_wait:
+            blocker_ids = [
+                f"{row.get('name') or 'Git'} PID {row['pid']}"
+                for row in blockers
+                if str(row.get("pid") or "").isdigit()
+            ]
+            blocker_detail = (
+                "; processus: " + ", ".join(blocker_ids[:8])
+                if blocker_ids else ""
+            )
+            if len(blocker_ids) > 8:
+                blocker_detail += f" (+{len(blocker_ids) - 8} autres)"
+            emit(
+                f"[ATTENTE] {len(blockers)} processus Git actifs; "
+                f"aucun ne sera interrompu, index.lock reste intact.{blocker_detail}"
+            )
+            announced_wait = True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return finish(
+                2,
+                "[NO_GO] Git est encore actif apres l'attente bornee; "
+                "verrou conserve, relancer apres la fin de Git.",
+                blockers=blockers,
+                lock_age_seconds=initial_age,
+                lock_signature=initial_signature,
+            )
+        sleep(min(max(0.1, poll_interval_seconds), remaining))
+
+    if settle_seconds > 0:
+        sleep(settle_seconds)
+    try:
+        final_processes = process_census()
+    except (OSError, subprocess.SubprocessError, ValueError) as exc:
+        return finish(
+            2, f"[NO_GO] Seconde verification Git impossible; verrou conserve ({exc}).",
+            lock_age_seconds=initial_age, lock_signature=initial_signature,
+        )
+    if not isinstance(final_processes, list) or any(
+        not isinstance(row, dict) for row in final_processes
+    ):
+        return finish(
+            2, "[NO_GO] Seconde liste Git mal formee; verrou conserve.",
+            lock_age_seconds=initial_age, lock_signature=initial_signature,
+        )
+    final_blockers = classify_processes(final_processes, initial_signature[3])
+    if final_blockers:
+        return finish(
+            2, "[NO_GO] Git a redemarre pendant la verification; verrou conserve.",
+            blockers=final_blockers,
+            lock_age_seconds=initial_age, lock_signature=initial_signature,
+        )
+    try:
+        current_signature = _index_lock_signature(lock_path)
+    except FileNotFoundError:
+        return finish(
+            0, "[VERROU] Le verrou a disparu sans intervention; aucune suppression.",
+            lock_age_seconds=initial_age, lock_signature=initial_signature,
+            receipt_status="NO_LOCK",
+        )
+    except OSError as exc:
+        return finish(
+            2, f"[NO_GO] Seconde inspection de index.lock impossible: {exc}",
+            lock_age_seconds=initial_age, lock_signature=initial_signature,
+        )
+    if current_signature != initial_signature:
+        return finish(
+            2, "[NO_GO] index.lock a change pendant le controle; verrou conserve.",
+            lock_age_seconds=initial_age, lock_signature=current_signature,
+        )
+    current_age = now() - (current_signature[3] / 1_000_000_000)
+    if current_age < STALE_INDEX_LOCK_MIN_AGE_SECONDS:
+        return finish(
+            2, "[NO_GO] index.lock n'est plus assez ancien; verrou conserve.",
+            lock_age_seconds=current_age, lock_signature=current_signature,
+        )
+    quarantine = lock_path.with_name(
+        f"index.lock.stale-{time.time_ns()}-{os.getpid()}-{uuid.uuid4().hex}"
+    )
+    try:
+        # Same-directory rename is atomic. A concurrent Git process can then
+        # create a fresh index.lock without that new file being overwritten.
+        lock_path.rename(quarantine)
+    except OSError as exc:
+        return finish(
+            2, f"[NO_GO] Quarantaine atomique de index.lock impossible: {exc}",
+            lock_age_seconds=current_age, lock_signature=current_signature,
+        )
+
+    if lock_path.exists():
+        return finish(
+            2,
+            "[NO_GO] Un nouveau index.lock est apparu pendant la quarantaine; "
+            "il est conserve et le lanceur s'arrete.",
+            lock_age_seconds=current_age, lock_signature=current_signature,
+        )
+    try:
+        post_move_processes = process_census()
+    except (OSError, subprocess.SubprocessError, ValueError) as exc:
+        return finish(
+            2,
+            "[NO_GO] Controle post-quarantaine impossible; le verrou ancien "
+            f"reste en quarantaine ({quarantine.name}): {exc}",
+            lock_age_seconds=current_age, lock_signature=current_signature,
+        )
+    if not isinstance(post_move_processes, list) or any(
+        not isinstance(row, dict) for row in post_move_processes
+    ):
+        return finish(
+            2,
+            "[NO_GO] Liste Git post-quarantaine mal formee; verrou ancien "
+            f"preserve sous {quarantine.name}.",
+            lock_age_seconds=current_age, lock_signature=current_signature,
+        )
+    post_move_blockers = classify_processes(post_move_processes, initial_signature[3])
+    if post_move_blockers:
+        return finish(
+            2,
+            "[NO_GO] Git a demarre pendant la quarantaine; le chemin de verrou "
+            f"est libre mais l'ancien fichier est preserve sous {quarantine.name}.",
+            blockers=post_move_blockers,
+            lock_age_seconds=current_age, lock_signature=current_signature,
+        )
+    if lock_path.exists():
+        return finish(
+            2, "[NO_GO] Un verrou Git neuf est present; aucune synchronisation.",
+            lock_age_seconds=current_age, lock_signature=current_signature,
+        )
+    try:
+        quarantine.unlink()
+    except OSError as exc:
+        # The stale file no longer occupies Git's reserved lock path. Keeping
+        # the uniquely named receipt is harmless and safer than broad cleanup.
+        emit(
+            f"[AVERTISSEMENT] index.lock est libere; ancien fichier conserve "
+            f"sous {quarantine.name} ({exc})."
+        )
+    message = (
+        f"[AUTO-REPAIR] Verrou orphelin de {current_age:.0f}s retire par "
+        "quarantaine atomique apres trois controles sans proprietaire Git possible; "
+        "aucune donnee du depot touchee."
+    )
+    started_after_count = sum(
+        row["reason"] == "started_after_lock"
+        for row in non_blocking_processes_by_key.values()
+    )
+    if started_after_count:
+        message += (
+            f" {started_after_count} processus Git ont démarré après index.lock "
+            "et ont été ignorés car ils ne pouvaient pas en être propriétaires."
+        )
+    return finish(
+        0, message, lock_age_seconds=current_age, lock_signature=current_signature,
+    )
 
 
 def _run_git(
@@ -2610,8 +3017,8 @@ class Synchronizer:
         if tracked_protected:
             self.report["protected_local_changes"] = sorted(tracked_protected)
             self.say(
-                "[GARDE DONNEES] Modifications locales protegees conservees hors "
-                "du commit; elles seront refusees si GitHub touche ces chemins."
+                "[GARDE DONNEES] Modifications locales protegees exclues du commit; "
+                "si GitHub change ces chemins, elles restent en overlay local."
             )
         eligible = sorted(
             p for p in set(staged + tracked + untracked)
@@ -3678,6 +4085,80 @@ class Synchronizer:
             f"{budget}s; rebase annulee proprement."
         ) from timeout
 
+    def _capture_protected_index_overlay(
+        self, paths: set[str],
+    ) -> dict[str, tuple[bytes, bytes] | None]:
+        """Snapshot staged data entries so a remote tree adoption cannot drop them."""
+        ordered = sorted(paths)
+        entries: dict[str, tuple[bytes, bytes] | None] = {}
+        for start in range(0, len(ordered), PROTECTED_PATH_BATCH_SIZE):
+            lot = ordered[start:start + PROTECTED_PATH_BATCH_SIZE]
+            raw = self.command(
+                "ls-files", "--stage", "-z", "--", *lot,
+            ).stdout
+            if raw and not raw.endswith(b"\0"):
+                raise SyncBlocked("Inventaire d'index protege tronque; adoption refusee.")
+            for record in raw[:-1].split(b"\0") if raw else ():
+                metadata, separator, raw_path = record.partition(b"\t")
+                fields = metadata.split()
+                if not separator or len(fields) != 3:
+                    raise SyncBlocked("Entree d'index protege illisible; adoption refusee.")
+                mode, oid, stage = fields
+                try:
+                    path = raw_path.decode("utf-8")
+                except UnicodeDecodeError as exc:
+                    raise SyncBlocked(
+                        "Chemin d'index protege non UTF-8; adoption refusee."
+                    ) from exc
+                if path not in paths or path in entries:
+                    raise SyncBlocked("Index protege ambigu; adoption refusee.")
+                if stage != b"0":
+                    raise SyncBlocked(
+                        f"Index protege non fusionne pour {path}; adoption refusee."
+                    )
+                if (
+                    not re.fullmatch(rb"[0-7]{6}", mode)
+                    or not re.fullmatch(rb"[0-9a-f]{40,64}", oid)
+                    or set(oid) == {ord("0")}
+                    or any(char in raw_path for char in (b"\t", b"\r", b"\n"))
+                ):
+                    raise SyncBlocked(
+                        f"Entree d'index protege non preservable: {path}."
+                    )
+                entries[path] = (mode, oid)
+        for path in ordered:
+            entries.setdefault(path, None)  # A staged deletion has no index row.
+        return entries
+
+    def _restore_protected_index_overlay(
+        self, entries: dict[str, tuple[bytes, bytes] | None],
+    ) -> None:
+        """Restore saved stage-0 entries after the target tree updates the index."""
+        if not entries:
+            return
+        object_format = self.text("rev-parse", "--show-object-format")
+        zero_length = 64 if object_format == "sha256" else 40
+        zero_oid = b"0" * zero_length
+        ordered = sorted(entries)
+        for start in range(0, len(ordered), PROTECTED_PATH_BATCH_SIZE):
+            lot = ordered[start:start + PROTECTED_PATH_BATCH_SIZE]
+            payload = bytearray()
+            for path in lot:
+                raw_path = path.encode("utf-8")
+                if any(char in raw_path for char in (b"\t", b"\r", b"\n")):
+                    raise SyncBlocked(
+                        f"Chemin d'index protege non preservable: {path}."
+                    )
+                entry = entries[path]
+                if entry is None:
+                    payload.extend(b"0 " + zero_oid + b"\t" + raw_path + b"\n")
+                else:
+                    mode, oid = entry
+                    payload.extend(mode + b" " + oid + b"\t" + raw_path + b"\n")
+            self.command(
+                "update-index", "--index-info", input_bytes=bytes(payload),
+            )
+
     def _adopter_tete_sans_balayage(
         self, new_tip: str, old_tip: str, origine: str,
     ) -> None:
@@ -3705,28 +4186,18 @@ class Synchronizer:
         # On recontrole l'inventaire de code juste avant d'appliquer le nouvel
         # arbre suivi, pour qu'un editeur concurrent ne soit jamais ecrase.
         self._assert_no_new_code_changes()
-        # On a shallow clone with thousands of SAFE catalog files on disk,
-        # ``read-tree -u -m`` will refuse if any untracked file matches a
-        # path in new_tip.  Pre-identify those conflicts and remove the SAFE
-        # ones before attempting the tree update.
+        # On a shallow clone with many SAFE catalog files on disk, adoption
+        # updates only the index before selectively materializing code.
+        # Detect untracked collisions up front so protected bytes remain in
+        # place and differing files fail closed.
         incoming_paths = _paths(
             self.command(
                 "diff", "--name-only", "-z", old_tip, new_tip,
             ).stdout
         )
-        # 21/11/2026 -- LE REFUS VENAIT DE GIT, PAS DE NOUS.
-        # Mesure : sur `test_tracked_protected_collision_still_fails_closed`,
-        # l'ancien chemin echouait sur le message de GIT << Your local changes
-        # to the following files would be overwritten by merge >>. La garde
-        # etait donc un effet de bord de `merge --ff-only`, pas un controle du
-        # lanceur. Le chemin rapide n'ecrit jamais un chemin protege
-        # (`checkout-index` ne recoit que les chemins de CODE) : les octets
-        # locaux survivaient, mais l'index declarait la version distante.
-        # Divergence SILENCIEUSE -- precisement la corruption de `catalog/`
-        # constatee le 19/11/2026 (1 582 fichiers supprimes localement,
-        # DATA_INDEX incoherent avec lui-meme). Le contrat que le lanceur
-        # AFFICHE deja est le bon : << elles seront refusees si GitHub touche
-        # ces chemins >>. On le rend explicite ici.
+        # A true local difference is retained as an explicit overlay. This
+        # removes the accidental Git merge refusal while making the local-vs-
+        # remote version visible and ensuring protected data is never committed.
         # On reutilise l'inventaire DEJA valide `protected_local_changes` au
         # lieu d'un `git diff HEAD -- <milliers de chemins>` : ce module a
         # mesure que ce diff etait le goulot de plusieurs minutes sur cet
@@ -3744,34 +4215,110 @@ class Synchronizer:
             and chemin in observes
             and chemin.replace("\\", "/").casefold() not in RUNTIME_CHURN_FILES
         )
-        # 21/11/2026 -- `protected_local_changes` DIT << PEUT-ETRE MODIFIE >>.
-        # Premier essai de cette garde : NO_GO sur
-        # `catalog/CAMPAIGN_WATCHDOG_RECEIPT.json`. Mesure : le fichier sur
-        # disque avait EXACTEMENT le blob de HEAD (3999191e8b8d, 2 608 870
-        # octets a l'identique) et `git diff --name-only HEAD -- <ce chemin>`
-        # ne renvoyait RIEN. L'inventaire est volontairement base sur le STAT
-        # (ce module a mesure qu'un diff de contenu sur des milliers de chemins
-        # coute plusieurs minutes) : c'est un SUR-ENSEMBLE, pas un diagnostic.
-        # Refuser dessus bloquait une adoption parfaitement legitime -- le
-        # meme travers que les controles qui lisent une etiquette pour un fait.
-        # On confirme donc par le CONTENU, avec le critere de git lui-meme,
-        # borne aux seuls chemins ENTRANTS (1 ici, pas les 28 163 de
-        # l'inventaire) : le cout reste celui d'un inventaire borne.
-        collisions: list[str] = []
+        # Resolve STAT candidates against both local index and worktree, then
+        # compare only real local deltas with the incoming tree. `_preserve_...`
+        # may have marked these entries skip-worktree during replay; clear that
+        # bit for this bounded diff so it cannot hide current local bytes. This
+        # changes index flags only, never the files themselves.
+        tracked_suspects: set[str] = set()
         for start in range(0, len(suspects), PROTECTED_PATH_BATCH_SIZE):
             lot = suspects[start:start + PROTECTED_PATH_BATCH_SIZE]
-            collisions.extend(_paths(self.command(
+            tracked_suspects.update(_paths(self.command(
+                "ls-files", "-z", "--", *lot,
+            ).stdout))
+        if tracked_suspects:
+            self.command(
+                "update-index", "--no-skip-worktree", "-z", "--stdin",
+                input_bytes=b"\0".join(
+                    path.encode("utf-8") for path in sorted(tracked_suspects)
+                ) + b"\0",
+            )
+        # Differing SAFE data is retained as an explicit local overlay; unsafe
+        # protected paths still stop adoption. No protected path enters code.
+        local_worktree: set[str] = set()
+        local_index: set[str] = set()
+        for start in range(0, len(suspects), PROTECTED_PATH_BATCH_SIZE):
+            lot = suspects[start:start + PROTECTED_PATH_BATCH_SIZE]
+            local_worktree.update(_paths(self.command(
                 "diff", "--name-only", "-z", "HEAD", "--", *lot,
             ).stdout))
-        collisions = sorted(set(collisions))
+            local_index.update(_paths(self.command(
+                "diff", "--cached", "--name-only", "-z", "HEAD", "--", *lot,
+            ).stdout))
+
+        worktree_conflicts: set[str] = set()
+        index_conflicts: set[str] = set()
+        for candidates, cached, output in (
+            (local_worktree, False, worktree_conflicts),
+            (local_index, True, index_conflicts),
+        ):
+            ordered = sorted(candidates)
+            for start in range(0, len(ordered), PROTECTED_PATH_BATCH_SIZE):
+                lot = ordered[start:start + PROTECTED_PATH_BATCH_SIZE]
+                args = ["diff"]
+                if cached:
+                    args.append("--cached")
+                args.extend(["--name-only", "-z", new_tip, "--", *lot])
+                output.update(_paths(self.command(*args).stdout))
+
+        protected_overlay_paths = worktree_conflicts | index_conflicts
+        staged_overlay_paths = set(self._deferred_staged_protected_paths)
+        staged_overlay_paths.update(local_index)
+        staged_extra_paths = sorted(
+            path for path in staged_overlay_paths
+            if path in incoming_paths and path not in local_index
+        )
+        staged_conflicts: set[str] = set()
+        for start in range(0, len(staged_extra_paths), PROTECTED_PATH_BATCH_SIZE):
+            lot = staged_extra_paths[start:start + PROTECTED_PATH_BATCH_SIZE]
+            staged_conflicts.update(_paths(self.command(
+                "diff", "--cached", "--name-only", "-z", new_tip,
+                "--", *lot,
+            ).stdout))
+        protected_overlay_paths.update(staged_conflicts)
+        unsafe_overlay_paths = sorted(
+            path for path in protected_overlay_paths
+            if not _can_defer_staged_protected(path)
+            and path.replace("\\", "/").casefold() not in RUNTIME_CHURN_FILES
+        )
         self.report["adoption_protected_suspects"] = len(suspects)
-        if collisions:
+        self.report["adoption_protected_local_worktree_changes"] = len(local_worktree)
+        self.report["adoption_protected_local_index_changes"] = len(local_index)
+        self.report["adoption_protected_collisions"] = len(protected_overlay_paths)
+        if unsafe_overlay_paths:
             raise SyncBlocked(
-                f"GitHub toucherait {len(collisions)} fichier(s) protege(s) "
-                f"modifie(s) localement: {', '.join(collisions[:5])}. "
+                f"GitHub toucherait {len(unsafe_overlay_paths)} fichier(s) "
+                f"protege(s) non differables: {', '.join(unsafe_overlay_paths[:5])}. "
                 "Adoption interdite pour proteger les donnees."
             )
-        self.report["adoption_protected_collisions"] = len(collisions)
+        self.report["adoption_protected_overlay_count"] = len(protected_overlay_paths)
+        self.report["adoption_protected_overlay_paths"] = sorted(
+            protected_overlay_paths
+        )[:100]
+        if protected_overlay_paths:
+            self.say(
+                f"[GARDE DONNEES] {len(protected_overlay_paths)} version(s) "
+                "locale(s) divergent(es) seront gardees comme overlay, "
+                "visibles localement et exclues du commit de code."
+            )
+
+        # `read-tree` can replace the operator index on its compatibility
+        # fallback. Preserve every staged collector-owned path, not only paths
+        # touched by the remote update; restore exact blobs and staged deletes.
+        unsafe_staged = sorted(
+            path for path in staged_overlay_paths
+            if _protected(path)
+            and not _can_defer_staged_protected(path)
+            and path.replace("\\", "/").casefold() not in RUNTIME_CHURN_FILES
+        )
+        if unsafe_staged:
+            raise SyncBlocked(
+                "Index local protege non preservable sans decision manuelle: "
+                + ", ".join(unsafe_staged[:5])
+            )
+        staged_index_snapshot = self._capture_protected_index_overlay(
+            {path for path in staged_overlay_paths if _protected(path)}
+        )
         existing_untracked: list[str] = []
         for path in incoming_paths:
             full = self.root / path
@@ -3784,26 +4331,16 @@ class Synchronizer:
             _tracked_here.update(_paths(
                 self.command("ls-files", "-z", "--", *batch).stdout
             ))
-        removed_safe: list[str] = []
+        identical_untracked: list[str] = []
         blocked_unsafe: list[str] = []
         candidats = [
             path for path in existing_untracked if path not in _tracked_here
         ]
-        # 21/11/2026 -- NE JAMAIS SUPPRIMER UN FICHIER LOCAL POUR LAISSER PASSER
-        # LA FUSION. Cette boucle retirait tout chemin que
-        # `_can_defer_staged_protected` tolere (donc tout `runtime/**`,
-        # `catalog/**`...) au motif que << le remote le recree >>. C'est vrai
-        # pour un shard SAFE identique au distant ; c'est FAUX pour un etat
-        # local comme `runtime/session.json`, qui etait alors ecrase en
-        # silence. Le `merge --ff-only` ne tenait ce cas que parce que GIT
-        # refusait d'ecraser un fichier non suivi : la protection venait du
-        # refus de git, pas d'un controle a nous. Tests qui l'exigent :
-        # `test_ignored_data_collision_refused` et
-        # `test_tracked_protected_collision_still_fails_closed`.
-        # Critere PROUVABLE retenu : on ne retire que si les octets locaux sont
-        # DEJA ceux que le distant ecrirait (meme blob apres les filtres git du
-        # chemin). Identiques -> retirer ne perd rien. Differents -> le fichier
-        # porte un etat que le distant n'a pas : REFUS.
+        # Never delete a local file to make adoption possible. An untracked
+        # protected file is accepted only when its Git-filtered blob exactly
+        # matches the incoming blob; it then remains in place as a local
+        # overlay and is excluded from checkout-index. Differing bytes fail
+        # closed, preserving the original behavior for unsafe collisions.
         identiques: set[str] = set()
         if candidats:
             for start in range(0, len(candidats), PROTECTED_PATH_BATCH_SIZE):
@@ -3834,10 +4371,23 @@ class Synchronizer:
                         identiques.add(path)
         for path in candidats:
             if _can_defer_staged_protected(path) and path in identiques:
-                (self.root / path).unlink()
-                removed_safe.append(path)
+                identical_untracked.append(path)
             else:
                 blocked_unsafe.append(path)
+        if identical_untracked:
+            protected_overlay_paths.update(identical_untracked)
+            self.report["adoption_identical_untracked_preserved"] = len(
+                identical_untracked
+            )
+            self.report["adoption_protected_collisions"] = len(
+                protected_overlay_paths
+            )
+            self.report["adoption_protected_overlay_count"] = len(
+                protected_overlay_paths
+            )
+            self.report["adoption_protected_overlay_paths"] = sorted(
+                protected_overlay_paths
+            )[:100]
         if blocked_unsafe:
             raise SyncBlocked(
                 f"GitHub toucherait {len(blocked_unsafe)} fichier(s) local non "
@@ -3845,10 +4395,10 @@ class Synchronizer:
                 f"{', '.join(blocked_unsafe[:5])}. "
                 "Fusion interdite."
             )
-        if removed_safe:
+        if identical_untracked:
             self.say(
-                f"[GARDE DONNEES] {len(removed_safe)} fichier(s) SAFE locaux "
-                f"supprimes pour permettre la fusion (recrees par le remote)."
+                f"[GARDE DONNEES] {len(identical_untracked)} fichier(s) "
+                "SAFE non suivi(s), identiques au distant, gardes sur disque."
             )
         # 24/11/2026 -- GARDER LES DATES DE L'INDEX. `read-tree <new>` seul
         # reconstruisait les 1 941 337 entrees SANS date ni taille (mesure :
@@ -3860,22 +4410,51 @@ class Synchronizer:
         # les deux commits, sans regarder l'arbre de travail (comme avant :
         # index seul). Si git la refuse, on retombe EXACTEMENT sur l'ancien
         # `read-tree <new>` : aucun nouveau cas d'echec.
-        fusion = self.command(
-            "read-tree", "-m", "-i", old_tip, new_tip,
-            check=False,
-            timeout=REPLAY_WORKTREE_TIMEOUT_SECONDS,
-        )
-        if fusion.returncode:
-            self.report["adoption_index"] = "READ_TREE_SIMPLE_REPLI"
-            self.command(
-                "read-tree", new_tip,
+        try:
+            fusion = self.command(
+                "read-tree", "-m", "-i", old_tip, new_tip,
+                check=False,
                 timeout=REPLAY_WORKTREE_TIMEOUT_SECONDS,
             )
-        else:
-            self.report["adoption_index"] = "READ_TREE_DEUX_ARBRES_DATES_GARDEES"
+            if fusion.returncode:
+                self.report["adoption_index"] = "READ_TREE_SIMPLE_REPLI"
+                self.command(
+                    "read-tree", new_tip,
+                    timeout=REPLAY_WORKTREE_TIMEOUT_SECONDS,
+                )
+            else:
+                self.report["adoption_index"] = "READ_TREE_DEUX_ARBRES_DATES_GARDEES"
+        except SyncBlocked:
+            self._restore_protected_index_overlay(staged_index_snapshot)
+            raise
+        self._restore_protected_index_overlay(staged_index_snapshot)
+        self.report["adoption_protected_index_entries_preserved"] = len(
+            staged_index_snapshot
+        )
+        if protected_overlay_paths:
+            # A staged deletion has no index row, so it cannot carry the
+            # skip-worktree bit. Filter against the post-read-tree index to
+            # avoid turning a safe local deletion into a new NO_GO.
+            overlay_index_paths: set[str] = set()
+            ordered_overlays = sorted(protected_overlay_paths)
+            for start in range(0, len(ordered_overlays), PROTECTED_PATH_BATCH_SIZE):
+                lot = ordered_overlays[start:start + PROTECTED_PATH_BATCH_SIZE]
+                overlay_index_paths.update(_paths(self.command(
+                    "ls-files", "-z", "--", *lot,
+                ).stdout))
+            skip_paths = sorted(protected_overlay_paths & overlay_index_paths)
+            if skip_paths:
+                self.command(
+                    "update-index", "--skip-worktree", "-z", "--stdin",
+                    input_bytes=b"\0".join(
+                        path.encode("utf-8") for path in skip_paths
+                    ) + b"\0",
+                )
+            self.report["adoption_protected_skip_worktree_count"] = len(skip_paths)
         code_changed = [
             p for p in incoming_paths
-            if not _protected(p) or _adoptable_depuis_le_distant(p)
+            if p not in protected_overlay_paths
+            and (not _protected(p) or _adoptable_depuis_le_distant(p))
         ]
         self.report["adoption_canonical_materialises"] = sum(
             1 for p in code_changed if _protected(p)
@@ -3905,13 +4484,14 @@ class Synchronizer:
                 check=False,
                 timeout=REPLAY_WORKTREE_TIMEOUT_SECONDS,
             )
+            self._restore_protected_index_overlay(staged_index_snapshot)
             if restored.returncode:
                 raise SyncBlocked(
                     "Mise a jour atomique de main refusee et restauration du "
-                    "code impossible; intervention manuelle requise."
+                    "code impossible; index SAFE preserve, intervention requise."
                 )
             raise SyncBlocked(
-                "Mise a jour atomique de main refusee; code local restaure."
+                "Mise a jour atomique de main refusee; code et index locaux restaures."
             )
 
         if self.text("rev-parse", "HEAD") != new_tip:
@@ -4296,10 +4876,8 @@ class Synchronizer:
                 )
             for path in approved_deletions:
                 # Nettoyage implicite : le fichier n'est plus dans l'arbre pousse.
-                try:
+                with contextlib.suppress(OSError):
                     (self.root / path).unlink()
-                except OSError:
-                    pass
             if approved_deletions:
                 self.report["workflow_deletions_accepted"] = sorted(approved_deletions)
             code_paths = [
@@ -4867,10 +5445,8 @@ class Synchronizer:
                 reverse=True,
             )
             for stale in history_files[RECEIPT_HISTORY_LIMIT:]:
-                try:
+                with contextlib.suppress(FileNotFoundError):
                     stale.unlink()
-                except FileNotFoundError:
-                    pass
             # Publish LAST_SYNC only after its immutable history target exists;
             # a reporting failure therefore leaves the previous pointer valid.
             _atomic_json_write(dest / "LAST_SYNC.json", self.report)
@@ -5044,10 +5620,22 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--test-remote", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
+        "--repair-stale-lock", action="store_true",
+        help="quarantainer uniquement un index.lock ancien apres trois controles sans proprietaire Git possible",
+    )
+    parser.add_argument(
         "--adopter-seulement", action="store_true",
         help="avance rapide propre vers GitHub main, sans jamais committer ni pousser (AlinaSync)",
     )
     options = parser.parse_args(argv)
+    if options.repair_stale_lock:
+        incompatible = (
+            options.dry_run or options.wip_only or options.promote_current_to_main
+            or options.adopter_seulement or options.test_remote
+        )
+        if incompatible:
+            parser.error("--repair-stale-lock est une operation autonome.")
+        return repair_stale_index_lock(options.root)
     if options.adopter_seulement and (options.dry_run or options.wip_only or options.promote_current_to_main):
         parser.error("--adopter-seulement est incompatible avec --dry-run, --wip-only et la promotion.")
     if options.dry_run and options.wip_only:

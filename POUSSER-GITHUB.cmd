@@ -26,6 +26,7 @@ set "ALINA_SHARDS_ARGS=--download-safe --all-safe"
 set "ALINA_SKIP_UPDATE=0"
 set "ALINA_COPY_VAULT_ONLY="
 set "ALINA_ENGINE_RAN=0"
+set "ALINA_LOCK_REPAIR_RAN=0"
 set "RC=1"
 
 if /I "%~1"=="--help" goto :help
@@ -90,7 +91,7 @@ set "ALINA_LAUNCH_OUTPUT_LOG=runtime/reports/git-sync/LAST_SYNC.json"
 "%HYPERSMART_PYTHON%" %PYARGS% -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)" >nul 2>nul
 if errorlevel 1 goto :missing_python
 
-set "ALINA_ENGINE_REQUIRED_BUILD=2026-11-12-compact-fresh-index-v15"
+set "ALINA_ENGINE_REQUIRED_BUILD=2026-11-25-protected-overlay-v21"
 set "ALINA_ENGINE=%ALINA_ROOT%tools\alina_git_code_sync.py"
 set "ALINA_SHARDS_ENGINE=%ALINA_ROOT%tools\sync_complete_clone.py"
 if not exist "%ALINA_ENGINE%" goto :missing_engine
@@ -248,6 +249,8 @@ goto :finish
 call "%~dp0tools\launcher_log.cmd" "POUSSER-GITHUB" EXIT completion "launcher-finished" "%RC%"
 echo.
 if "%ALINA_ENGINE_RAN%"=="1" "%HYPERSMART_PYTHON%" %PYARGS% "%ALINA_ROOT%tools\cmd_progress.py" summary "%ALINA_ROOT%runtime\reports\git-sync\LAST_SYNC.json" "%RC%"
+if "%ALINA_LOCK_REPAIR_RAN%"=="1" "%HYPERSMART_PYTHON%" %PYARGS% "%ALINA_ROOT%tools\cmd_progress.py" summary "%ALINA_ROOT%runtime\reports\git-sync\LOCK_REPAIR.json" "%RC%"
+if "%ALINA_LOCK_REPAIR_RAN%"=="1" echo Journal verrou : runtime\reports\git-sync\LOCK_REPAIR.json
 if "%RC%"=="0" if /I not "%ALINA_MODE%"=="self-check" "%HYPERSMART_PYTHON%" %PYARGS% "%ALINA_ROOT%tools\cmd_progress.py" percent 100 "Lanceur termine et resultat verifie"
 if defined HYPERSMART_PYTHON "%HYPERSMART_PYTHON%" %PYARGS% "%ALINA_ROOT%tools\cmd_progress.py" elapsed
 echo [FIN] Lanceur termine - code retour %RC%
@@ -256,34 +259,20 @@ if "%ALINA_PUSHD_OK%"=="1" popd
 endlocal & exit /b %RC%
 
 rem ============================================================
-rem  Self-healing SUR : supprime un verrou Git index.lock PERIME
-rem  uniquement si aucun processus d'ecriture Git ne tourne. Les demons
-rem  fsmonitor sont des lecteurs longue duree et ne doivent pas bloquer.
-rem  Toute commande Git active ou tout processus sans ligne identifiable
-rem  reste bloque par prudence. Jamais de reset, force, clean ou stash.
-rem  Appele via `call`, retourne par `goto :eof`.
-rem ============================================================
-rem  Remove an index.lock only after a successful process census.
-rem  ACTIVE and UNKNOWN states preserve the lock; query errors fail closed.
-rem  Git fsmonitor daemons are read-only and do not block cleanup.
-rem  No reset, clean, stash, or data mutation is performed here.
+rem  Reparation du verrou delegue au moteur canonique deja valide.
+rem  Attente bornee; aucun processus Git n'est interrompu. Un verrou recent,
+rem  un inventaire CIM en echec ou un Git pouvant posseder ce verrou le conserve
+rem  et arrete la synchronisation. Un Git demarre apres l'horodatage stable du
+rem  verrou ne peut pas en etre proprietaire. Aucun reset, clean, stash ou push force.
 rem ============================================================
 :ensure_no_stale_lock
 if not exist "%ALINA_ROOT%.git\index.lock" exit /b 0
-set "ALINA_GIT_WRITER_STATE="
-for /f "delims=" %%G in ('powershell -NoProfile -NonInteractive -Command "$ErrorActionPreference='Stop'; try { $procs=Get-CimInstance Win32_Process -ErrorAction Stop; $active=$false; foreach($p in $procs){ if($p.Name -eq 'git.exe' -and ([string]::IsNullOrWhiteSpace($p.CommandLine) -or $p.CommandLine -notmatch 'fsmonitor--daemon')) { $active=$true; break } }; if($active){ 'ACTIVE' } else { 'CLEAR' } } catch { 'UNKNOWN'; exit 1 }"') do set "ALINA_GIT_WRITER_STATE=%%G"
-if /I "%ALINA_GIT_WRITER_STATE%"=="ACTIVE" (
-  echo [VERROU] Un processus Git d'ecriture est actif; verrou respecte ^(pas de suppression^).
-  exit /b 0
-)
-if /I not "%ALINA_GIT_WRITER_STATE%"=="CLEAR" (
-  echo [NO_GO] Impossible de confirmer l'absence d'un processus Git; verrou conserve.
+set "ALINA_LOCK_REPAIR_RAN=1"
+"%HYPERSMART_PYTHON%" %PYARGS% "%ALINA_ENGINE%" --root "%ALINA_ROOT%." --repair-stale-lock
+if errorlevel 1 (
+  echo [NO_GO] Verrou Git non reparable en securite; aucune synchronisation lancee.
+  set "RC=2"
   exit /b 1
 )
-echo [AUTO-REPAIR] Verrou Git perime confirme ^(aucun ecrivain Git; fsmonitor ignore^) -^> suppression securisee.
-del /f /q "%ALINA_ROOT%.git\index.lock" >nul 2>nul
-if exist "%ALINA_ROOT%.git\index.lock" (
-  echo [NO_GO] Verrou Git toujours present apres la tentative de nettoyage; aucune synchronisation.
-  exit /b 1
-)
+set "ALINA_LOCK_REPAIR_RAN=0"
 exit /b 0

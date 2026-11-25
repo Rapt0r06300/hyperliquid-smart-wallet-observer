@@ -39,6 +39,48 @@ def test_safety_audit_passes_project_baseline():
     assert result.checks["live_executor_disabled_exists"]
 
 
+def test_safety_audit_fails_closed_when_directory_walk_is_incomplete(tmp_path, monkeypatch):
+    import hl_observer.security.safety_audit as safety_audit
+
+    src = tmp_path / "src" / "hl_observer"
+    tests = tmp_path / "tests"
+    (src / "execution").mkdir(parents=True)
+    tests.mkdir()
+    (tmp_path / ".env.example").write_text(
+        "HL_ENABLE_MAINNET_EXECUTION=false\n", encoding="utf-8",
+    )
+    (src / "execution" / "live_executor_disabled.py").write_text(
+        "LOCKED = True\n", encoding="utf-8",
+    )
+    for name in (
+        "test_no_mainnet_execution.py", "test_safety_audit.py",
+        "test_testnet_locked.py",
+    ):
+        (tests / name).write_text("# fixture\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "hl_observer.security.safety_audit.auditer_l_environnement",
+        lambda: type("Audit", (), {"ok": True, "alerte": ""})(),
+    )
+    original_walk = safety_audit.os.walk
+
+    def walk_with_unreadable_directory(path, *args, **kwargs):
+        onerror = kwargs.get("onerror")
+        assert onerror is not None, "the inventory must observe os.walk errors"
+        onerror(PermissionError("simulated unreadable operational directory", 13,
+                                str(Path(path) / "tools")))
+        yield from original_walk(path, *args, **kwargs)
+
+    monkeypatch.setattr(safety_audit.os, "walk", walk_with_unreadable_directory)
+
+    result = run_safety_audit(tmp_path)
+
+    assert result.checks["operational_source_inventory_complete"] is False
+    assert result.checks["operational_source_scan_complete"] is False
+    assert result.checks["no_forbidden_mainnet_order_method"] is False
+    assert result.checks["no_exchange_endpoint_in_runtime_source"] is False
+    assert any("operational source enumeration incomplete" in item for item in result.findings)
+
+
 def test_no_fabricated_data_generators_in_runtime():
     """Rule #1 (NO FAKE): the active runtime must invent nothing —
     no fake price / PnL / fill / wallet generator anywhere in src/hl_observer."""
@@ -159,6 +201,29 @@ def test_exchange_endpoint_scan_ignores_comments_and_other_venue_paths():
         "@echo off\nREM Never call /exchange\necho safe\n", ".cmd"
     )
     assert _contains_exchange_endpoint("URL = '/' + 'exchange'\n", ".py")
+
+
+def test_exchange_endpoint_scan_resolves_constant_url_fragments():
+    built_from_names = (
+        'BASE = "https://api.hyperliquid.xyz"\n'
+        'ROUTE = "exchange"\n'
+        'PATH = "/" + ROUTE\n'
+        'URL = BASE + PATH\n'
+    )
+    built_with_fstring = (
+        'BASE = "https://api.hyperliquid.xyz"\n'
+        'ROUTE = "exchange"\n'
+        'URL = f"{BASE}/{ROUTE}"\n'
+    )
+    other_venue_path = (
+        'BASE = "https://fapi.binance.com"\n'
+        'ROUTE = "exchangeInfo"\n'
+        'URL = f"{BASE}/fapi/v1/{ROUTE}"\n'
+    )
+
+    assert _contains_exchange_endpoint(built_from_names, ".py")
+    assert _contains_exchange_endpoint(built_with_fstring, ".py")
+    assert not _contains_exchange_endpoint(other_venue_path, ".py")
 
 
 def test_safety_audit_covers_legacy_tools_scripts_and_workflows(tmp_path, monkeypatch):

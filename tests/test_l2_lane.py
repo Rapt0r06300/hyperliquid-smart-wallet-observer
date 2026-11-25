@@ -162,6 +162,72 @@ def test_chaque_carnet_porte_l_identite_de_sa_connexion_et_l_epoque_de_son_march
     assert lane.epoque == {"KPEPE": 2, "ETH": 1}
 
 
+def test_recu_sante_l2_est_actualisable_et_distingu_le_silence_du_defaut(tmp_path):
+    import asyncio
+
+    lane = L.LaneL2(tmp_path / "l2.jsonl", tmp_path / "bbo.jsonl")
+    lane.attendre_coins(["ETH", "BTC"])
+    row, raison = L.construire_carnet(_frame("ETH", exch=NOW - 100), recv_ms=NOW)
+    assert raison == ""
+
+    async def scenario():
+        await lane.ecrire(row, "cx-live")
+
+    asyncio.run(scenario())
+    receipt_path = tmp_path / "l2_lane_sante_0.json"
+    L.ecrire_sante_lane(receipt_path, lane, 0, [], now_ms=NOW + 5_000)
+    first = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert first["schema_version"] == "hypersmart.copy_vault_l2_lane_health.v1"
+    assert first["genere_ms"] == NOW + 5_000
+    assert first["coins"] == 2
+    assert first["coins_avec_carnet"] == 1
+    assert first["coins_en_attente_premier_carnet"] == 1
+    assert first["coins_silence_observe_120s"] == 0
+    assert first["silence_is_failure"] is False
+    assert first["per_coin"][0]["coin"] == "BTC"
+    assert first["per_coin"][0]["etat"] == "AWAITING_FIRST_BOOK"
+    assert first["per_coin"][1]["coin"] == "ETH"
+    assert first["per_coin"][1]["connection_id"] == "cx-live"
+    assert first["per_coin"][1]["livres_emis"] == 1
+    assert first["per_coin"][1]["etat"] == "RECENT"
+    assert not list(tmp_path.glob("l2_lane_sante_0.json.*.tmp"))
+
+    L.ecrire_sante_lane(receipt_path, lane, 0, [], now_ms=NOW + 121_000)
+    second = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert second["genere_ms"] > first["genere_ms"]
+    assert second["coins_silence_observe_120s"] == 1
+    assert second["per_coin"][1]["etat"] == "SILENCE_OBSERVE"
+    assert second["silence_is_failure"] is False
+
+
+def test_battement_rafraichit_le_recu_sante_sans_heartbeat_superviseur(tmp_path, monkeypatch):
+    import asyncio
+    import time
+
+    lane = L.LaneL2(tmp_path / "l2.jsonl", tmp_path / "bbo.jsonl")
+    lane.attendre_coins(["ETH"])
+    receipt_path = tmp_path / "l2_lane_sante_0.json"
+    original = L.ecrire_sante_lane
+    ecritures = []
+
+    def tracer_ecriture(*args, **kwargs):
+        ecritures.append(1)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(L, "ecrire_sante_lane", tracer_ecriture)
+
+    async def scenario():
+        await L._battre(
+            tmp_path, "", lane, time.monotonic() + 0.08, periode_s=0.01,
+            sante_path=receipt_path, shard_index=0, shard_count=1,
+        )
+
+    asyncio.run(scenario())
+    assert len(ecritures) >= 2
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert receipt["per_coin"][0]["etat"] == "AWAITING_FIRST_BOOK"
+
+
 def test_un_trade_n_est_executable_que_sur_des_carnets_de_la_meme_connexion(tmp_path):
     """Bout en bout : collecteur -> certificateur -> ruban -> chargeur du labo -> moteur d'exécution."""
     import asyncio
@@ -177,7 +243,7 @@ def test_un_trade_n_est_executable_que_sur_des_carnets_de_la_meme_connexion(tmp_
     metaordre = cv.cluster_metaorders([entree])[0][0]
 
     def rejouer(identites):
-        racine = tmp_path / ("cas_%d" % len(list(tmp_path.iterdir())))
+        racine = tmp_path / f"cas_{len(list(tmp_path.iterdir()))}"
         ruban = racine / "runtime" / "data" / "copy_vault_l2_tape.jsonl"
         lane = L.LaneL2(ruban, racine / "bbo.jsonl")
 

@@ -7,6 +7,7 @@ from pathlib import Path
 import httpx
 import pytest
 
+from hl_observer.control_plane.campaign_adapters import _collection_checkpoint_metrics
 from tools import collect_cloud_copy_vault as C
 
 
@@ -1895,11 +1896,26 @@ def test_copy_vault_bundle_excludes_ws_shard_without_connection_heartbeat(tmp_pa
         queue_drops={},
         selection={"selected_at_ms": received},
         collection_run_id="missing-heartbeat-test",
+        accepted_frames=1,
+        persisted_frames=1,
     )
     assert index["shard_count"] == 0
     assert index["source_admission"]["blocking_reasons"][
         "HEARTBEAT_EVIDENCE_MISSING"
     ] == 1
+    assert index["frame_reconciliation"] == {
+        "schema": "alina.collection_frame_reconciliation.v1",
+        "status": "MATCHED",
+        "record_count_unit": "valid_jsonl_records",
+        "accepted_frames": 1,
+        "persisted_frames": 1,
+        "all_shard_count": 1,
+        "published_shard_count": 0,
+        "excluded_shard_count": 1,
+        "all_shard_record_count": 1,
+        "published_record_count": 0,
+        "excluded_record_count": 1,
+    }
 
 
 def test_market_context_bundle_is_safe_but_never_pnl_proof(tmp_path: Path) -> None:
@@ -1997,6 +2013,8 @@ def test_market_context_bundle_is_safe_but_never_pnl_proof(tmp_path: Path) -> No
         queue_drops={},
         selection={"selected_at_ms": received},
         collection_run_id="market-context-test",
+        accepted_frames=len(envelopes),
+        persisted_frames=len(envelopes),
         connection_heartbeats={
             "market-bundle-test": {
                 "connection_id": "market-bundle-test",
@@ -2012,6 +2030,34 @@ def test_market_context_bundle_is_safe_but_never_pnl_proof(tmp_path: Path) -> No
 
     assert index["shard_count"] == 5
     assert index["partial_count"] == 5  # remote release SHA is not verified here
+    assert index["frame_reconciliation"] == {
+        "schema": "alina.collection_frame_reconciliation.v1",
+        "status": "MATCHED",
+        "record_count_unit": "valid_jsonl_records",
+        "accepted_frames": len(envelopes),
+        "persisted_frames": len(envelopes),
+        "all_shard_count": 5,
+        "published_shard_count": 5,
+        "excluded_shard_count": 0,
+        "all_shard_record_count": len(envelopes),
+        "published_record_count": len(envelopes),
+        "excluded_record_count": 0,
+    }
+    (output / "collection_summary.json").write_text(
+        json.dumps({
+            "accepted_frames": len(envelopes),
+            "persisted_frames": len(envelopes),
+            "l2_frames": 0,
+            "queue_drops": 0,
+            "frame_reconciliation": index["frame_reconciliation"],
+            "source_admission": index["source_admission"],
+        }),
+        encoding="utf-8",
+    )
+    checkpoint_metrics = _collection_checkpoint_metrics(output)
+    assert checkpoint_metrics["frame_metrics_complete"] is True
+    assert checkpoint_metrics["bbo_frames"] == 1
+    assert checkpoint_metrics["l2_frames"] == 0
     manifests = [
         json.loads(path.read_text(encoding="utf-8"))
         for path in (output / "manifests").glob("*.json")

@@ -490,6 +490,7 @@ def test_le_resume_operateur_montre_vivant_progression_debit_et_eta(tmp_path):
     mesure = {
         "lignes_par_minute": 12.5, "motif": None, "taille_octets": 42,
         "active_sources": 7, "source_count": 94, "recent_sources": 12,
+        "active_source_paths": ["runtime/data/fills.jsonl", "runtime/data/l2.jsonl"],
     }
     etat = {"code": "ACTIF", "detail": "7/94 fichiers de données en croissance", "age_s": 0.4}
     eta = {"statut": "EN_COURS", "heures": 26.0}
@@ -503,16 +504,32 @@ def test_le_resume_operateur_montre_vivant_progression_debit_et_eta(tmp_path):
     assert "SUIVI ACTUALISÉ" in texte
     assert "50.0 %" in texte
     assert "12.5 lignes/min" in texte
-    assert "7/94 fichiers locaux suivis ont grandi entre les deux relevés" in texte
-    assert "ni le nombre de collecteurs ni une limite à 10" in texte
-    assert "7/94 ont grandi depuis le relevé précédent" in texte
+    assert "7/94 fichiers de flux locaux ont grandi entre les deux relevés" in texte
+    assert "7/94 fichiers de flux ont grandi depuis le relevé précédent" in texte
     assert "94 fichiers ont grandi." not in texte
-    assert "DÉBIT FICHIERS SUIVIS" in texte
-    assert "archives et shards imbriqués sont hors de ce débit" in texte
-    assert "94 fichiers locaux surveillés" in texte
+    assert "FLUX LOCAUX" in texte
+    assert "FLUX EN CROISSANCE" in texte
+    assert "runtime/data/fills.jsonl" in texte
+    assert "runtime/data/l2.jsonl" in texte
+    assert "archives et shards exclus" in texte
+    assert "JSONL/NDJSON/CSV locaux seulement" in texte
     assert "12/94 modifiés récemment" in texte
     assert "ETA moteur" in texte
     assert "demo [base]" in texte
+
+
+def test_eta_flux_exclut_les_json_de_etat_et_garde_les_tapes_append_only(tmp_path):
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    (data / "collector_state.json").write_text('{"updated": true}', encoding="utf-8")
+    (data / "fills.jsonl").write_text('{"fill": 1}\n', encoding="utf-8")
+    (data / "pages.ndjson").write_text('{"page": 1}\n', encoding="utf-8")
+    (data / "ticks.csv").write_text("ts,coin\n1,BTC\n", encoding="utf-8")
+    (data / "ticks.jsonl.partial").write_text('{"partial": true}\n', encoding="utf-8")
+
+    paths = ETA.trouver_flux_de_donnees(tmp_path)
+
+    assert {path.name for path in paths} == {"fills.jsonl", "pages.ndjson", "ticks.csv"}
 
 
 def _ecrire_suivi_collecteurs(racine: Path, payload: dict) -> None:
@@ -662,7 +679,15 @@ def test_suivi_collecteurs_refuse_un_etat_non_paper_read_only(tmp_path):
 def test_dashboard_court_affiche_separement_processus_et_croissance_fichiers():
     lignes = ETA.lignes_dashboard_simple(
         tours=1,
-        mesure={"motif": "PREMIERE_MESURE", "active_sources": 5, "source_count": 95},
+        mesure={
+            "motif": None,
+            "active_sources": 5,
+            "source_count": 95,
+            "active_source_paths": [
+                "runtime/data/copy_vault_l2_lane.jsonl",
+                "runtime/data/copy_vault_bbo_lane.jsonl",
+            ],
+        },
         etat={"code": "ACTIF"},
         denses_acquis=0,
         requis=6,
@@ -677,12 +702,40 @@ def test_dashboard_court_affiche_separement_processus_et_croissance_fichiers():
 
     texte = "\n".join(lignes)
     ligne_etat = next(ligne for ligne in lignes if "| ÉTAT" in ligne)
-    assert "ACTIF — 5/95 ont grossi en 2.0 s" in ligne_etat
-    assert "fichiers observés, pas collecteurs" in ligne_etat
+    assert "5/95 fichiers de flux ont grandi en 2.0 s" in ligne_etat
+    ligne_ecritures = next(ligne for ligne in lignes if "FICHIERS ÉCRIVANTS" in ligne)
+    assert "copy_vault_l2_lane.jsonl" in ligne_ecritures
+    assert "copy_vault_bbo_lane.jsonl" in ligne_ecritures
+    assert "+3 autres" in ligne_ecritures
     assert len(ligne_etat) <= 100
     assert "COLLECTEURS" in texte and "20/20 actifs" in texte
     assert "écarts signalés: 1 184" in texte
     assert "+3 depuis lancement du suivi" in texte
+
+
+def test_premier_cycle_ne_fait_pas_passer_les_fichiers_en_actifs_ou_en_zero_sur_95():
+    lignes = ETA.lignes_dashboard_simple(
+        tours=1,
+        mesure={"motif": "PREMIERE_MESURE", "active_sources": 0, "source_count": 95},
+        etat={"code": "EN_ATTENTE"},
+        denses_acquis=2,
+        requis=6,
+        age_sonde_h=7.6,
+        eta={"statut": "INCONNU", "heures": None},
+        besoins=[],
+        sources=None,
+        intervalle_s=2.0,
+    )
+
+    texte = "\n".join(lignes)
+    ligne_etat = next(ligne for ligne in lignes if "| ÉTAT" in ligne)
+    assert "PREMIÈRE MESURE — 95 fichiers repérés" in ligne_etat
+    assert "premier débit après 2.0 s" in ligne_etat
+    assert "0/95" not in texte
+    assert "5/95" not in texte
+    assert "calcul au prochain relevé" in texte
+    assert "noms au prochain relevé" in texte
+    assert "33.3 % (2/6 jours denses), âge 7.6 h" in texte
 
 
 def test_dashboard_affiche_le_rapport_sonde_reel_et_non_le_nombre_de_fichiers():
@@ -690,11 +743,11 @@ def test_dashboard_affiche_le_rapport_sonde_reel_et_non_le_nombre_de_fichiers():
         tours=2,
         mesure={
             "motif": "PREMIERE_MESURE",
-            "active_sources": 7,
+            "active_sources": 0,
             "source_count": 94,
             "recent_sources": 54,
         },
-        etat={"code": "ACTIF"},
+        etat={"code": "EN_ATTENTE"},
         denses_acquis=2,
         requis=6,
         age_sonde_h=7.6,
@@ -789,11 +842,10 @@ def test_le_dashboard_par_defaut_est_court_et_garde_les_sources_reelles(tmp_path
         intervalle_s=2.0,
     )
     texte = "\n".join(lignes)
-    assert len(lignes) <= 16
+    assert len(lignes) <= 17  # ligne séparée : noms des fichiers qui écrivent
     assert "SUIVI ACTUALISÉ" in texte
     ligne_etat = next(ligne for ligne in lignes if "| ÉTAT" in ligne)
-    assert "ACTIF — 2/7 ont grossi en 2.0 s" in ligne_etat
-    assert "fichiers observés, pas collecteurs" in ligne_etat
+    assert "2/7 fichiers de flux ont grandi en 2.0 s" in ligne_etat
     assert len(ligne_etat) <= 100
     assert "PÉRIMÉE — dernière mesure 3/6 jours, âge 30.0 h" in texte
     assert "ETA MOTEUR        : INCONNU — sonde périmée depuis 30.0 h" in texte
@@ -1035,5 +1087,5 @@ def test_main_ne_projette_pas_un_eta_dense_depuis_le_debit_global_des_fichiers(
     sortie = capsys.readouterr().out
     ligne_eta = next(ligne for ligne in sortie.splitlines() if "ETA moteur" in ligne)
     assert "INCONNU" in ligne_eta
-    assert "DÉBIT FICHIERS" in sortie
+    assert "DÉBIT FLUX LOCAUX" in sortie
     assert "pas de débit de signaux évaluables" in sortie

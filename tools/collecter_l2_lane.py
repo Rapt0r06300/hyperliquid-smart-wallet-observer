@@ -18,23 +18,23 @@ import argparse
 import asyncio
 import json
 import math
+import os
 import sys
 import time
 import uuid
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
 RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
 
-from hl_observer.datasets.coffre_certifie import certifier_book, QUARANTAINE  # noqa: E402
 from hl_observer.collection.forward_poll_fills import shard_leaders  # noqa: E402 (shard generique)
-from hl_observer.instrument_identity import preserve_native_instrument_symbol  # noqa: E402
 from hl_observer.collection.univers_perps import charger_univers, filtrer_abonnables  # noqa: E402
-from hl_observer.feed_integrity.idle_socket_watchdog import (  # noqa: E402
-    MORT, etat_socket)
-from hl_observer.feed_integrity.subscription_ack_state import (  # noqa: E402
-    EtatAbonnements)
+from hl_observer.datasets.coffre_certifie import QUARANTAINE, certifier_book  # noqa: E402
+from hl_observer.feed_integrity.idle_socket_watchdog import MORT, etat_socket  # noqa: E402
+from hl_observer.feed_integrity.subscription_ack_state import EtatAbonnements  # noqa: E402
+from hl_observer.instrument_identity import preserve_native_instrument_symbol  # noqa: E402
 
 WS_URL = "wss://api.hyperliquid.xyz/ws"
 OUT_DEFAUT = Path("runtime") / "data" / "copy_vault_l2_lane.jsonl"
@@ -165,10 +165,23 @@ class LaneL2:
         self.rejets = 0
         self.reconnects = 0
         self.gaps = 0        # B6 : trous L2 detectes (coin silencieux > seuil)
+        self.coins_attendus: set[str] = set()
+        self.dernier_recu_l2_ms: dict[str, int | None] = {}
+        self.livres_l2_par_coin: dict[str, int] = {}
+        self.dernier_connexion_l2: dict[str, str | None] = {}
+        self.dernier_epoque_l2: dict[str, int | None] = {}
+        self.dernier_recu_bbo_ms: dict[str, int | None] = {}
+        self.livres_bbo_par_coin: dict[str, int] = {}
         # Époque de trou par marché : nombre d'INCIDENTS d'intégrité observés sur son flux (déconnexion,
         # trame rejetée), comme dans le collecteur de référence (``collect_cloud_copy_vault._open_l2_gap``).
         # Un marché simplement calme n'est pas un incident.
         self.epoque: dict[str, int] = {}
+
+    def attendre_coins(self, coins: Any) -> None:
+        """Déclare les marchés attendus pour distinguer attente et flux observé."""
+        for coin in coins:
+            if isinstance(coin, str) and coin.strip():
+                self.coins_attendus.add(coin.strip())
 
     def incident(self, coins: Any) -> None:
         """Le flux de ces marchés vient d'être interrompu ou corrompu : nouvelle époque pour chacun."""
@@ -203,6 +216,17 @@ class LaneL2:
             with self.out_path.open("a", encoding="utf-8") as h:
                 h.write(json.dumps(row, ensure_ascii=False) + "\n")
             self.emis += 1
+            try:
+                recu_ms = int(row.get("received_at_ms"))
+            except (TypeError, ValueError):
+                recu_ms = None
+            self.dernier_recu_l2_ms[coin] = recu_ms if recu_ms and recu_ms > 0 else None
+            self.livres_l2_par_coin[coin] = self.livres_l2_par_coin.get(coin, 0) + 1
+            self.dernier_connexion_l2[coin] = connexion_id
+            try:
+                self.dernier_epoque_l2[coin] = int(row.get("l2_gap_epoch"))
+            except (TypeError, ValueError):
+                self.dernier_epoque_l2[coin] = None
 
     async def ecrire_bbo(self, row: dict[str, Any], connexion_id: str | None = None) -> None:
         coin = str(row.get("coin"))
@@ -215,6 +239,12 @@ class LaneL2:
             with self.bbo_out_path.open("a", encoding="utf-8") as h:
                 h.write(json.dumps(row, ensure_ascii=False) + "\n")
             self.emis_bbo += 1
+            try:
+                recu_ms = int(row.get("received_at_ms"))
+            except (TypeError, ValueError):
+                recu_ms = None
+            self.dernier_recu_bbo_ms[coin] = recu_ms if recu_ms and recu_ms > 0 else None
+            self.livres_bbo_par_coin[coin] = self.livres_bbo_par_coin.get(coin, 0) + 1
 
 
 #: SEUIL DE DIAGNOSTIC, PAS DE GARDE CALIBREE. La lecture est deja bornee a 30 s et
@@ -255,9 +285,9 @@ def diagnostic_silence(dernier_message_ms, now_ms,
     verdict = etat_socket(dernier_message_ms, now_ms, timeout_ms=timeout_ms)
     if verdict.get("etat") != MORT:
         return None
-    return ("[l2-lane] FLUX SILENCIEUX : etat=%s raison=%s silence_ms=%s"
-            % (verdict.get("etat"), verdict.get("raison"),
-               verdict.get("silence_ms", "inconnu")))
+    return (f"[l2-lane] FLUX SILENCIEUX : etat={verdict.get('etat')} "
+            f"raison={verdict.get('raison')} "
+            f"silence_ms={verdict.get('silence_ms', 'inconnu')}")
 
 
 async def _connexion(lane: LaneL2, coins: list[str], socket_id: str, deadline: float) -> None:
@@ -301,9 +331,8 @@ async def _connexion(lane: LaneL2, coins: list[str], socket_id: str, deadline: f
                             manquants = sorted(
                                 {str(c).upper() for c in coins} - abonnements.actifs())
                             if manquants:
-                                ligne += (" | abonnements JAMAIS acquittes : %d/%d %s"
-                                          % (len(manquants), len(coins),
-                                             manquants[:8]))
+                                ligne += (f" | abonnements JAMAIS acquittes : {len(manquants)}/{len(coins)} "
+                                          f"{manquants[:8]}")
                             print(ligne, flush=True)   # une fois par episode
                             silence_signale = True
                         continue
@@ -364,19 +393,140 @@ def _charger_coins(root: Path, chemin: str) -> list[str]:
     return list(vus)
 
 
-async def _battre(root: Path, nom: str, lane: "LaneL2", deadline: float, *, periode_s: float = 10.0) -> None:
-    """Heartbeat du collecteur lancé en local par le superviseur (les lanes cloud n'en ont pas besoin)."""
-    sys.path.insert(0, str(RACINE / "tools"))
-    import heartbeat_collecteur as HB
+def construire_sante_lane(
+    lane: LaneL2,
+    shard_index: int,
+    marches_inconnus: list[str],
+    *,
+    now_ms: int,
+    shard_count: int = 1,
+) -> dict[str, Any]:
+    """Etat live par coin; le silence est un constat, jamais une panne affirmée."""
+    coins = sorted(
+        lane.coins_attendus
+        | set(lane.dernier_recu_l2_ms)
+        | set(lane.livres_l2_par_coin)
+    )
+    par_coin: list[dict[str, Any]] = []
+    en_attente = 0
+    silencieux = 0
+    observes = 0
+    for coin in coins:
+        dernier = lane.dernier_recu_l2_ms.get(coin)
+        livres = lane.livres_l2_par_coin.get(coin, 0)
+        age = max(0, now_ms - dernier) if dernier is not None else None
+        if livres == 0:
+            etat = "AWAITING_FIRST_BOOK"
+            en_attente += 1
+        elif age is None:
+            etat = "RECEIVED_TIME_UNKNOWN"
+            observes += 1
+        elif age <= SILENCE_DIAGNOSTIC_MS:
+            etat = "RECENT"
+            observes += 1
+        else:
+            etat = "SILENCE_OBSERVE"
+            silencieux += 1
+            observes += 1
+        dernier_bbo = lane.dernier_recu_bbo_ms.get(coin)
+        bbo_age = max(0, now_ms - dernier_bbo) if dernier_bbo is not None else None
+        par_coin.append({
+            "coin": coin,
+            "etat": etat,
+            "dernier_carnet_recu_ms": dernier,
+            "age_carnet_ms": age,
+            "livres_emis": livres,
+            "connection_id": lane.dernier_connexion_l2.get(coin),
+            "l2_gap_epoch": lane.dernier_epoque_l2.get(coin),
+            "dernier_bbo_recu_ms": dernier_bbo,
+            "age_bbo_ms": bbo_age,
+            "bbo_emis": lane.livres_bbo_par_coin.get(coin, 0),
+        })
+    return {
+        "schema_version": "hypersmart.copy_vault_l2_lane_health.v1",
+        "lane": f"{shard_index}/{max(1, shard_count)}",
+        "genere_ms": int(now_ms),
+        "coins": len(coins),
+        "coins_avec_carnet": observes,
+        "coins_en_attente_premier_carnet": en_attente,
+        "coins_silence_observe_120s": silencieux,
+        "seuil_silence_diagnostic_ms": int(SILENCE_DIAGNOSTIC_MS),
+        "silence_is_failure": False,
+        "carnets_emis": lane.emis,
+        "bbo_emis": lane.emis_bbo,
+        "rejets": lane.rejets,
+        "reconnects": lane.reconnects,
+        "trous_l2": lane.gaps,
+        "marches_inconnus_non_abonnes": list(marches_inconnus),
+        "per_coin": par_coin,
+    }
+
+
+def ecrire_sante_lane(
+    path: Path,
+    lane: LaneL2,
+    shard_index: int,
+    marches_inconnus: list[str],
+    *,
+    now_ms: int | None = None,
+    shard_count: int = 1,
+) -> None:
+    """Publie un reçu frais par remplacement atomique, sans JSON partiel."""
+    payload = construire_sante_lane(
+        lane, shard_index, marches_inconnus,
+        now_ms=int(now_ms if now_ms is not None else time.time() * 1000),
+        shard_count=shard_count,
+    )
+    temporaire = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    try:
+        with temporaire.open("w", encoding="utf-8", newline="\n") as fichier:
+            json.dump(payload, fichier, ensure_ascii=False, indent=2)
+            fichier.write("\n")
+        os.replace(temporaire, path)
+    except OSError:
+        with suppress(FileNotFoundError):
+            temporaire.unlink()
+        raise
+
+
+async def _battre(
+    root: Path,
+    nom: str,
+    lane: LaneL2,
+    deadline: float,
+    *,
+    periode_s: float = 10.0,
+    sante_path: Path | None = None,
+    shard_index: int = 0,
+    shard_count: int = 1,
+    marches_inconnus: list[str] | None = None,
+) -> None:
+    """Rafraîchit l'état de lane et, si demandé, le heartbeat du superviseur local."""
+    hb = None
+    if nom:
+        sys.path.insert(0, str(RACINE / "tools"))
+        import heartbeat_collecteur as hb
 
     deja = 0
+    erreur_sante_signalee = False
     while time.monotonic() < deadline:
         total = lane.emis + lane.emis_bbo
-        try:
-            HB.battre(root, nom, n_ecrites=total - deja,
-                      note=f"{lane.emis} carnets, {lane.emis_bbo} bbo, {lane.reconnects} reconnexions")
-        except (OSError, ValueError):
-            pass
+        if sante_path is not None:
+            try:
+                ecrire_sante_lane(
+                    sante_path, lane, shard_index, marches_inconnus or [],
+                    shard_count=shard_count,
+                )
+                erreur_sante_signalee = False
+            except OSError as exc:
+                if not erreur_sante_signalee:
+                    print(f"[l2-lane] reçu de santé non actualisé ({type(exc).__name__}); "
+                          "la collecte continue, ancienne valeur conservée.", flush=True)
+                    erreur_sante_signalee = True
+        if hb is not None:
+            with suppress(OSError, ValueError):
+                hb.battre(root, nom, n_ecrites=total - deja,
+                          note=f"{lane.emis} carnets, {lane.emis_bbo} bbo, {lane.reconnects} reconnexions")
         deja = total
         await asyncio.sleep(periode_s)
 
@@ -402,7 +552,7 @@ def coins_a_ajouter(deja: set[str], lus: list[str], univers, *, shard_count: int
     return abonnables
 
 
-async def _ajouter_les_nouveaux_coins(root: Path, args: argparse.Namespace, lane: "LaneL2", suivis: set[str],
+async def _ajouter_les_nouveaux_coins(root: Path, args: argparse.Namespace, lane: LaneL2, suivis: set[str],
                                       deadline: float, taches: list, *, periode_s: float = RELECTURE_COINS_S,
                                       dormir=asyncio.sleep, horloge=time.monotonic) -> None:
     """Toutes les `periode_s`, ouvre une connexion SUPPLÉMENTAIRE pour les coins apparus dans la
@@ -425,6 +575,8 @@ async def _ajouter_les_nouveaux_coins(root: Path, args: argparse.Namespace, lane
         for i in range(0, len(nouveaux), pas):
             groupe = nouveaux[i:i + pas]
             suivis.update(groupe)
+            if lane is not None:
+                lane.attendre_coins(groupe)
             rang += 1
             print(f"[l2-lane] {len(groupe)} nouveau(x) coin(s) dans la liste -> connexion supplementaire "
                   f"N{rang} : {', '.join(groupe[:8])}", flush=True)
@@ -452,6 +604,14 @@ async def _boucle(args: argparse.Namespace) -> int:
     bbo_out = Path(args.bbo_out) if args.bbo_out else (root / BBO_OUT_DEFAUT)
     bbo_out = bbo_out if bbo_out.is_absolute() else root / bbo_out
     lane = LaneL2(out, bbo_out)
+    lane.attendre_coins(lane_coins)
+    sante_path = lane.out_path.parent / f"l2_lane_sante_{args.shard_index}.json"
+    try:
+        # État initial visible immédiatement : les marchés attendent encore leur premier carnet.
+        ecrire_sante_lane(sante_path, lane, args.shard_index, inconnus, shard_count=args.shard_count)
+    except OSError as exc:
+        print(f"[l2-lane] reçu de santé initial impossible ({type(exc).__name__}); "
+              "la collecte continue.", flush=True)
     pas = max(1, int(args.coins_par_connexion))
     groupes = [lane_coins[i:i + pas] for i in range(0, len(lane_coins), pas)]
     deadline = time.monotonic() + max(10.0, float(args.duree_s))
@@ -459,8 +619,11 @@ async def _boucle(args: argparse.Namespace) -> int:
           f"sur {len(groupes)} connexion(s), {int(args.duree_s)}s.", flush=True)
     taches = [asyncio.create_task(_connexion(lane, grp, chr(65 + i), deadline))
               for i, grp in enumerate(groupes)]
-    if args.heartbeat:
-        taches.append(asyncio.create_task(_battre(root, args.heartbeat, lane, deadline)))
+    # Le reçu live est rafraîchi même pour une lane cloud sans heartbeat de superviseur.
+    taches.append(asyncio.create_task(_battre(
+        root, args.heartbeat, lane, deadline, sante_path=sante_path,
+        shard_index=args.shard_index, shard_count=args.shard_count, marches_inconnus=inconnus,
+    )))
     suivis = set(lane_coins)
     relecture = asyncio.create_task(_ajouter_les_nouveaux_coins(root, args, lane, suivis, deadline, taches))
     # Les connexions ajoutées en cours de route rejoignent `taches` : on attend jusqu'à ce que
@@ -475,17 +638,11 @@ async def _boucle(args: argparse.Namespace) -> int:
     print(f"[l2-lane] fini : {lane.emis} carnets L2 + {lane.emis_bbo} BBO emis, "
           f"{lane.rejets} rejets, {lane.reconnects} reconnexions, {lane.gaps} trous L2 "
           f"-> {lane.out_path}", flush=True)
-    # B29 : sante JSON de la lane (metriques, sans changer l'affichage console).
+    # Dernier état après arrêt, y compris si les connexions ont fini avant le heartbeat.
     try:
-        sante = {"lane": f"{args.shard_index}/{args.shard_count}", "coins": len(lane_coins),
-                 "marches_inconnus_non_abonnes": inconnus,
-                 "carnets_emis": lane.emis, "bbo_emis": lane.emis_bbo, "rejets": lane.rejets,
-                 "reconnects": lane.reconnects, "trous_l2": lane.gaps,
-                 "genere_ms": int(time.time() * 1000)}
-        (lane.out_path.parent / f"l2_lane_sante_{args.shard_index}.json").write_text(
-            json.dumps(sante, ensure_ascii=False, indent=2), encoding="utf-8")
-    except OSError:
-        pass
+        ecrire_sante_lane(sante_path, lane, args.shard_index, inconnus, shard_count=args.shard_count)
+    except OSError as exc:
+        print(f"[l2-lane] reçu de santé final impossible ({type(exc).__name__}).", flush=True)
     return 0
 
 

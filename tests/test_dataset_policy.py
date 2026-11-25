@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 from collections import Counter
@@ -90,6 +91,9 @@ def test_active_status_matches_index():
     # SAFE means replay/validation data quality only. It must never be promoted
     # into profitability proof without a separate costed OOS/forward result.
     assert REG["active_dataset"]["proof_of_pnl_allowed"] is False
+    assert REG["active_dataset"]["source_index_sha256"] == hashlib.sha256(
+        INDEX_PATH.read_bytes()
+    ).hexdigest()
 
 
 def test_every_status_counter_is_index_bound(indexed_catalog_audit):

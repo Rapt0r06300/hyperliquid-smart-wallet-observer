@@ -21,22 +21,27 @@ from urllib.parse import quote
 
 from index_run_manifest import (
     _publish_canonical_index,
+    _sharded_receipt_path,
     compact_index_rows,
     hydrate_default_release_repository,
-    _sharded_receipt_path,
 )
 from manifest_policy import classify_manifest, is_official_historical_archive
 from replay_compatibility import VERIFIER_VERSION, inspect_asset
 
 try:
-    from tools.partitioned_data_index import read_index
+    from tools.partitioned_data_index import index_file_sha256, read_index
 except ModuleNotFoundError:
-    from partitioned_data_index import read_index
+    from partitioned_data_index import index_file_sha256, read_index
 
 try:
     from tools.backfill_exact_trade_counts import IDENTITY_VERSION, _extract_packed_verified_shard
 except ModuleNotFoundError:
     from backfill_exact_trade_counts import IDENTITY_VERSION, _extract_packed_verified_shard
+
+try:
+    from tools.global_unique_trade_patch import global_unique_count_rows
+except ModuleNotFoundError:
+    from global_unique_trade_patch import global_unique_count_rows
 
 ROOT=Path(__file__).resolve().parents[1]
 INDEX_PATH=ROOT/"catalog"/"DATA_INDEX.json"
@@ -355,14 +360,7 @@ def _load_global_unique_rows(*, root: Path) -> dict[str,Mapping[str,Any]]:
         return {}
     if str(patch.get("identity_version") or "")!=GLOBAL_IDENTITY_VERSION:
         return {}
-    counts=patch.get("counts")
-    if not isinstance(counts,Mapping):
-        return {}
-    return {
-        str(dataset_id): evidence
-        for dataset_id,evidence in counts.items()
-        if isinstance(evidence,Mapping)
-    }
+    return global_unique_count_rows(patch)
 
 
 def _global_unique_evidence_valid(
@@ -876,6 +874,7 @@ def _refresh_catalog(index: dict[str,Any], root: Path) -> None:
         "partial_count":counts["PARTIAL"],
         "stale_count":counts["STALE"],
         "reject_count":counts["REJECT"],
+        "source_index_sha256":index_file_sha256(root/"catalog"/"DATA_INDEX.json"),
     }
     _write_json(root/"catalog"/"DATA_CATALOG.json",catalog)
     _write_json(root/"catalog"/"DATA_QUALITY_REGISTRY.json",registry)

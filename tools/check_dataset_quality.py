@@ -9,9 +9,12 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 try:
-    from tools.partitioned_data_index import iter_index_rows
+    from tools.partitioned_data_index import (
+        iter_index_rows,
+        require_index_sha256_binding,
+    )
 except ModuleNotFoundError:
-    from partitioned_data_index import iter_index_rows
+    from partitioned_data_index import iter_index_rows, require_index_sha256_binding
 
 # REFUS SUR SI LES ASSERTS SONT DESACTIVES (21/11/2026). Toute la verification de
 # cette porte -- 36 asserts, 19 sites d appel dans .github/workflows -- repose sur
@@ -44,6 +47,10 @@ reg = json.loads((root / "catalog/DATA_QUALITY_REGISTRY.json").read_text(encodin
 cat = json.loads((root / "catalog/DATA_CATALOG.json").read_text(encoding="utf-8"))
 index_path = root / "catalog/DATA_INDEX.json"
 index_root = json.loads(index_path.read_text(encoding="utf-8"))
+try:
+    require_index_sha256_binding(reg["active_dataset"], index_path)
+except (KeyError, TypeError, ValueError) as exc:
+    raise SystemExit(f"DATA_QUALITY_REGISTRY source-index binding refused: {exc}") from exc
 
 
 def _validate_manifest(root_path: Path, row: dict[str, object]) -> None:

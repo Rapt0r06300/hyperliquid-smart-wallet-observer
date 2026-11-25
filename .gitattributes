@@ -19,6 +19,9 @@ catalog/DATA_INDEX.json text eol=lf
 catalog/DATA_METRICS.json text eol=lf
 catalog/data-index-parts/*.json text eol=lf
 catalog/quarantine-audit-parts/*.json text eol=lf
+# Manifestes SAFE de datasets/ : LF dans le depot, comme sur GitHub (24/11/2026). Les copies locales etaient en
+# CRLF (contenu identique) : git voyait 1,9 M fichiers modifies et chaque git status les re-hachait.
+datasets/**/*.manifest.json text eol=lf
 # Historical campaign manifests may contain authentic CRLF; preserve blob bytes.
 catalog/campaigns/*.json -text
 docs/PRE_RUN_775_SOURCE_LOSS_CLOSURE.md text eol=lf

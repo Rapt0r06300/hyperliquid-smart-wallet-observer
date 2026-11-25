@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import hashlib
 import json
-from pathlib import Path
 import sys
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
+import promote_manifest  # noqa: E402
 from index_run_manifest import index_run_manifests  # noqa: E402
 
 
@@ -156,6 +158,39 @@ def test_index_run_manifest_writes_complete_safe_row(tmp_path) -> None:
     assert manifest["proof_of_pnl_allowed"] is False
     catalog = json.loads((root / "catalog/DATA_CATALOG.json").read_text())
     assert catalog["active_data_status"] == "SAFE"
+    assert catalog["indexed_shard_count"] == 1
+    assert catalog["safe_shard_count"] == 1
+    registry = json.loads((root / "catalog/DATA_QUALITY_REGISTRY.json").read_text())
+    assert registry["active_dataset"]["source_index_sha256"] == hashlib.sha256(
+        (root / "catalog/DATA_INDEX.json").read_bytes()
+    ).hexdigest()
+
+
+def test_promote_manifest_refreshes_bound_registry_and_catalog(tmp_path, monkeypatch) -> None:
+    root = _bootstrap_root(tmp_path)
+    manifest = _manifest(
+        family="l2Book",
+        reconciliation="SOURCE_CONTINUITY_VERIFIED",
+        dataset_id="promoted-safe",
+    )
+    monkeypatch.setattr(promote_manifest, "ROOT", root)
+    monkeypatch.setattr(promote_manifest, "INDEX_PATH", root / "catalog/DATA_INDEX.json")
+    monkeypatch.setattr(promote_manifest, "CATALOG_PATH", root / "catalog/DATA_CATALOG.json")
+    monkeypatch.setattr(promote_manifest, "REGISTRY_PATH", root / "catalog/DATA_QUALITY_REGISTRY.json")
+    monkeypatch.setattr(promote_manifest, "load_json", lambda _path: dict(manifest))
+    monkeypatch.setattr(promote_manifest, "classify_manifest", lambda _manifest: ("SAFE", []))
+
+    result = promote_manifest.promote(tmp_path / "input.manifest.json")
+
+    assert result["status"] == "SAFE"
+    index_path = root / "catalog/DATA_INDEX.json"
+    registry = json.loads((root / "catalog/DATA_QUALITY_REGISTRY.json").read_text())
+    catalog = json.loads((root / "catalog/DATA_CATALOG.json").read_text())
+    assert registry["active_dataset"]["source_index_sha256"] == hashlib.sha256(
+        index_path.read_bytes()
+    ).hexdigest()
+    assert registry["active_dataset"]["indexed_shards"] == 1
+    assert registry["active_dataset"]["safe_count"] == 1
     assert catalog["indexed_shard_count"] == 1
     assert catalog["safe_shard_count"] == 1
 

@@ -11,15 +11,16 @@ import gzip
 import hashlib
 import json
 import os
+import re
 import shutil
 import sys
 import zlib
-import re
 from pathlib import Path
 
 CANONICAL_REPOSITORY = "Rapt0r06300/hyperliquid-smart-wallet-observer"
 RESERVE_BYTES = 1024 ** 3
 MAX_SINGLE_FILE_BYTES = (1 << 32) - 1
+MAX_JSONL_RECORD_BYTES = 64 * 1024 * 1024
 
 
 def _windows_io_path(path: Path) -> Path:
@@ -414,12 +415,17 @@ def expand_safe_corpus(
             # place de la sortie, et `out` vaut None -- les verifications, elles, restent toutes.
             sortie = contextlib.nullcontext() if sceaux_seuls else tmp.open("xb")
             with gzip.open(source, "rb") as inp, sortie as out:
-                for line in inp:
+                while True:
+                    # Bound allocation before reading: iterating the stream first can
+                    # materialize a corrupt multi-gigabyte JSONL record in memory.
+                    line = inp.readline(MAX_JSONL_RECORD_BYTES + 1)
+                    if not line:
+                        break
+                    if len(line) > MAX_JSONL_RECORD_BYTES:
+                        raise SafeUnpackError(f"oversized JSONL record: {source}")
                     size += len(line)
                     if size > announced_bytes or size > MAX_SINGLE_FILE_BYTES:
                         raise SafeUnpackError(f"gzip size exceeds declared ISIZE: {source}")
-                    if len(line) > 64 * 1024 * 1024:
-                        raise SafeUnpackError(f"oversized JSONL record: {source}")
                     try:
                         event = json.loads(line)
                     except (ValueError, UnicodeError) as exc:

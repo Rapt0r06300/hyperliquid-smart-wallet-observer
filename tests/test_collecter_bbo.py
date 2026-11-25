@@ -3,6 +3,7 @@ d'arb invalide : mapping EXACT des contrats (refus si non mappable), parsers, re
 synchronisation, et mesure de lead-lag. Aucun réseau réel : la boucle WS n'est pas testée ici (I/O)."""
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
 from pathlib import Path
@@ -219,6 +220,32 @@ def test_parser_bookticker_binance():
     r = m.parser_bookticker_binance(msg)
     assert r["symbol"] == "ETHUSDT" and r["bid"] == 3000.1 and r["ask"] == 3000.4 and r["ts_ex"] == 222
     assert m.parser_bookticker_binance({"x": 1}) is None
+
+
+def test_collecter_bbo_uses_only_declared_feed_event_kinds():
+    source = (RACINE / "tools" / "collecter_bbo.py").read_text(encoding="utf-8")
+    enum_source = (RACINE / "src" / "hl_observer" / "realtime" / "feed_quality.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    enum_tree = ast.parse(enum_source)
+    enum_class = next(
+        node for node in enum_tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "FeedEventKind"
+    )
+    enum_members = {
+        target.id
+        for node in enum_class.body
+        if isinstance(node, (ast.Assign, ast.AnnAssign))
+        for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
+        if isinstance(target, ast.Name)
+    }
+    used = {
+        node.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "FeedEventKind"
+    }
+    assert used <= enum_members, f"undeclared FeedEventKind values: {sorted(used - enum_members)}"
 
 
 def test_binance_bbo_tape_record_preserves_top_of_book_sizes():

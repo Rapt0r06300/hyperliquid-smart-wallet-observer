@@ -14,9 +14,16 @@ except ModuleNotFoundError:
     from manifest_policy import classify_manifest
 
 try:
-    from tools.partitioned_data_index import read_index, save_index, SCHEMA as PARTITION_SCHEMA
+    from tools.partitioned_data_index import SCHEMA as PARTITION_SCHEMA
+    from tools.partitioned_data_index import index_file_sha256, read_index, save_index
 except ModuleNotFoundError:
-    from partitioned_data_index import read_index, save_index, SCHEMA as PARTITION_SCHEMA
+    from partitioned_data_index import SCHEMA as PARTITION_SCHEMA
+    from partitioned_data_index import index_file_sha256, read_index, save_index
+
+try:
+    from tools.global_unique_trade_patch import global_unique_count_rows
+except ModuleNotFoundError:
+    from global_unique_trade_patch import global_unique_count_rows
 
 ROOT = Path(__file__).resolve().parents[1]
 INDEX_PATH = ROOT / "catalog" / "DATA_INDEX.json"
@@ -175,7 +182,7 @@ def _load_trade_count_patch_results(root: Path) -> dict[str, Mapping[str, Any]]:
     }
 
 
-def _load_global_unique_count_patch_results(root: Path) -> dict[str, Mapping[str, Any]]:
+def _load_global_unique_count_patch_results(root: Path) -> Mapping[str, Mapping[str, Any]]:
     path = root / "catalog" / "TRADE_UNIQUE_COUNT_PATCH.json"
     if not path.is_file():
         return {}
@@ -183,14 +190,9 @@ def _load_global_unique_count_patch_results(root: Path) -> dict[str, Mapping[str
         doc = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
-    counts = doc.get("counts") if isinstance(doc, Mapping) else {}
-    if not isinstance(counts, Mapping):
+    if not isinstance(doc, Mapping):
         return {}
-    return {
-        str(dataset_id): dict(row)
-        for dataset_id, row in counts.items()
-        if isinstance(row, Mapping)
-    }
+    return global_unique_count_rows(doc)
 
 
 
@@ -739,6 +741,7 @@ def index_run_manifests(
         "partial_count": partial_count,
         "stale_count": stale_count,
         "reject_count": reject_count,
+        "source_index_sha256": index_file_sha256(index_path),
     }
     _atomic_json(registry_path, registry)
 

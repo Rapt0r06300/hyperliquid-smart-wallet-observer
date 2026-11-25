@@ -77,6 +77,74 @@ def _frame_metrics_are_complete(metrics: Mapping[str, Any]) -> bool:
     )
 
 
+def _frame_reconciliation_matches(
+    metrics: Mapping[str, Any],
+    *,
+    accepted_frames: int | None,
+    persisted_frames: int | None,
+    published_record_count: int | None,
+) -> bool:
+    reconciliation = metrics.get("frame_reconciliation")
+    if not isinstance(reconciliation, Mapping):
+        return False
+    values = {
+        key: _exact_nonnegative_int(reconciliation.get(key))
+        for key in (
+            "accepted_frames", "persisted_frames", "all_shard_count",
+            "published_shard_count", "excluded_shard_count",
+            "all_shard_record_count", "published_record_count",
+            "excluded_record_count",
+        )
+    }
+    if any(value is None for value in values.values()):
+        return False
+    bundle = metrics.get("bundle_index")
+    if not isinstance(bundle, Mapping):
+        bundle = metrics.get("bundle")
+    if not isinstance(bundle, Mapping):
+        bundle = {}
+    admission = metrics.get("source_admission")
+    if not isinstance(admission, Mapping):
+        admission = {}
+    published_shards = _exact_nonnegative_int(metrics.get("shard_count"))
+    if published_shards is None:
+        published_shards = _exact_nonnegative_int(bundle.get("shard_count"))
+    excluded_shards = _exact_nonnegative_int(
+        metrics.get("excluded_shard_count_observed")
+    )
+    if excluded_shards is None:
+        excluded_shards = _exact_nonnegative_int(admission.get("excluded_shards"))
+    excluded_records = _exact_nonnegative_int(
+        metrics.get("excluded_record_count_observed")
+    )
+    if excluded_records is None and admission.get("excluded_record_count_exact") is True:
+        excluded_records = _exact_nonnegative_int(admission.get("excluded_record_count"))
+    return (
+        reconciliation.get("schema") == "alina.collection_frame_reconciliation.v1"
+        and reconciliation.get("status") == "MATCHED"
+        and reconciliation.get("record_count_unit") == "valid_jsonl_records"
+        and accepted_frames is not None
+        and persisted_frames is not None
+        and published_record_count is not None
+        and values["accepted_frames"] == accepted_frames
+        and values["persisted_frames"] == persisted_frames
+        and accepted_frames == persisted_frames
+        and values["all_shard_record_count"] == persisted_frames
+        and values["published_record_count"] == published_record_count
+        and values["published_shard_count"] == published_shards
+        and values["excluded_shard_count"] == excluded_shards
+        and values["excluded_record_count"] == excluded_records
+        and (
+            not admission
+            or admission.get("no_rejected_payload_published") is True
+        )
+        and values["all_shard_record_count"]
+        == values["published_record_count"] + values["excluded_record_count"]
+        and values["all_shard_count"]
+        == values["published_shard_count"] + values["excluded_shard_count"]
+    )
+
+
 def _summary_from_result(result: Mapping[str, Any]) -> dict[str, Any] | None:
     metrics = result.get("collection_metrics")
     if isinstance(metrics, Mapping):
@@ -134,8 +202,13 @@ def _summary_from_result(result: Mapping[str, Any]) -> dict[str, Any] | None:
                 and l2 is not None
                 and bbo is not None
                 and record_count is not None
-                and accepted >= persisted
-                and persisted == record_count
+                and accepted == persisted
+                and _frame_reconciliation_matches(
+                    compact,
+                    accepted_frames=accepted,
+                    persisted_frames=persisted,
+                    published_record_count=record_count,
+                )
                 and l2 <= persisted
                 and bbo <= persisted
             )
@@ -157,7 +230,6 @@ def _summary_from_result(result: Mapping[str, Any]) -> dict[str, Any] | None:
     assets = summary.get("assets")
     trade_count: int | None = 0
     record_count = 0
-    trade_assets_seen = False
     asset_frame_counts_complete = isinstance(assets, list)
     asset_l2_frames = 0
     asset_bbo_frames = 0
@@ -177,11 +249,9 @@ def _summary_from_result(result: Mapping[str, Any]) -> dict[str, Any] | None:
             if family in {"l2book", "copy_vault_l2", "native_market"}:
                 if events is not None:
                     asset_l2_frames += events
-            elif family == "bbo":
-                if events is not None:
-                    asset_bbo_frames += events
+            elif family in {"bbo", "copy_vault_bbo"} and events is not None:
+                asset_bbo_frames += events
             if family in TRADE_FAMILIES:
-                trade_assets_seen = True
                 if events is None:
                     trade_count = None
                 elif trade_count is not None:
@@ -316,12 +386,16 @@ def _summary_from_result(result: Mapping[str, Any]) -> dict[str, Any] | None:
         and l2_frames is not None
         and bbo_frames is not None
         and drops is not None
-        and accepted_frames >= persisted_frames
+        and accepted_frames == persisted_frames
         and l2_frames <= persisted_frames
         and bbo_frames <= persisted_frames
-        and (
-            not asset_frame_counts_complete
-            or persisted_frames == record_count
+        and _frame_reconciliation_matches(
+            summary,
+            accepted_frames=accepted_frames,
+            persisted_frames=persisted_frames,
+            published_record_count=(
+                record_count if record_count_coverage_complete else None
+            ),
         )
     )
     compressed_bytes = _exact_nonnegative_int(summary.get("compressed_bytes"))
@@ -494,6 +568,10 @@ def build() -> dict[str, Any]:
                 if (
                     type(excluded) is int and excluded >= 0
                     and type(excluded_bytes) is int and excluded_bytes >= 0
+                    and (
+                        source.get("excluded_compressed_bytes_exact") is True
+                        or (excluded == 0 and excluded_bytes == 0)
+                    )
                     and isinstance(reasons, Mapping)
                     and source.get("no_rejected_payload_published") is True
                     and all(
@@ -703,6 +781,10 @@ def build() -> dict[str, Any]:
         and totals["units_trade_count_coverage_incomplete"] == 0
         and totals["units_uncompressed_coverage_incomplete"] == 0
     )
+    trade_count_coverage_complete = (
+        totals["durable_units"] > 0
+        and totals["units_trade_count_coverage_incomplete"] == 0
+    )
     # Every durable result is an observed admission unit.  Even an empty
     # result must carry an explicit validated admission record before the
     # quality verdict can be COMPLETE.
@@ -749,9 +831,10 @@ def build() -> dict[str, Any]:
                 else totals["uncompressed_bytes"]
             ),
             "coverage_complete": (
-                totals["durable_units"] > 0
-                and totals["units_trade_count_coverage_incomplete"] == 0
+                trade_count_coverage_complete
             ),
+            "trade_count_coverage_complete": trade_count_coverage_complete,
+            "coverage_complete_scope": "observed_durable_collection_trade_counts_only",
             "uncompressed_coverage_complete": (
                 totals["durable_units"] > 0
                 and totals["units_uncompressed_coverage_incomplete"] == 0

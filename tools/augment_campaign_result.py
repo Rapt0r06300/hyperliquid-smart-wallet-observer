@@ -15,6 +15,46 @@ def _exact_nonnegative_int(value: Any) -> int | None:
     return value
 
 
+def _valid_frame_reconciliation(
+    reconciliation: Any,
+    *,
+    published_record_count: int | None,
+    published_shard_count: int | None,
+    excluded_record_count: int | None,
+    excluded_shard_count: int | None,
+    collection_metrics: dict[str, Any],
+) -> bool:
+    if not isinstance(reconciliation, dict):
+        return False
+    fields = (
+        "accepted_frames", "persisted_frames", "all_shard_count",
+        "published_shard_count", "excluded_shard_count",
+        "all_shard_record_count", "published_record_count",
+        "excluded_record_count",
+    )
+    exact = {key: _exact_nonnegative_int(reconciliation.get(key)) for key in fields}
+    metric_accepted = _exact_nonnegative_int(collection_metrics.get("accepted_frames"))
+    metric_persisted = _exact_nonnegative_int(collection_metrics.get("persisted_frames"))
+    return (
+        all(value is not None for value in exact.values())
+        and reconciliation.get("schema") == "alina.collection_frame_reconciliation.v1"
+        and reconciliation.get("status") == "MATCHED"
+        and reconciliation.get("record_count_unit") == "valid_jsonl_records"
+        and metric_accepted == exact["accepted_frames"]
+        and metric_persisted == exact["persisted_frames"]
+        and exact["accepted_frames"] == exact["persisted_frames"]
+        and exact["all_shard_record_count"] == exact["persisted_frames"]
+        and exact["published_record_count"] == published_record_count
+        and exact["published_shard_count"] == published_shard_count
+        and exact["excluded_record_count"] == excluded_record_count
+        and exact["excluded_shard_count"] == excluded_shard_count
+        and exact["all_shard_record_count"]
+        == exact["published_record_count"] + exact["excluded_record_count"]
+        and exact["all_shard_count"]
+        == exact["published_shard_count"] + exact["excluded_shard_count"]
+    )
+
+
 def _load(path: Path) -> dict[str, Any]:
     value=json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(value,dict):
@@ -109,6 +149,56 @@ def annotate_collection(
     # truncated, non-JSON tail. Frame counters come only from the structured
     # checkpoint; missing counters stay unknown instead of becoming zero.
     merged_collection_metrics.setdefault("frame_metrics_complete", False)
+    source_admission = manifest.get("source_admission")
+    excluded_record_count = (
+        _exact_nonnegative_int(source_admission.get("excluded_record_count"))
+        if isinstance(source_admission, dict)
+        and source_admission.get("excluded_record_count_exact") is True
+        else None
+    )
+    excluded_shard_count = (
+        _exact_nonnegative_int(source_admission.get("excluded_shards"))
+        if isinstance(source_admission, dict) else None
+    )
+    frame_reconciliation = manifest.get("frame_reconciliation")
+    frame_counter_consistent = (
+        manifest_inventory_complete
+        and isinstance(source_admission, dict)
+        and source_admission.get("no_rejected_payload_published") is True
+        and _valid_frame_reconciliation(
+            frame_reconciliation,
+            published_record_count=record_count if manifest_inventory_complete else None,
+            published_shard_count=declared_shards,
+            excluded_record_count=excluded_record_count,
+            excluded_shard_count=excluded_shard_count,
+            collection_metrics=merged_collection_metrics,
+        )
+    )
+    merged_collection_metrics.update({
+        "frame_counter_consistent": frame_counter_consistent,
+        "frame_reconciliation": (
+            dict(frame_reconciliation)
+            if isinstance(frame_reconciliation, dict) else None
+        ),
+        "all_shard_count_observed": (
+            _exact_nonnegative_int(frame_reconciliation.get("all_shard_count"))
+            if isinstance(frame_reconciliation, dict) else None
+        ),
+        "published_shard_count_observed": declared_shards,
+        "excluded_shard_count_observed": excluded_shard_count,
+        "all_shard_record_count_observed": (
+            _exact_nonnegative_int(frame_reconciliation.get("all_shard_record_count"))
+            if isinstance(frame_reconciliation, dict) else None
+        ),
+        "published_record_count_observed": (
+            record_count if manifest_inventory_complete else None
+        ),
+        "excluded_record_count_observed": excluded_record_count,
+    })
+    merged_collection_metrics["frame_metrics_complete"] = (
+        merged_collection_metrics.get("frame_metrics_complete") is True
+        and frame_counter_consistent
+    )
     merged_collection_metrics.update({
         "trade_count_observed":trade_count if trade_count_coverage_complete else None,
         "trade_count_observed_lower_bound":trade_count,
@@ -135,7 +225,7 @@ def annotate_collection(
         "partial_count":partial_shards,
         "reject_count":rejected_shards,
         "durable_persisted":True,
-        "source_admission":manifest.get("source_admission"),
+        "source_admission":source_admission,
         "collection_metrics":merged_collection_metrics,
     })
     _write_result(result_path,row)

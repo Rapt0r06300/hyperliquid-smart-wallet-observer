@@ -256,6 +256,18 @@ def test_valid_gzip_with_invalid_jsonl_is_rejected(tmp_path):
     assert not (tmp_path / "usable" / "unpacked" / "release-one" / "safe.jsonl").exists()
 
 
+def test_oversized_jsonl_record_is_bounded_before_reading(tmp_path, monkeypatch):
+    fixture(tmp_path)
+    monkeypatch.setattr(unpack_module, "MAX_JSONL_RECORD_BYTES", 8)
+
+    with pytest.raises(SafeUnpackError, match="oversized JSONL record"):
+        _expand(tmp_path)
+
+    target = tmp_path / "usable" / "unpacked" / "release-one" / "safe.jsonl"
+    assert not target.exists()
+    assert not target.with_suffix(".jsonl.alina.json").exists()
+
+
 
 def test_interrupted_unsealed_jsonl_quarantined_and_reconstructed(tmp_path):
     fixture(tmp_path)

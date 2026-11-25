@@ -870,7 +870,10 @@ def record_trade_count_preflight(evidence_dir: Path) -> dict[str, Any]:
     if not isinstance(patch, dict):
         raise RuntimeError("global unique-trade patch root is invalid")
     required_exact = (
-        patch.get("schema") == "alina.global_unique_trade_patch.v4"
+        patch.get("schema") in {
+            "alina.global_unique_trade_patch.v4",
+            "alina.global_unique_trade_patch.v5",
+        }
         and patch.get("coverage_complete") is True
         and patch.get("identity_store_persisted") is True
         and patch.get("candidate_trade_shards") == patch.get("successful")

@@ -109,6 +109,8 @@ def test_public_event_bundle_is_causal_read_only_and_not_artificially_safe(
     assert bundle["dataset_ids"] == []
     assert bundle["source_admission"]["mode"] == "replay_only"
     assert bundle["source_admission"]["excluded_shards"] == 4
+    assert bundle["source_admission"]["excluded_compressed_bytes_exact"] is True
+    assert bundle["source_admission"]["excluded_compressed_bytes"] > 0
     assert bundle["source_admission"]["no_rejected_payload_published"] is True
     assert not list((tmp_path / "bundle" / "assets").glob("*.jsonl.gz"))
     assert not list((tmp_path / "bundle" / "manifests").glob("*.json"))

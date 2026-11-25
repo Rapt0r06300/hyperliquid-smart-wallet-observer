@@ -179,3 +179,9 @@ def test_global_unique_backfill_persists_and_restores_its_durable_checkpoint():
     assert "key: global-unique-trades-v4-${{ github.run_id }}" in txt
     assert "restore-keys:" in txt
     assert "global-unique-trades-v4-" in txt
+
+
+def test_global_unique_backfill_triggers_when_its_v5_codec_changes():
+    txt = _texte("backfill-global-unique-trade-counts.yml")
+    push_paths = txt.split("  push:", 1)[1].split("  workflow_dispatch:", 1)[0]
+    assert '"tools/global_unique_trade_patch.py"' in push_paths

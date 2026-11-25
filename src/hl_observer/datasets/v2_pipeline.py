@@ -366,10 +366,20 @@ def locally_replay_admissible(manifest: Mapping[str, Any]) -> bool:
 def admission_rejection(manifest: Mapping[str, Any]) -> dict[str, Any]:
     """Payload-free classification; never promote non-replayable evidence."""
     candidate = finalize_manifest({**manifest, "asset_verified": True})
+    raw_records = candidate.get("record_count")
+    if raw_records is None:
+        raw_records = candidate.get("event_count")
+    exact_records = (
+        raw_records
+        if type(raw_records) is int and raw_records >= 0
+        else None
+    )
     return {
         "quality_status": candidate.get("quality_status"),
         "reasons": candidate.get("quality_reasons") or ["REPLAY_NOT_PROVEN"],
         "compressed_bytes": max(0, _int(candidate.get("bytes")) or 0),
+        "record_count": exact_records,
+        "family": str(candidate.get("family") or ""),
     }
 
 
@@ -534,11 +544,48 @@ def pipeline_done_receipt(*, checks: Sequence[Mapping[str, Any]]) -> dict[str, A
 
 def summarize_admission_rejections(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
     counts: Counter[str] = Counter()
+    record_counts: list[int] = []
+    compressed_byte_counts: list[int] = []
+    records_by_family: Counter[str] = Counter()
+    record_counts_complete = True
+    compressed_byte_counts_complete = True
+    family_counts_exact = True
     for row in rows:
         counts.update(str(reason) for reason in row.get("reasons", []) if reason)
+        raw_bytes = row.get("compressed_bytes")
+        if type(raw_bytes) is not int or raw_bytes < 0:
+            compressed_byte_counts_complete = False
+        else:
+            compressed_byte_counts.append(raw_bytes)
+        raw_records = row.get("record_count")
+        if type(raw_records) is not int or raw_records < 0:
+            record_counts_complete = False
+            family_counts_exact = False
+            continue
+        record_counts.append(raw_records)
+        family = str(row.get("family") or "").strip().lower()
+        if not family:
+            family_counts_exact = False
+            continue
+        records_by_family[family] += raw_records
+    excluded_records_exact = record_counts_complete and len(record_counts) == len(rows)
     return {
         "excluded_shards": len(rows),
-        "excluded_compressed_bytes": sum(int(row.get("compressed_bytes") or 0) for row in rows),
+        "excluded_compressed_bytes": (
+            sum(compressed_byte_counts)
+            if compressed_byte_counts_complete
+            and len(compressed_byte_counts) == len(rows)
+            else None
+        ),
+        "excluded_compressed_bytes_exact": (
+            compressed_byte_counts_complete
+            and len(compressed_byte_counts) == len(rows)
+        ),
+        "excluded_record_count": sum(record_counts) if excluded_records_exact else None,
+        "excluded_record_count_exact": excluded_records_exact,
+        "excluded_record_count_by_family": (
+            dict(sorted(records_by_family.items())) if family_counts_exact else None
+        ),
         "blocking_reasons": dict(sorted(counts.items())),
         "no_rejected_payload_published": True,
     }

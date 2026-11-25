@@ -1,5 +1,6 @@
 from tools.index_run_manifest import (
     BYBIT_IDENTITY_VERSION,
+    _load_global_unique_count_patch_results,
     _apply_replay_patch,
     _apply_trade_count_patch,
 )
@@ -75,6 +76,47 @@ def test_trade_count_patch_is_sha_bound_and_old_bybit_unique_is_fail_closed():
     )
     assert current["unique_trade_count"] == 190000
     assert current["unique_trade_count_exact"] is True
+
+
+def test_index_manifest_reads_compact_global_unique_patch_v5(tmp_path):
+    import json
+    from tools.index_run_manifest import _index_row
+
+    catalog = tmp_path / "catalog"
+    catalog.mkdir()
+    (catalog / "TRADE_UNIQUE_COUNT_PATCH.json").write_text(json.dumps({
+        "schema": "alina.global_unique_trade_patch.v5",
+        "identity_version": "native-id-or-venue-family-symbol-time-side-price-size-v3-full-string",
+        "counts": {
+            "dataset-a": ["a" * 64, 5, 4, 3, 1, True],
+        },
+    }), encoding="utf-8")
+
+    rows = _load_global_unique_count_patch_results(tmp_path)
+
+    assert rows["dataset-a"]["asset_sha256"] == "a" * 64
+    assert rows["dataset-a"]["trade_count_scanned"] == 5
+    assert rows["dataset-a"]["unique_trade_count"] == 4
+    assert rows["dataset-a"]["unique_trade_count_exact"] is True
+    assert rows["dataset-a"]["identity_version"] == (
+        "native-id-or-venue-family-symbol-time-side-price-size-v3-full-string"
+    )
+    manifest = {
+        "dataset_id": "dataset-a",
+        "family": "trades",
+        "venue": "binance",
+        "sha256": "a" * 64,
+        "trade_count": 5,
+        "trade_count_exact": True,
+    }
+    indexed = _index_row(
+        manifest,
+        tmp_path / "datasets" / "safe" / "dataset-a.manifest.json",
+        tmp_path,
+        unique_patch_results=rows,
+    )
+    assert indexed["unique_trade_count"] == 4
+    assert indexed["unique_trade_count_exact"] is True
 
 
 

@@ -555,8 +555,8 @@ def _progression_densite_affiche(
     if pourcent is None:
         return None, f"INCONNUE — mesure {denses_acquis}/{requis}, dénominateur invalide"
     return pourcent, (
-        f"{pourcent:.1f} % — {denses_acquis}/{requis} jours denses "
-        f"(sonde âgée de {age_sonde_h:.1f} h)"
+        f"{pourcent:.1f} % ({denses_acquis}/{requis} jours denses), "
+        f"âge {age_sonde_h:.1f} h"
     )
 
 
@@ -1098,25 +1098,49 @@ def lignes_dashboard_simple(
     actifs = int(mesure.get("active_sources") or 0)
     total_fichiers = int(mesure.get("source_count") or 0)
     recents = int(mesure.get("recent_sources") or 0)
-    clair = {
-        "ACTIF": (
-            f"ACTIF — {actifs}/{total_fichiers} ont grossi en {intervalle_affiche:.1f} s "
-            "(fichiers observés, pas collecteurs)"
-        ),
-        "EN_ATTENTE": (
-            f"ATTENTE — 0/{total_fichiers} grossi en {intervalle_affiche:.1f} s; "
-            f"{recents}/{total_fichiers} modifiés <5 min"
-        ),
-        "SANS_NOUVELLE": (
-            f"AUCUNE ÉCRITURE <5 min sur {total_fichiers} fichiers; "
-            "collecteurs non vérifiés"
-        ),
-        "INCONNU": "INCONNU — les fichiers ne sont pas vérifiables",
-    }.get(etat.get("code"), "INCONNU — état non reconnu")
+    if mesure.get("motif") == "PREMIERE_MESURE":
+        clair = (
+            f"PREMIÈRE MESURE — {total_fichiers} fichiers repérés; "
+            f"premier débit après {intervalle_affiche:.1f} s"
+        )
+    else:
+        clair = {
+            "ACTIF": (
+                f"ACTIF — {actifs}/{total_fichiers} fichiers de flux ont grandi en "
+                f"{intervalle_affiche:.1f} s"
+            ),
+            "EN_ATTENTE": (
+                f"AUCUNE CROISSANCE en {intervalle_affiche:.1f} s; "
+                f"{recents}/{total_fichiers} fichiers modifiés <5 min"
+            ),
+            "SANS_NOUVELLE": (
+                f"AUCUNE ÉCRITURE <5 min sur {total_fichiers} fichiers; "
+                "collecteurs non vérifiés"
+            ),
+            "INCONNU": "INCONNU — les fichiers ne sont pas vérifiables",
+        }.get(etat.get("code"), "INCONNU — état non reconnu")
+    chemins_actifs = mesure.get("active_source_paths")
+    noms_actifs = (
+        [Path(path).name for path in chemins_actifs if isinstance(path, str)][:2]
+        if isinstance(chemins_actifs, list)
+        else []
+    )
+    if mesure.get("motif") == "PREMIERE_MESURE":
+        ecritures = "en première mesure; noms au prochain relevé"
+    elif noms_actifs:
+        autres = max(0, actifs - len(noms_actifs))
+        suffixe_autres = f" (+{autres} autres)" if autres else ""
+        ecritures = f"{', '.join(noms_actifs)}{suffixe_autres}"
+    else:
+        ecritures = "aucun fichier n'a grandi sur ce cycle"
     debit = (
         f"{mesure['lignes_par_minute']:.1f} lignes/min"
         if mesure.get("lignes_par_minute") is not None
-        else f"INCONNU ({mesure.get('motif') or 'première mesure'})"
+        else (
+            "calcul au prochain relevé"
+            if mesure.get("motif") == "PREMIERE_MESURE"
+            else f"INCONNU ({mesure.get('motif') or 'mesure en cours'})"
+        )
     )
     moteur = _eta_moteur_affiche(eta, age_sonde_h)
     eta_secondes = etude.get("eta_live_secondes")
@@ -1189,7 +1213,8 @@ def lignes_dashboard_simple(
         f"| COPY-VAULT — SUIVI ACTUALISÉ | cycle {tours} | {time.strftime('%H:%M:%S')} |",
         "+" + "-" * 76 + "+",
         f"| ÉTAT              : {clair}",
-        f"| DÉBIT FICHIERS    : {debit} (pas des signaux) | mise à jour {intervalle_affiche:.1f} s",
+        f"| FICHIERS ÉCRIVANTS: {ecritures}",
+        f"| DÉBIT FLUX LOCAUX : {debit} (pas des signaux) | mise à jour {intervalle_affiche:.1f} s",
         f"| PROCHAINE ÉTAPE   : {prochaine}",
         f"| TEMPS MINIMUM     : {eta_etude} (si chaque journée reste dense)",
         f"| ETA MOTEUR        : {moteur}",
@@ -1225,21 +1250,50 @@ def lignes_resume(
         denses_acquis, requis, age_sonde_h
     )
     etude = progression_etude(besoins)
+    intervalle_affiche = max(0.5, float(intervalle_s))
     etat_clair = {
         "ACTIF": (
             f"Croissance mesurée : {mesure.get('active_sources', 0)}/"
-            f"{mesure.get('source_count', 0)} fichiers locaux suivis ont grandi entre les deux relevés; "
-            "ce n’est ni le nombre de collecteurs ni une limite à 10."
+            f"{mesure.get('source_count', 0)} fichiers de flux locaux ont grandi entre les deux relevés."
         ),
-        "EN_ATTENTE": "En attente : pas encore assez de recul pour mesurer le débit.",
+        "EN_ATTENTE": (
+            f"Première mesure : {mesure.get('source_count', 0)} fichiers repérés; "
+            f"premier débit après {intervalle_affiche:.1f} s."
+            if mesure.get("motif") == "PREMIERE_MESURE"
+            else "Aucune croissance mesurée sur ce cycle; les collecteurs sont décrits séparément."
+        ),
         "SANS_NOUVELLE": "Aucun fichier observé n'a grandi récemment ; cela ne prouve pas un arrêt.",
         "INCONNU": "État inconnu : le ruban n'est pas vérifiable.",
     }.get(etat["code"], "État non reconnu : aucune conclusion.")
     debit = (
         f"{mesure['lignes_par_minute']:.1f} lignes/min"
         if mesure.get("lignes_par_minute") is not None
-        else f"INCONNU ({mesure.get('motif') or 'mesure en cours'})"
+        else (
+            "calcul au prochain relevé"
+            if mesure.get("motif") == "PREMIERE_MESURE"
+            else f"INCONNU ({mesure.get('motif') or 'mesure en cours'})"
+        )
     )
+    if mesure.get("motif") == "PREMIERE_MESURE":
+        activite_fichiers = (
+            f"| ACTIVITÉ FICHIERS   : première mesure — "
+            f"{mesure.get('source_count', 0)} fichiers repérés; comparaison au prochain relevé"
+        )
+    else:
+        activite_fichiers = (
+            f"| ACTIVITÉ FLUX      : {mesure.get('active_sources', 0)}/"
+            f"{mesure.get('source_count', 0)} fichiers de flux ont grandi depuis le relevé précédent | "
+            f"{mesure.get('recent_sources', 0)}/{mesure.get('source_count', 0)} modifiés récemment"
+        )
+    chemins_actifs = mesure.get("active_source_paths")
+    if isinstance(chemins_actifs, list) and chemins_actifs:
+        lignes_chemins_actifs = ["| FLUX EN CROISSANCE :"] + [
+            f"|   {chemin}" for chemin in chemins_actifs if isinstance(chemin, str)
+        ]
+    elif mesure.get("motif") == "PREMIERE_MESURE":
+        lignes_chemins_actifs = ["| FLUX EN CROISSANCE : mesure initiale en cours"]
+    else:
+        lignes_chemins_actifs = ["| FLUX EN CROISSANCE : aucun détecté sur ce cycle"]
     eta_txt = _eta_moteur_affiche(eta, age_sonde_h)
     sonde_source = Path(source_denses).name if source_denses else "INCONNUE"
     return [
@@ -1252,14 +1306,12 @@ def lignes_resume(
         f"| ETA MINIMUM ACTUEL  : {etude['eta_live']} (si chaque journée reste dense)",
         *besoins_live(besoins),
         *lignes_sources_live(sources),
-        f"| DÉBIT FICHIERS SUIVIS: {debit} | ETA moteur : {eta_txt}",
-        f"| ACTIVITÉ FICHIERS   : {mesure.get('active_sources', 0)}/{mesure.get('source_count', 0)} "
-        f"ont grandi depuis le relevé précédent | "
-        f"{mesure.get('recent_sources', 0)}/{mesure.get('source_count', 0)} modifiés récemment",
+        f"| DÉBIT FLUX LOCAUX  : {debit} | ETA moteur : {eta_txt}",
+        activite_fichiers,
+        *lignes_chemins_actifs,
         *_lignes_suivi_collecteurs(suivi_collecteurs),
         *_lignes_detail_suivi_collecteurs(suivi_collecteurs),
-        f"| À SAVOIR            : {mesure.get('source_count', 0)} fichiers locaux surveillés; les archives et shards imbriqués sont hors de ce débit",
-        f"| ÉTAT DU RUBAN       : {etat['detail']} | dernière écriture : {etat.get('age_s', '?')} s",
+        "| À SAVOIR            : rubans JSONL/NDJSON/CSV locaux seulement; JSON d'état, archives et shards exclus; cela ne prouve pas l'état des processus",
         f"| SONDE DENSITÉ       : rapport {sonde_source} | rafraîchissement écran {max(0.5, float(intervalle_s)):.1f} s",
         "+" + "=" * 72 + "+",
         "  Lecture seule : le résumé indique des observations, il ne démarre ni n'arrête rien.",
@@ -1345,18 +1397,18 @@ class MesureDeDebit:
                 "age_s": round(ecoule, 1), "motif": None}
 
 
-FLUX_DATA_EXTENSIONS = (".jsonl", ".ndjson", ".csv", ".json")
+FLUX_DATA_EXTENSIONS = (".jsonl", ".ndjson", ".csv")
 FLUX_DATA_SUFFIXES_IGNORES = (".lock", ".part", ".partial", ".idx.json")
 
 
 def trouver_flux_de_donnees(racine: Path) -> list[Path]:
     """Découvre les flux locaux sans ouvrir ni modifier leurs données.
 
-    Les collecteurs écrivent plusieurs rubans en parallèle. L'ancien ETA choisissait
-    ``vault_fills_poll`` puis pouvait afficher 0 alors que L2, trades ou checkpoints
-    avançaient. On observe tous les fichiers de données directement sous
-    ``runtime/data`` et les rubans live connus, sans compter les archives SAFE ni les
-    rapports du labo comme du débit de collecte.
+    Les collecteurs écrivent plusieurs rubans append-only en parallèle. L'ancien ETA
+    choisissait ``vault_fills_poll`` puis pouvait afficher 0 alors que L2 ou trades
+    avançaient. On observe les JSONL/NDJSON/CSV directement sous ``runtime/data`` et
+    les rubans live connus. Les JSON d'état/checkpoint ne sont pas des flux; les
+    archives SAFE et rapports du labo ne comptent pas dans le débit.
     """
     vus: dict[str, Path] = {}
     dossier = Path(racine) / "runtime" / "data"
@@ -1393,6 +1445,15 @@ def etat_flux_global(mesure: dict, *, maintenant: float | None = None) -> dict:
     recents = int(mesure.get("recent_sources") or 0)
     if total == 0:
         return {"code": "INCONNU", "detail": "aucun flux de données trouvé", "age_s": None}
+    if mesure.get("motif") == "PREMIERE_MESURE":
+        return {
+            "code": "EN_ATTENTE",
+            "detail": (
+                f"première mesure : {total} fichiers repérés; "
+                "le débit sera calculé au prochain relevé"
+            ),
+            "age_s": mesure.get("age_s"),
+        }
     if actifs:
         return {
             "code": "ACTIF",

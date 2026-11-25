@@ -18,7 +18,9 @@ Pure static analysis: reads text, never imports or runs the scanned code.
 
 from __future__ import annotations
 
+import os
 import re
+import tokenize
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -70,15 +72,26 @@ class FakeDataFinding:
 
 
 def _iter_py_files(root: Path):
+    root = Path(root)
     if root.is_file():
         yield root
         return
-    for path in root.rglob("*.py"):
-        if any(part in _EXCLUDED_DIRS for part in path.parts):
-            continue
-        if path.name in _EXCLUDED_FILENAMES:
-            continue
-        yield path
+    if not root.is_dir():
+        raise FileNotFoundError(f"fake-data scan root is unavailable: {root}")
+    errors: list[OSError] = []
+    for dirpath, dirnames, filenames in os.walk(
+        root, topdown=True, followlinks=False, onerror=errors.append,
+    ):
+        # Prune excluded trees before descending, rather than discovering every
+        # vendored/cache file and discarding it after traversal.
+        dirnames[:] = sorted(name for name in dirnames if name not in _EXCLUDED_DIRS)
+        for name in sorted(filenames):
+            if not name.endswith(".py") or name in _EXCLUDED_FILENAMES:
+                continue
+            yield Path(dirpath) / name
+    if errors:
+        first = errors[0]
+        raise OSError(f"fake-data inventory incomplete: {first}") from first
 
 
 def _scan_text(path: str, text: str) -> list[FakeDataFinding]:
@@ -102,12 +115,23 @@ def scan_for_fake_data(roots=None):
     targets = [Path(r) for r in roots] if roots else [DEFAULT_SCAN_ROOT]
     findings = []
     for root in targets:
-        for path in _iter_py_files(root):
-            try:
-                text = path.read_text(encoding="utf-8", errors="ignore")
-            except OSError:
-                continue
-            findings.extend(_scan_text(str(path), text))
+        try:
+            for path in _iter_py_files(root):
+                try:
+                    with tokenize.open(path) as stream:
+                        text = stream.read()
+                except (OSError, UnicodeError, LookupError, SyntaxError) as exc:
+                    findings.append(FakeDataFinding(
+                        str(path), 0, "SCAN_INCOMPLETE",
+                        f"could not read source ({type(exc).__name__})",
+                    ))
+                    continue
+                findings.extend(_scan_text(str(path), text))
+        except OSError as exc:
+            findings.append(FakeDataFinding(
+                str(root), 0, "SCAN_INCOMPLETE",
+                f"could not enumerate source ({type(exc).__name__})",
+            ))
     return findings
 
 

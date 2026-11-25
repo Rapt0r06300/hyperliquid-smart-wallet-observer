@@ -39,10 +39,12 @@ class PartitionedTickDatasetWriter:
         *,
         rotate_bytes: int = 128 * 1024 * 1024,
         flush_every: int = 1,
+        manifest_interval_s: float = 0.0,
     ) -> None:
         self.root = Path(root)
         self.rotate_bytes = max(1, int(rotate_bytes))
         self.flush_every = max(1, int(flush_every))
+        self.manifest_interval_s = max(0.0, float(manifest_interval_s))
         self._writers: dict[tuple[str, str, str], TickDatasetWriter] = {}
         self._last_connection: dict[tuple[str, str, str], str | None] = {}
         # Track exchange-authenticated L2 predecessor evidence per partition.
@@ -77,6 +79,7 @@ class PartitionedTickDatasetWriter:
             stream_name="ticks",
             rotate_bytes=self.rotate_bytes,
             flush_every=self.flush_every,
+            manifest_interval_s=self.manifest_interval_s,
         )
         self._writers[key] = writer
         return writer

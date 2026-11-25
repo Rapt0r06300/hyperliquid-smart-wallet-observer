@@ -4,8 +4,14 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
+
+try:
+    from tools.global_unique_trade_patch import global_unique_count_rows
+except ModuleNotFoundError:
+    from global_unique_trade_patch import global_unique_count_rows
 
 try:
     from tools.partitioned_data_index import SCHEMA, iter_index_rows, read_index
@@ -182,20 +188,26 @@ def build() -> dict[str, Any]:
     manifest_trade_shards = 0
     global_unique_asset_receipts_bound = True
     unique_doc_early: dict[str, Any] = {}
-    unique_rows: dict[str, Any] = {}
+    unique_rows: Mapping[str, Any] = {}
     unique_identity_current_early = False
     try:
-        unique_doc_early = json.loads(UNIQUE_PATCH.read_text(encoding="utf-8"))
-        unavailable_early = unique_doc_early.get("unavailable") if isinstance(unique_doc_early, dict) else {}
+        patch_document = json.loads(UNIQUE_PATCH.read_text(encoding="utf-8"))
+        unavailable_early = patch_document.get("unavailable") if isinstance(patch_document, dict) else {}
         if isinstance(unavailable_early, dict):
             unique_unavailable_ids = set(unavailable_early)
-        if isinstance(unique_doc_early, dict):
+        if isinstance(patch_document, dict):
             unique_identity_current_early = (
-                str(unique_doc_early.get("identity_version") or "") == GLOBAL_IDENTITY_VERSION
+                str(patch_document.get("identity_version") or "") == GLOBAL_IDENTITY_VERSION
             )
-            raw_unique_rows = unique_doc_early.get("counts")
-            if isinstance(raw_unique_rows, dict):
-                unique_rows = raw_unique_rows
+            unique_rows = global_unique_count_rows(patch_document)
+            # Keep summary metadata but release the deserialized row container
+            # here; ``unique_rows`` holds only the lazy view needed by the scan.
+            unique_doc_early = {
+                key: value for key, value in patch_document.items()
+                if key not in {"counts", "unavailable"}
+            }
+        else:
+            unique_doc_early = {}
     except (OSError, ValueError, TypeError):
         unique_doc_early = {}
         unique_rows = {}
@@ -500,13 +512,16 @@ def build() -> dict[str, Any]:
     totals["TOTAL_TRADES_COUNT_COVERAGE_COMPLETE"] = (
         totals["TRADE_SHARDS_MISSING_EXACT_COUNT"] == 0
     )
-    unique_patch = {}
+    # Reuse the exact patch snapshot already loaded before scanning rows.  The
+    # global-unique receipt can be ~94 MiB; loading/parsing it again needlessly
+    # doubles I/O and peak JSON memory and could observe a different version
+    # if a concurrent writer publishes during this build.
+    unique_patch = unique_doc_early if isinstance(unique_doc_early, dict) else {}
     global_unique = None
     global_unique_digest = None
     global_unique_complete = False
-    if UNIQUE_PATCH.is_file():
+    if unique_patch:
         try:
-            unique_patch = json.loads(UNIQUE_PATCH.read_text(encoding="utf-8"))
             if isinstance(unique_patch, dict):
                 unique_identity_current = (
                     str(unique_patch.get("identity_version") or "") == GLOBAL_IDENTITY_VERSION
@@ -537,8 +552,8 @@ def build() -> dict[str, Any]:
                         and _int(unique_patch.get("unproven_trade_count_shards")) == 0
                     )
                 else:
-                    # v4 patches produced by the full-corpus scanner predate the
-                    # explicit scope fields but carry an equivalent complete receipt.
+                    # Legacy/v4 patches predate explicit scope fields; the same
+                    # summary is retained by compact v5 receipts for compatibility.
                     failed_rows = unique_patch.get("failed")
                     unique_scope_complete = (
                         _int(unique_patch.get("candidate_trade_shards")) == manifest_trade_shards

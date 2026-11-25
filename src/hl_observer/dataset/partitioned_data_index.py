@@ -1,9 +1,4 @@
-"""Lossless, fail-closed partition format for a future DATA_INDEX migration.
-
-This module does not publish or activate a partitioned catalogue. The existing
-DATA_INDEX.json remains authoritative until *all* readers, writers, replay,
-metrics, selection and SAFE restore paths are migrated and parity-gated.
-"""
+"""Lossless, fail-closed reader and writer for the partitioned DATA_INDEX."""
 from __future__ import annotations
 
 import hashlib
@@ -15,7 +10,63 @@ from typing import Any
 
 SCHEMA = "alina.data_index_partitioned.v1"
 MAX_PARTITION_BYTES = 8 * 1024 * 1024
-_PART_PATH = re.compile(r"data-index-parts/part-([0-9]{6})[.]json")
+_PART_PATH = re.compile(
+    r"data-index-parts/part-([0-9]{6})(?:-([0-9a-f]{64}))?[.]json"
+)
+
+
+def index_file_sha256(index_path: str | Path) -> str:
+    """Hash the exact published DATA_INDEX root bytes with bounded memory."""
+    path = Path(index_path)
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("DATA_INDEX_SHA_SOURCE_UNAVAILABLE")
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def require_index_sha256_binding(
+    receipt: Mapping[str, Any], index_path: str | Path,
+) -> str:
+    """Fail closed unless a receipt is bound to the current index root bytes."""
+    if not isinstance(receipt, Mapping):
+        raise ValueError("DATA_INDEX_SHA_BINDING_RECEIPT_INVALID")
+    observed = receipt.get("source_index_sha256")
+    expected = index_file_sha256(index_path)
+    if not isinstance(observed, str) or not re.fullmatch(r"[0-9a-f]{64}", observed):
+        raise ValueError("DATA_INDEX_SHA_BINDING_MISSING_OR_INVALID")
+    if observed != expected:
+        raise ValueError("DATA_INDEX_SHA_BINDING_STALE")
+    return expected
+
+
+def immutable_partition_path(number: int, digest: str) -> str:
+    """Name a new immutable partition by its exact SHA-256.
+
+    Legacy ``part-NNNNNN.json`` paths remain readable. Writers use this form
+    for changed bytes so the old DATA_INDEX root stays valid until one atomic
+    root replacement points at the complete new set.
+    """
+    if type(number) is not int or number < 1:
+        raise ValueError("PARTITION_PARITY_INVALID_NUMBER")
+    if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise ValueError("PARTITION_PARITY_INVALID_DIGEST")
+    return f"data-index-parts/part-{number:06d}-{digest}.json"
+
+
+def is_canonical_partition_path(relative: Any, number: int, digest: Any) -> bool:
+    """Accept a legacy path or an immutable hash-suffixed path for this row."""
+    if not isinstance(relative, str) or type(number) is not int or number < 1:
+        return False
+    match = _PART_PATH.fullmatch(relative)
+    if match is None or int(match.group(1)) != number:
+        return False
+    suffix = match.group(2)
+    if suffix is None:
+        return True
+    return isinstance(digest, str) and suffix == digest
 
 
 def _dataset_id_fingerprint(dataset_id: str) -> int:
@@ -34,6 +85,41 @@ def _json_bytes(value: Any) -> bytes:
         json.dumps(value, sort_keys=True, ensure_ascii=False,
                    separators=(",", ":"), allow_nan=False) + "\n"
     ).encode("utf-8")
+
+
+def _publish_immutable_partition(destination: Path, content: bytes) -> None:
+    """Install bytes at a new immutable path without replacing a raced file."""
+    import os
+    import tempfile
+
+    destination = Path(destination)
+    if destination.is_symlink():
+        raise ValueError("PARTITION_PARITY_SYMLINK_DESTINATION")
+    if destination.exists():
+        if not destination.is_file() or destination.read_bytes() != content:
+            raise ValueError("PARTITION_PARITY_IMMUTABLE_PATH_COLLISION")
+        return
+
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.", suffix=".tmp", dir=destination.parent,
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        try:
+            # Hard-link creation is atomic and fails if another writer already
+            # installed this content-addressed name; os.replace would overwrite
+            # an immutable path in that race.
+            os.link(temporary, destination)
+        except FileExistsError:
+            if (destination.is_symlink() or not destination.is_file()
+                    or destination.read_bytes() != content):
+                raise ValueError("PARTITION_PARITY_IMMUTABLE_PATH_COLLISION") from None
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _validate_rows(rows: Any) -> list[dict[str, Any]]:
@@ -149,7 +235,7 @@ def load_partitioned_index(
         path = descriptor.get("path")
         if not isinstance(path, str) or not _PART_PATH.fullmatch(path):
             raise ValueError("PARTITION_PARITY_INVALID_PATH")
-        if path != f"data-index-parts/part-{i:06d}.json":
+        if not is_canonical_partition_path(path, i, descriptor.get("sha256")):
             raise ValueError("PARTITION_PARITY_NONCANONICAL_SEQUENCE")
         file_path = index_path.parent / path
         if file_path.is_symlink() or not file_path.is_file():
@@ -251,7 +337,7 @@ def iter_index_rows(
         relative = descriptor.get("path")
         if not isinstance(relative, str) or not _PART_PATH.fullmatch(relative):
             raise ValueError("PARTITION_PARITY_INVALID_PATH")
-        if relative != f"data-index-parts/part-{number:06d}.json":
+        if not is_canonical_partition_path(relative, number, descriptor.get("sha256")):
             raise ValueError("PARTITION_PARITY_NONCANONICAL_SEQUENCE")
         part_path = index_path.parent / relative
         if (
@@ -384,7 +470,7 @@ def select_index_rows(
         relative = descriptor.get("path")
         if not isinstance(relative, str) or not _PART_PATH.fullmatch(relative):
             raise ValueError("PARTITION_PARITY_INVALID_PATH")
-        if relative != f"data-index-parts/part-{index:06d}.json":
+        if not is_canonical_partition_path(relative, index, descriptor.get("sha256")):
             raise ValueError("PARTITION_PARITY_NONCANONICAL_SEQUENCE")
         part_path = index_path.parent / relative
         if (
@@ -497,8 +583,10 @@ def save_index(
     if max_inline_bytes < 1024:
         raise ValueError("PARTITION_PARITY_INVALID_INLINE_LIMIT")
     current_partitioned = False
+    existing: dict[str, Any] = {}
+    original_root_bytes = index_path.read_bytes() if index_path.is_file() else None
     if index_path.is_file():
-        existing = json.loads(index_path.read_text(encoding="utf-8"))
+        existing = json.loads(original_root_bytes)
         if not isinstance(existing, dict):
             raise ValueError("PARTITION_PARITY_EXISTING_ROOT_INVALID")
         # Validate every existing layout, not only the partitioned one.
@@ -510,18 +598,58 @@ def save_index(
     if not current_partitioned and len(inline) < max_inline_bytes:
         _validate_rows(logical_index.get("shards"))
         index_path.parent.mkdir(parents=True, exist_ok=True)
-        temp = index_path.with_suffix(index_path.suffix + ".publish.tmp")
-        temp.write_bytes(inline)
-        os.replace(temp, index_path)
+        if index_path.is_file() and index_path.read_bytes() != original_root_bytes:
+            raise ValueError("PARTITION_PARITY_CONCURRENT_ROOT_CHANGE")
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{index_path.name}.", suffix=".publish.tmp", dir=index_path.parent,
+        )
+        temporary = Path(temporary_name)
+        try:
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(inline)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, index_path)
+        finally:
+            temporary.unlink(missing_ok=True)
         return {"format": "INLINE", "shards": len(logical_index["shards"]),
                 "index_bytes": len(inline)}
 
-    root, parts = partition_index(logical_index, max_partition_bytes=max_partition_bytes)
+    root, legacy_parts = partition_index(
+        logical_index, max_partition_bytes=max_partition_bytes,
+    )
     index_path.parent.mkdir(parents=True, exist_ok=True)
     # Refuse a pre-existing link at the partition directory before writing
     # anything. Checking only each final part misses parent-symlink escapes.
-    if (index_path.parent / "data-index-parts").is_symlink():
+    base = index_path.parent / "data-index-parts"
+    if base.is_symlink():
         raise ValueError("PARTITION_PARITY_SYMLINK_DIRECTORY")
+    old_descriptors = (
+        existing.get("partitions", [])
+        if current_partitioned and isinstance(existing.get("partitions"), list)
+        else []
+    )
+    parts: dict[str, bytes] = {}
+    reused_paths: set[str] = set()
+    for number, descriptor in enumerate(root["partitions"], 1):
+        legacy_path = descriptor["path"]
+        content = legacy_parts[legacy_path]
+        digest = descriptor["sha256"]
+        old = old_descriptors[number - 1] if number <= len(old_descriptors) else None
+        if (
+            isinstance(old, Mapping)
+            and old.get("sha256") == digest
+            and old.get("bytes") == len(content)
+            and old.get("row_count") == descriptor["row_count"]
+            and is_canonical_partition_path(old.get("path"), number, digest)
+        ):
+            relative = str(old["path"])
+            reused_paths.add(relative)
+        else:
+            relative = immutable_partition_path(number, digest)
+        descriptor["path"] = relative
+        parts[relative] = content
+
     with tempfile.TemporaryDirectory(prefix=".catalog-partition-stage-", dir=index_path.parent) as td:
         stage = Path(td)
         staged_root = stage / "DATA_INDEX.json"
@@ -530,29 +658,40 @@ def save_index(
             file = stage / rel
             file.parent.mkdir(parents=True, exist_ok=True)
             file.write_bytes(content)
-        if load_partitioned_index(staged_root) != dict(logical_index):
+        verified_rows = sum(1 for _ in iter_index_rows(staged_root))
+        if verified_rows != root["shard_count"]:
             raise ValueError("PARTITION_PARITY_STAGED_WRITE_MISMATCH")
-        # Git publication is the atomic boundary. No incomplete working-tree
-        # state is ever committed; every single part is checked before root.
+        # Every content-addressed part is immutable. A crash while publishing
+        # leaves the old root and its old parts intact; unreferenced new parts
+        # are harmless and retained for later verification/reuse.
         for rel, content in parts.items():
             destination = index_path.parent / rel
-            if destination.is_symlink():
-                raise ValueError("PARTITION_PARITY_SYMLINK_DESTINATION")
             destination.parent.mkdir(parents=True, exist_ok=True)
-            temporary = destination.with_suffix(".publish.tmp")
-            temporary.write_bytes(content)
-            os.replace(temporary, destination)
-        os.replace(staged_root, index_path)
-    if read_index(index_path) != dict(logical_index):
-        raise ValueError("PARTITION_PARITY_PUBLISHED_WRITE_MISMATCH")
-    current_parts = set(parts)
-    base = index_path.parent / "data-index-parts"
-    # Prune *only* files matching the canonical format, leaving other
-    # evidence untouched; the old bytes remain available in Git history.
-    for obsolete in sorted(base.glob("part-*.json")):
-        rel = obsolete.relative_to(index_path.parent).as_posix()
-        if rel not in current_parts and obsolete.is_file() and not obsolete.is_symlink():
-            obsolete.unlink()
+            if rel in reused_paths:
+                if destination.is_symlink() or not destination.is_file():
+                    raise ValueError("PARTITION_PARITY_MISSING_FILE")
+                continue
+            _publish_immutable_partition(destination, content)
+        # Stage validation proves every descriptor and generated partition;
+        # newly installed paths are exact-byte hard links, while reused paths
+        # were verified with the old root above. The root replace is the only
+        # publication boundary and requires no second full-catalogue read.
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{index_path.name}.", suffix=".publish.tmp", dir=index_path.parent,
+        )
+        temporary_root = Path(temporary_name)
+        try:
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(_json_bytes(root))
+                handle.flush()
+                os.fsync(handle.fileno())
+            if json.loads(temporary_root.read_bytes()) != root:
+                raise ValueError("PARTITION_PARITY_STAGED_WRITE_MISMATCH")
+            if index_path.is_file() and index_path.read_bytes() != original_root_bytes:
+                raise ValueError("PARTITION_PARITY_CONCURRENT_ROOT_CHANGE")
+            os.replace(temporary_root, index_path)
+        finally:
+            temporary_root.unlink(missing_ok=True)
     return {"format": "PARTITIONED", "shards": len(logical_index["shards"]),
             "partitions": len(parts),
             "root_bytes": index_path.stat().st_size,

@@ -10,6 +10,7 @@ from hl_observer.datasets.v2_pipeline import (
     build_bundle,
     finalize_manifest,
     infer_reconciliation_status,
+    summarize_admission_rejections,
     verify_remote_asset,
 )
 
@@ -882,3 +883,47 @@ def test_collector_replay_only_admission_never_stages_reject_payload(tmp_path) -
     assert published
     assert all(row["connection_id"] == "good" for row in published)
     assert all(int(row["gap_count"]) == 0 for row in published)
+
+
+def test_admission_rejection_summary_keeps_exact_excluded_record_counts():
+    summary = summarize_admission_rejections(
+        [
+            {
+                "reasons": ["GAP"],
+                "compressed_bytes": 100,
+                "record_count": 3,
+                "family": "l2Book",
+            },
+            {
+                "reasons": ["NO_REPLAY_ADAPTER"],
+                "compressed_bytes": 50,
+                "record_count": 4,
+                "family": "trades",
+            },
+        ]
+    )
+
+    assert summary["excluded_shards"] == 2
+    assert summary["excluded_record_count"] == 7
+    assert summary["excluded_record_count_exact"] is True
+    assert summary["excluded_record_count_by_family"] == {
+        "l2book": 3,
+        "trades": 4,
+    }
+    assert summary["excluded_compressed_bytes"] == 150
+    assert summary["excluded_compressed_bytes_exact"] is True
+    assert summary["no_rejected_payload_published"] is True
+
+    incomplete = summarize_admission_rejections(
+        [{"reasons": ["UNKNOWN"], "compressed_bytes": 1, "family": "trades"}]
+    )
+    assert incomplete["excluded_record_count"] is None
+    assert incomplete["excluded_record_count_exact"] is False
+    assert incomplete["excluded_compressed_bytes"] == 1
+    assert incomplete["excluded_compressed_bytes_exact"] is True
+
+    unknown_size = summarize_admission_rejections(
+        [{"reasons": ["UNKNOWN"], "record_count": 1, "family": "trades"}]
+    )
+    assert unknown_size["excluded_compressed_bytes"] is None
+    assert unknown_size["excluded_compressed_bytes_exact"] is False

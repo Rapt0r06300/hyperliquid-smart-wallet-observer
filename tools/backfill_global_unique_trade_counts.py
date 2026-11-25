@@ -16,6 +16,7 @@ import contextlib
 import gzip
 import hashlib
 import json
+import mmap
 import os
 import sqlite3
 import tempfile
@@ -30,8 +31,20 @@ try:
         _download,
         _native_trade_keys,
     )
+    from tools.global_unique_trade_patch import (
+        SCHEMA_V5 as GLOBAL_UNIQUE_PATCH_SCHEMA,
+    )
+    from tools.global_unique_trade_patch import (
+        compact_global_unique_count_rows,
+    )
 except ModuleNotFoundError:
     from backfill_exact_trade_counts import TRADE_FAMILIES, _download, _native_trade_keys
+    from global_unique_trade_patch import (
+        SCHEMA_V5 as GLOBAL_UNIQUE_PATCH_SCHEMA,
+    )
+    from global_unique_trade_patch import (
+        compact_global_unique_count_rows,
+    )
 
 try:
     from tools.index_run_manifest import (
@@ -46,10 +59,24 @@ except ModuleNotFoundError:
 
 try:
     from tools.partitioned_data_index import SCHEMA as PARTITION_SCHEMA
-    from tools.partitioned_data_index import _json_bytes, iter_index_rows
+    from tools.partitioned_data_index import (
+        _dataset_id_fingerprint,
+        _json_bytes,
+        _publish_immutable_partition,
+        immutable_partition_path,
+        is_canonical_partition_path,
+        iter_index_rows,
+    )
 except ModuleNotFoundError:
     from partitioned_data_index import SCHEMA as PARTITION_SCHEMA
-    from partitioned_data_index import _json_bytes, iter_index_rows
+    from partitioned_data_index import (
+        _dataset_id_fingerprint,
+        _json_bytes,
+        _publish_immutable_partition,
+        immutable_partition_path,
+        is_canonical_partition_path,
+        iter_index_rows,
+    )
 
 ROOT = Path(__file__).resolve().parents[1]
 INDEX_PATH = ROOT / "catalog" / "DATA_INDEX.json"
@@ -57,9 +84,12 @@ PATCH_PATH = ROOT / "catalog" / "TRADE_UNIQUE_COUNT_PATCH.json"
 EXACT_COUNT_PATCH_PATH = ROOT / "catalog" / "TRADE_COUNT_PATCH.json"
 CHECKPOINT_PATH = ROOT / "runtime" / "reports" / "global-unique-trades" / "identities.sqlite"
 IDENTITY_VERSION = "native-id-or-venue-family-symbol-time-side-price-size-v3-full-string"
+MERGE_ORDER_VERSION = "dataset-id-ascending-v1"
 MAX_IN_FLIGHT_RELEASE_BYTES = 768 * 1024 * 1024
+MAX_JSONL_RECORD_BYTES = 64 * 1024 * 1024
 CHECKPOINT_COMMIT_INTERVAL = 32
 IDENTITY_INSERT_BATCH_SIZE = 4096
+GLOBAL_UNIQUE_PATCH_MAX_BYTES = 95_000_000
 _SCAN_ROW_KEYS = (
     "dataset_id", "family", "venue", "symbol", "trade_count",
     "trade_count_exact", "manifest_path", "release_repository",
@@ -68,6 +98,128 @@ _SCAN_ROW_KEYS = (
     "release_remote_digest", "sha256", "bytes",
 )
 _SCAN_ROW_INDEX = {key: index for index, key in enumerate(_SCAN_ROW_KEYS)}
+
+
+def _skip_json_whitespace(data: mmap.mmap, offset: int) -> int:
+    while offset < len(data) and data[offset] in b" \t\r\n":
+        offset += 1
+    return offset
+
+
+def _json_string_end(data: mmap.mmap, offset: int) -> int:
+    """Return the byte just after a JSON string, respecting escaped quotes."""
+    if offset >= len(data) or data[offset] != ord('"'):
+        raise ValueError("expected JSON string")
+    cursor = offset + 1
+    while True:
+        quote = data.find(b'"', cursor)
+        if quote < 0:
+            raise ValueError("unterminated JSON string")
+        slash = quote - 1
+        while slash >= offset and data[slash] == ord("\\"):
+            slash -= 1
+        if (quote - slash - 1) % 2 == 0:
+            return quote + 1
+        cursor = quote + 1
+
+
+def _json_value_end(data: mmap.mmap, offset: int) -> int:
+    """Find a JSON value boundary without materializing nested objects."""
+    offset = _skip_json_whitespace(data, offset)
+    if offset >= len(data):
+        raise ValueError("missing JSON value")
+    first = data[offset]
+    if first == ord('"'):
+        return _json_string_end(data, offset)
+    if first in (ord("{"), ord("[")):
+        closing = {ord("{"): ord("}"), ord("["): ord("]")}
+        stack = [closing[first]]
+        cursor = offset + 1
+        while stack:
+            if cursor >= len(data):
+                raise ValueError("unterminated JSON container")
+            byte = data[cursor]
+            if byte == ord('"'):
+                cursor = _json_string_end(data, cursor)
+                continue
+            if byte in closing:
+                stack.append(closing[byte])
+            elif byte in (ord("}"), ord("]")) and (
+                not stack or byte != stack.pop()
+            ):
+                raise ValueError("mismatched JSON container")
+            cursor += 1
+        return cursor
+
+    cursor = offset
+    while cursor < len(data) and data[cursor] not in b" \t\r\n,}]":
+        cursor += 1
+    if cursor == offset:
+        raise ValueError("invalid JSON value")
+    return cursor
+
+
+def _read_top_level_json_field(path: Path, field: str) -> Any:
+    """Read one top-level JSON field without decoding large sibling values.
+
+    The generated global-unique receipt may contain a very large ``counts``
+    object. This scanner uses a read-only memory map to find and validate the
+    top-level object boundaries, then JSON-decodes only the requested value.
+    """
+    with path.open("rb") as handle:
+        if path.stat().st_size == 0:
+            raise ValueError("empty JSON document")
+        with mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ) as data:
+            offset = _skip_json_whitespace(data, 0)
+            if offset >= len(data) or data[offset] != ord("{"):
+                raise ValueError("expected top-level JSON object")
+            offset += 1
+            found = False
+            result: Any = None
+            while True:
+                offset = _skip_json_whitespace(data, offset)
+                if offset >= len(data):
+                    raise ValueError("unterminated top-level JSON object")
+                if data[offset] == ord("}"):
+                    offset = _skip_json_whitespace(data, offset + 1)
+                    if offset != len(data):
+                        raise ValueError("trailing content after JSON object")
+                    return result if found else None
+
+                key_start = offset
+                key_end = _json_string_end(data, key_start)
+                try:
+                    key = json.loads(data[key_start:key_end].decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                    raise ValueError("invalid top-level JSON key") from exc
+                offset = _skip_json_whitespace(data, key_end)
+                if offset >= len(data) or data[offset] != ord(":"):
+                    raise ValueError("expected colon after top-level JSON key")
+                value_start = _skip_json_whitespace(data, offset + 1)
+                value_end = _json_value_end(data, value_start)
+                if key == field:
+                    if found:
+                        raise ValueError(f"duplicate top-level JSON field: {field}")
+                    try:
+                        result = json.loads(data[value_start:value_end].decode("utf-8"))
+                    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                        raise ValueError(f"invalid JSON value for {field}") from exc
+                    found = True
+
+                offset = _skip_json_whitespace(data, value_end)
+                if offset >= len(data):
+                    raise ValueError("unterminated top-level JSON object")
+                if data[offset] == ord(","):
+                    offset = _skip_json_whitespace(data, offset + 1)
+                    if offset >= len(data) or data[offset] != ord('"'):
+                        raise ValueError("trailing comma in top-level JSON object")
+                    continue
+                if data[offset] == ord("}"):
+                    offset = _skip_json_whitespace(data, offset + 1)
+                    if offset != len(data):
+                        raise ValueError("trailing content after JSON object")
+                    return result if found else None
+                raise ValueError("expected comma or closing brace in JSON object")
 
 
 class _CompactScanRow(Mapping[str, Any]):
@@ -211,17 +363,24 @@ def _iter_trade_scan_rows(index_path: Path) -> tuple[list[Mapping[str, Any]], in
 
 def _patch_index_streaming(index_path: Path, counts: Mapping[str, Mapping[str, Any]]) -> None:
     """Patch unique counts without reconstructing a multi-gigabyte logical index."""
-    root = json.loads(index_path.read_text(encoding="utf-8"))
+    if index_path.is_symlink() or not index_path.is_file():
+        raise ValueError("PARTITION_PARITY_UNSAFE_INDEX")
+    original_root_bytes = index_path.read_bytes()
+    root = json.loads(original_root_bytes)
     if not isinstance(root, dict):
         raise ValueError("DATA_INDEX_INVALID_ROOT")
     if root.get("schema") != PARTITION_SCHEMA:
         rows = root.get("shards")
         if not isinstance(rows, list):
             raise ValueError("DATA_INDEX_UNKNOWN_OR_PARTIAL_LAYOUT")
+        for _ in iter_index_rows(index_path):
+            pass
         for row in rows:
             patch = counts.get(str(row.get("dataset_id") or ""))
             if isinstance(patch, Mapping):
                 row.update(patch)
+        if index_path.read_bytes() != original_root_bytes:
+            raise ValueError("PARTITION_PARITY_CONCURRENT_ROOT_CHANGE")
         _atomic_json(index_path, root)
         return
 
@@ -229,14 +388,28 @@ def _patch_index_streaming(index_path: Path, counts: Mapping[str, Mapping[str, A
     if not isinstance(descriptors, list):
         raise ValueError("PARTITION_PARITY_INVALID_METADATA")
     catalog_root = index_path.parent
+    partition_directory = catalog_root / "data-index-parts"
+    if partition_directory.is_symlink():
+        raise ValueError("PARTITION_PARITY_UNSAFE_DIRECTORY")
+    shard_count = root.get("shard_count")
+    source_digest = root.get("shards_sha256")
+    if (type(shard_count) is not int or shard_count < 0
+            or not isinstance(source_digest, str)
+            or len(source_digest) != 64
+            or any(char not in "0123456789abcdef" for char in source_digest)):
+        raise ValueError("PARTITION_PARITY_INVALID_METADATA")
     with tempfile.TemporaryDirectory(prefix=".global-unique-index-", dir=catalog_root) as temporary:
         stage = Path(temporary)
-        stage_parts = stage / "data-index-parts"
-        stage_parts.mkdir()
         new_descriptors: list[dict[str, Any]] = []
         global_digest = hashlib.sha256(b"[")
+        output_digest = hashlib.sha256(b"[")
+        source_count = 0
+        seen_fingerprints: set[int] = set()
+        reused_paths: set[str] = set()
         partition_limit = root.get("partition_max_bytes")
         if isinstance(partition_limit, bool) or not isinstance(partition_limit, int):
+            raise ValueError("PARTITION_PARITY_INVALID_METADATA")
+        if not 4 <= partition_limit <= 8 * 1024 * 1024:
             raise ValueError("PARTITION_PARITY_INVALID_METADATA")
         batch: list[dict[str, Any]] = []
         batch_bytes = 3
@@ -249,34 +422,73 @@ def _patch_index_streaming(index_path: Path, counts: Mapping[str, Mapping[str, A
             updated = _json_bytes(batch)
             if len(updated) > partition_limit:
                 raise ValueError("PARTITION_PARITY_OVERSIZE")
-            destination = stage_parts / f"part-{number:06d}.json"
+            digest = hashlib.sha256(updated).hexdigest()
+            old = descriptors[number - 1] if number <= len(descriptors) else None
+            if (isinstance(old, Mapping)
+                    and old.get("sha256") == digest
+                    and old.get("bytes") == len(updated)
+                    and old.get("row_count") == len(batch)
+                    and is_canonical_partition_path(old.get("path"), number, digest)):
+                relative = str(old["path"])
+                reused_paths.add(relative)
+            else:
+                relative = immutable_partition_path(number, digest)
+            destination = stage / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes(updated)
             new_descriptors.append({
-                "path": f"data-index-parts/part-{number:06d}.json",
-                "sha256": hashlib.sha256(updated).hexdigest(),
+                "path": relative,
+                "sha256": digest,
                 "bytes": len(updated),
                 "row_count": len(batch),
             })
             if number > 1:
-                global_digest.update(b",")
-            global_digest.update(memoryview(updated)[1:-2])
+                output_digest.update(b",")
+            output_digest.update(memoryview(updated)[1:-2])
             batch = []
             batch_bytes = 3
 
         for number, descriptor in enumerate(descriptors, 1):
             if not isinstance(descriptor, Mapping):
                 raise ValueError("PARTITION_PARITY_INVALID_DESCRIPTOR")
-            relative = f"data-index-parts/part-{number:06d}.json"
-            if descriptor.get("path") != relative:
+            relative = descriptor.get("path")
+            expected_size = descriptor.get("bytes")
+            expected_rows = descriptor.get("row_count")
+            expected_sha = descriptor.get("sha256")
+            if not is_canonical_partition_path(relative, number, expected_sha):
                 raise ValueError("PARTITION_PARITY_NONCANONICAL_SEQUENCE")
+            if (type(expected_size) is not int or not 0 < expected_size <= partition_limit
+                    or type(expected_rows) is not int or expected_rows <= 0
+                    or not isinstance(expected_sha, str) or len(expected_sha) != 64
+                    or any(char not in "0123456789abcdef" for char in expected_sha)):
+                raise ValueError("PARTITION_PARITY_INVALID_DESCRIPTOR")
             source = catalog_root / relative
+            if source.is_symlink() or not source.is_file():
+                raise ValueError("PARTITION_PARITY_MISSING_FILE")
             data = source.read_bytes()
+            if len(data) != expected_size or len(data) > partition_limit:
+                raise ValueError("PARTITION_PARITY_SIZE_MISMATCH")
+            if hashlib.sha256(data).hexdigest() != expected_sha:
+                raise ValueError("PARTITION_PARITY_DIGEST_MISMATCH")
+            if not data.startswith(b"[") or not data.endswith(b"]\n"):
+                raise ValueError("PARTITION_PARITY_GLOBAL_MISMATCH")
             part_rows = json.loads(data)
-            if not isinstance(part_rows, list):
+            if not isinstance(part_rows, list) or not part_rows or len(part_rows) != expected_rows:
                 raise ValueError("PARTITION_PARITY_INVALID_ROWS")
+            if source_count:
+                global_digest.update(b",")
+            global_digest.update(memoryview(data)[1:-2])
             for row in part_rows:
                 if not isinstance(row, dict):
                     raise ValueError("PARTITION_PARITY_INVALID_ROW")
+                dataset_id = row.get("dataset_id")
+                if not isinstance(dataset_id, str) or not dataset_id:
+                    raise ValueError("PARTITION_PARITY_DUPLICATE_OR_MISSING_DATASET_ID")
+                fingerprint = _dataset_id_fingerprint(dataset_id)
+                if fingerprint in seen_fingerprints:
+                    raise ValueError("PARTITION_PARITY_DUPLICATE_OR_MISSING_DATASET_ID")
+                seen_fingerprints.add(fingerprint)
+                source_count += 1
                 patch = counts.get(str(row.get("dataset_id") or ""))
                 if isinstance(patch, Mapping):
                     row.update(patch)
@@ -288,26 +500,47 @@ def _patch_index_streaming(index_path: Path, counts: Mapping[str, Mapping[str, A
                 batch.append(row)
                 batch_bytes += encoded_len + (1 if len(batch) > 1 else 0)
         flush_batch()
-        root["partitions"] = new_descriptors
         global_digest.update(b"]\n")
-        root["shards_sha256"] = global_digest.hexdigest()
+        output_digest.update(b"]\n")
+        if source_count != shard_count or global_digest.hexdigest() != source_digest:
+            raise ValueError("PARTITION_PARITY_GLOBAL_MISMATCH")
+        root["partitions"] = new_descriptors
+        root["shards_sha256"] = output_digest.hexdigest()
         staged_root = stage / "DATA_INDEX.json"
         staged_root.write_bytes(_json_bytes(root))
         observed = 0
         for _ in iter_index_rows(staged_root):
             observed += 1
-        if observed != root.get("shard_count"):
+        if observed != shard_count:
             raise ValueError("PARTITION_PARITY_COUNT_MISMATCH")
 
-        live_parts = catalog_root / "data-index-parts"
-        for number in range(1, len(new_descriptors) + 1):
-            live = live_parts / f"part-{number:06d}.json"
-            temporary_part = live.with_suffix(".publish.tmp")
-            temporary_part.write_bytes((stage_parts / live.name).read_bytes())
-            os.replace(temporary_part, live)
-        temporary_root = index_path.with_suffix(index_path.suffix + ".publish.tmp")
-        temporary_root.write_bytes(staged_root.read_bytes())
-        os.replace(temporary_root, index_path)
+        partition_directory.mkdir(parents=True, exist_ok=True)
+        for descriptor in new_descriptors:
+            relative = descriptor["path"]
+            destination = catalog_root / relative
+            if relative in reused_paths:
+                if destination.is_symlink() or not destination.is_file():
+                    raise ValueError("PARTITION_PARITY_MISSING_FILE")
+                continue
+            content = (stage / relative).read_bytes()
+            _publish_immutable_partition(destination, content)
+
+        descriptor_fd, temporary_name = tempfile.mkstemp(
+            prefix=f".{index_path.name}.", suffix=".publish.tmp", dir=catalog_root,
+        )
+        temporary_root = Path(temporary_name)
+        try:
+            with os.fdopen(descriptor_fd, "wb") as handle:
+                handle.write(staged_root.read_bytes())
+                handle.flush()
+                os.fsync(handle.fileno())
+            if json.loads(temporary_root.read_bytes()) != root:
+                raise ValueError("PARTITION_PARITY_STAGED_WRITE_MISMATCH")
+            if index_path.read_bytes() != original_root_bytes:
+                raise ValueError("PARTITION_PARITY_CONCURRENT_ROOT_CHANGE")
+            os.replace(temporary_root, index_path)
+        finally:
+            temporary_root.unlink(missing_ok=True)
 
 
 def _open_checkpoint(path: Path, candidates: list[Mapping[str, Any]]) -> sqlite3.Connection:
@@ -329,37 +562,84 @@ def _open_checkpoint(path: Path, candidates: list[Mapping[str, Any]]) -> sqlite3
         database.commit()
     elif version[0] != IDENTITY_VERSION:
         raise ValueError("checkpoint identity version mismatch")
+    merge_order = database.execute(
+        "SELECT value FROM metadata WHERE key='merge_order_version'"
+    ).fetchone()
+    if merge_order is None:
+        if database.execute("SELECT COUNT(*) FROM completed").fetchone()[0] or database.execute(
+            "SELECT COUNT(*) FROM ids"
+        ).fetchone()[0]:
+            database.close()
+            raise ValueError(
+                "checkpoint merge order is unverified; preserve it and rebuild "
+                "the unique-count checkpoint before publishing per-shard attribution"
+            )
+        database.execute(
+            "INSERT INTO metadata VALUES ('merge_order_version', ?)",
+            (MERGE_ORDER_VERSION,),
+        )
+        database.commit()
+    elif merge_order[0] != MERGE_ORDER_VERSION:
+        database.close()
+        raise ValueError("checkpoint merge order version mismatch")
     if database.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
         raise ValueError("checkpoint integrity check failed")
     # Sort the compact inventory in place, then validate checkpoint provenance
-    # with a merge walk. This avoids a second 300k-entry dict alongside the
-    # candidate list while preserving exact ID/SHA/count matching.
+    # with a merge walk. Keep only the inventory and one SQLite row in memory;
+    # materializing candidate IDs and all completed rows duplicates a large
+    # amount of data on every resume.
     candidates.sort(key=lambda row: str(row.get("dataset_id") or ""))
-    candidate_ids = [str(row.get("dataset_id") or "") for row in candidates]
     previous_id = ""
-    for dataset_id in candidate_ids:
+    for row in candidates:
+        dataset_id = str(row.get("dataset_id") or "")
         if not dataset_id or dataset_id == previous_id:
             raise ValueError("duplicate or empty candidate dataset_id")
         previous_id = dataset_id
 
+    completed_identity_count = 0
     completed = database.execute(
         "SELECT dataset_id, asset_sha256, trade_count, unique_count, global_new "
         "FROM completed ORDER BY dataset_id"
-    ).fetchall()
+    )
     candidate_index = 0
     for dataset_id, sha, trades, unique, new in completed:
-        while candidate_index < len(candidate_ids) and candidate_ids[candidate_index] < dataset_id:
+        while (candidate_index < len(candidates)
+               and str(candidates[candidate_index].get("dataset_id") or "") < dataset_id):
             candidate_index += 1
-        if candidate_index >= len(candidate_ids) or candidate_ids[candidate_index] != dataset_id:
+        if (candidate_index >= len(candidates)
+                or str(candidates[candidate_index].get("dataset_id") or "") != dataset_id):
             raise ValueError("checkpoint shard provenance mismatch")
         row = candidates[candidate_index]
         if (str(row.get("sha256") or "").lower() != sha
                 or row.get("trade_count_exact") is not True or row.get("trade_count") != trades
                 or not 0 <= new <= unique <= trades):
             raise ValueError("checkpoint shard provenance mismatch")
-    if database.execute("SELECT COUNT(*) FROM ids").fetchone()[0] != sum(item[4] for item in completed):
+        completed_identity_count += new
+    if database.execute("SELECT COUNT(*) FROM ids").fetchone()[0] != completed_identity_count:
         raise ValueError("checkpoint identity count mismatch")
     return database
+
+
+def _pending_scan_candidates(
+    candidates: list[Mapping[str, Any]],
+    database: sqlite3.Connection,
+    limit: int,
+) -> list[Mapping[str, Any]]:
+    """Select the next unfinished shards using an ordered merge, not a set."""
+    pending: list[Mapping[str, Any]] = []
+    completed = iter(database.execute("SELECT dataset_id FROM completed ORDER BY dataset_id"))
+    next_completed = next(completed, None)
+    for row in candidates:
+        dataset_id = str(row.get("dataset_id") or "")
+        while next_completed is not None and next_completed[0] < dataset_id:
+            next_completed = next(completed, None)
+        if next_completed is not None and next_completed[0] == dataset_id:
+            next_completed = next(completed, None)
+            continue
+        pending.append(row)
+        if len(pending) >= limit:
+            break
+    return pending
 
 
 def _merge_checkpoint_shard(
@@ -565,13 +845,13 @@ def _scan_candidate(row: Mapping[str, Any], temporary_root: Path) -> dict[str, A
     total = 0
     exact = True
     shard_ids: set[str] = set()
-    with gzip.open(asset, "rt", encoding="utf-8") as handle:
-        for line in handle:
-            if not line.strip():
-                continue
+    with gzip.open(asset, "rb") as handle:
+        while line := handle.readline(MAX_JSONL_RECORD_BYTES + 1):
+            if len(line) > MAX_JSONL_RECORD_BYTES:
+                raise ValueError("oversized JSONL record")
             raw = json.loads(line)
             if not isinstance(raw, Mapping):
-                continue
+                raise ValueError("non-object JSONL record")
             keys = _native_trade_keys(
                 raw,
                 venue=str(row.get("venue") or "unknown"),
@@ -613,6 +893,27 @@ def _digest_sqlite_identities(database: sqlite3.Connection) -> str:
     return digest.hexdigest()
 
 
+def _write_global_unique_patch(path: Path, payload: Mapping[str, Any]) -> None:
+    """Durably publish the compact receipt without exposing a truncated patch."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent,
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        if temporary.stat().st_size >= GLOBAL_UNIQUE_PATCH_MAX_BYTES:
+            raise ValueError("GLOBAL_UNIQUE_PATCH_NEEDS_PARTITION")
+        os.replace(temporary, path)
+    except BaseException:
+        with contextlib.suppress(FileNotFoundError):
+            temporary.unlink()
+        raise
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=5000)
@@ -627,24 +928,28 @@ def main() -> None:
         _iter_trade_scan_rows(INDEX_PATH)
     )
 
-    prior: dict[str, Any] = {}
+    failure_attempts: dict[str, Any] = {}
+    previous_attempts: Any = None
     if PATCH_PATH.exists():
         try:
-            prior = json.loads(PATCH_PATH.read_text(encoding="utf-8"))
+            previous_attempts = _read_top_level_json_field(
+                PATCH_PATH,
+                "failure_attempts",
+            )
         except (OSError, ValueError, TypeError):
-            prior = {}
-    failure_attempts = (
-        prior.get("failure_attempts")
-        if isinstance(prior, dict) and isinstance(prior.get("failure_attempts"), dict)
-        else {}
-    )
+            previous_attempts = None
+    if isinstance(previous_attempts, dict):
+        failure_attempts = previous_attempts
 
     database = _open_checkpoint(CHECKPOINT_PATH, all_candidates)
-    already_done = {row[0] for row in database.execute("SELECT dataset_id FROM completed")}
-    candidates = [row for row in all_candidates if str(row.get("dataset_id") or "") not in already_done][: args.limit]
+    already_done_count = int(
+        database.execute("SELECT COUNT(*) FROM completed").fetchone()[0]
+    )
+    candidates = _pending_scan_candidates(all_candidates, database, args.limit)
     failed: list[dict[str, Any]] = []
     failure_reasons: dict[str, dict[str, Any]] = {}
     counts: dict[str, dict[str, Any]] = {}
+    attempted_count = 0
     checkpoint_transaction_open = False
     checkpoint_batch_successes = 0
 
@@ -662,8 +967,9 @@ def main() -> None:
             result = _scan_candidate(row, root)
             return str(row.get("dataset_id") or ""), result
 
-        def record(row: Mapping[str, Any], scanned: dict[str, Any] | Exception | None) -> None:
-            nonlocal checkpoint_transaction_open, checkpoint_batch_successes
+        def record(row: Mapping[str, Any], scanned: dict[str, Any] | Exception | None) -> bool:
+            nonlocal checkpoint_transaction_open, checkpoint_batch_successes, attempted_count
+            attempted_count += 1
             dataset_id = str(row.get("dataset_id") or "")
             if isinstance(scanned, Exception) or scanned is None:
                 exc = scanned if isinstance(scanned, Exception) else RuntimeError("missing_scan_result")
@@ -677,7 +983,7 @@ def main() -> None:
                 }
                 failed.append(failure)
                 failure_reasons[dataset_id] = failure
-                return
+                return False
             if scanned.get("exact") is not True:
                 attempts = int(failure_attempts.get(dataset_id) or 0) + 1
                 failure_attempts[dataset_id] = attempts
@@ -688,7 +994,7 @@ def main() -> None:
                 }
                 failed.append(failure)
                 failure_reasons[dataset_id] = failure
-                return
+                return False
 
             try:
                 if not checkpoint_transaction_open:
@@ -711,7 +1017,7 @@ def main() -> None:
                 }
                 failed.append(failure)
                 failure_reasons[dataset_id] = failure
-                return
+                return False
             checkpoint_batch_successes += 1
             if checkpoint_batch_successes >= CHECKPOINT_COMMIT_INTERVAL:
                 database.commit()
@@ -723,35 +1029,35 @@ def main() -> None:
                 exact=True,
             )
             failure_attempts.pop(dataset_id, None)
+            return True
 
         with ThreadPoolExecutor(max_workers=args.workers) as pool:
             # Keep the number of simultaneous decompressions bounded.  A large
             # release shard can legitimately contain many identities; queuing
             # every candidate at once made the old implementation retain several
             # gigabytes before the first checkpoint merge.
-            pending: dict[Any, tuple[Mapping[str, Any], int]] = {}
-            candidate_iter = iter(candidates)
+            pending: dict[Any, tuple[int, Mapping[str, Any], int]] = {}
+            ready: dict[int, tuple[Mapping[str, Any], dict[str, Any] | Exception]] = {}
+            next_submit = 0
+            next_record = 0
             in_flight_bytes = 0
-            buffered: Mapping[str, Any] | None = None
+            stop_after_failure = False
 
             def submit_next() -> bool:
-                nonlocal buffered, in_flight_bytes
-                if buffered is None:
-                    try:
-                        buffered = next(candidate_iter)
-                    except StopIteration:
-                        return False
-                row = buffered
+                nonlocal next_submit, in_flight_bytes
+                if next_submit >= len(candidates):
+                    return False
+                row = candidates[next_submit]
                 row_bytes = max(1, int(row.get("bytes") or 0))
                 if pending and in_flight_bytes + row_bytes > MAX_IN_FLIGHT_RELEASE_BYTES:
                     return False
-                pending[pool.submit(scan, row)] = (row, row_bytes)
+                pending[pool.submit(scan, row)] = (next_submit, row, row_bytes)
+                next_submit += 1
                 in_flight_bytes += row_bytes
-                buffered = None
                 return True
 
             while True:
-                while len(pending) < args.workers and submit_next():
+                while not stop_after_failure and len(pending) < args.workers and submit_next():
                     pass
                 if not pending:
                     break
@@ -760,41 +1066,56 @@ def main() -> None:
                     return_when=FIRST_COMPLETED,
                 )
                 for future in completed_futures:
-                    row, row_bytes = pending.pop(future)
+                    candidate_number, row, row_bytes = pending.pop(future)
                     in_flight_bytes -= row_bytes
                     scanned: dict[str, Any] | Exception
                     try:
                         _, scanned = future.result()
                     except Exception as exc:  # isolated shard failure; coverage stays false
                         scanned = exc
-                    record(row, scanned)
+                    ready[candidate_number] = (row, scanned)
+
+                while next_record in ready:
+                    row, scanned = ready.pop(next_record)
+                    next_record += 1
+                    if not record(row, scanned):
+                        stop_after_failure = True
+                        for future in pending:
+                            future.cancel()
+                        pending.clear()
+                        break
+                if stop_after_failure:
+                    break
 
 
     if checkpoint_transaction_open:
         database.commit()
-    completed = database.execute("SELECT dataset_id, asset_sha256, trade_count, unique_count, global_new FROM completed").fetchall()
-    counts = {
-        dataset_id: {
+    counts = {}
+    for dataset_id, sha, trades, unique, global_new in database.execute(
+        "SELECT dataset_id, asset_sha256, trade_count, unique_count, global_new FROM completed"
+    ):
+        counts[dataset_id] = {
             "asset_sha256": sha, "trade_count_scanned": trades,
             "unique_trade_count": unique, "unique_trade_count_exact": True,
             "global_new_identity_count": global_new,
             "cross_shard_overlap_count": unique - global_new,
             "identity_version": IDENTITY_VERSION,
         }
-        for dataset_id, sha, trades, unique, global_new in completed
-    }
-    successful_ids = set(counts)
     observed_global_count = int(database.execute("SELECT COUNT(*) FROM ids").fetchone()[0])
     observed_identity_digest = _digest_sqlite_identities(database)
     database.close()
 
     _patch_index_streaming(INDEX_PATH, counts)
 
-    all_candidate_ids = {
-        str(row.get("dataset_id") or "") for row in all_candidates
-    }
-    remaining_ids = sorted(all_candidate_ids - successful_ids)
-    unscanned_count = max(0, len(all_candidates) - len(already_done) - len(candidates))
+    remaining_ids = [
+        str(row.get("dataset_id") or "")
+        for row in all_candidates
+        if str(row.get("dataset_id") or "") not in counts
+    ]
+    unscanned_count = max(
+        0,
+        len(all_candidates) - already_done_count - attempted_count,
+    )
     coverage_complete = (
         not unproven_trade_count_ids
         and not remaining_ids
@@ -808,9 +1129,10 @@ def main() -> None:
     )
 
     result = {
-        "schema": "alina.global_unique_trade_patch.v4",
+        "schema": GLOBAL_UNIQUE_PATCH_SCHEMA,
         "method": "bounded_trade_corpus_scan_with_durable_sqlite_checkpoint",
         "identity_version": IDENTITY_VERSION,
+        "merge_order_version": MERGE_ORDER_VERSION,
         "collision_policy": (
             "full canonical identity strings; native identifiers preferred; "
             "ambiguous missing identities fail closed"
@@ -820,12 +1142,16 @@ def main() -> None:
         "unproven_trade_count_dataset_ids": unproven_trade_count_ids,
         "candidate_trade_shards": len(all_candidates),
         "restored_exact_trade_rows": restored_exact_trade_rows,
-        "attempted": len(candidates),
-        "successful": len(successful_ids),
+        "selected_for_attempt": len(candidates),
+        "attempted": attempted_count,
+        "successful": len(counts),
         "failed": failed,
         "failure_reasons": dict(sorted(failure_reasons.items())),
         "failure_attempts": dict(sorted(failure_attempts.items())),
-        "counts": dict(sorted(counts.items())),
+        "counts": compact_global_unique_count_rows(
+            counts,
+            identity_version=IDENTITY_VERSION,
+        ),
         "remaining_candidate_shards": len(remaining_ids),
         "unscanned_candidate_shards": unscanned_count,
         "observed_unique_trade_count": observed_global_count,
@@ -844,10 +1170,7 @@ def main() -> None:
             "only compact counts and digest are published in Git"
         ),
     }
-    PATCH_PATH.write_text(
-        json.dumps(result, sort_keys=True, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    _write_global_unique_patch(PATCH_PATH, result)
     print(
         json.dumps(
             {

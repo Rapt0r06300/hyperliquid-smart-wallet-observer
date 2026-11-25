@@ -25,7 +25,7 @@ try:
         compact_index_rows,
         hydrate_default_release_repository,
     )
-    from tools.partitioned_data_index import read_index
+    from tools.partitioned_data_index import index_file_sha256, read_index
     from tools.prune_verified_recovery_capsule import (
         REPOSITORY,
         Refuse,
@@ -41,7 +41,7 @@ except ModuleNotFoundError:
         compact_index_rows,
         hydrate_default_release_repository,
     )
-    from partitioned_data_index import read_index
+    from partitioned_data_index import index_file_sha256, read_index
     from prune_verified_recovery_capsule import REPOSITORY, Refuse, assets, release, request
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -89,6 +89,7 @@ def _refresh_catalog(index: dict[str, Any], root: Path) -> None:
         "partial_count": counts["PARTIAL"],
         "stale_count": counts["STALE"],
         "reject_count": counts["REJECT"],
+        "source_index_sha256": index_file_sha256(root / "catalog" / "DATA_INDEX.json"),
     }
     _atomic_json(root / "catalog" / "DATA_QUALITY_REGISTRY.json", registry)
 

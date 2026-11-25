@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from hl_observer.datasets.v2_repository import (
@@ -81,6 +79,7 @@ def test_safe_packed_release_shard_materializes_inner_verified_payload(tmp_path,
     import hashlib
     import io
     import zipfile
+
     from hl_observer.datasets.v2_repository import download_safe_shard
 
     payload = b"immutable-gzip-data"
@@ -124,6 +123,7 @@ def test_packed_release_rejects_wrong_outer_archive_digest(tmp_path, monkeypatch
     import hashlib
     import io
     import zipfile
+
     from hl_observer.datasets.v2_repository import download_safe_shard
     payload = b"valid-inner"
     raw = io.BytesIO()
@@ -198,7 +198,9 @@ def test_selector_resolves_canonical_inherited_repository_only_when_declared():
 
 def test_safe_release_download_retries_504_then_verifies_sha(tmp_path, monkeypatch):
     import hashlib
+
     import requests
+
     from hl_observer.datasets.v2_repository import download_safe_shard
 
     data = b"immutable trade history"
@@ -236,6 +238,7 @@ def test_safe_release_download_retries_504_then_verifies_sha(tmp_path, monkeypat
 
 def test_safe_release_download_does_not_retry_404(tmp_path, monkeypatch):
     import requests
+
     from hl_observer.datasets.v2_repository import download_safe_shard
 
     calls = []
@@ -262,7 +265,9 @@ def test_safe_release_download_does_not_retry_404(tmp_path, monkeypatch):
 
 def test_safe_release_stream_retry_removes_partial_bytes(tmp_path, monkeypatch):
     import hashlib
+
     import requests
+
     from hl_observer.datasets.v2_repository import download_safe_shard
 
     data = b"verified-data"
@@ -299,8 +304,9 @@ def test_safe_release_stream_retry_removes_partial_bytes(tmp_path, monkeypatch):
 def test_remote_v2_reader_reconstructs_verified_partitions_without_network(monkeypatch):
     import hashlib
     import json
-    from tools.partitioned_data_index import partition_index
+
     from hl_observer.datasets import v2_repository as module
+    from tools.partitioned_data_index import immutable_partition_path, partition_index
 
     original = {
         "schema": "alina.data_index.v2",
@@ -308,9 +314,15 @@ def test_remote_v2_reader_reconstructs_verified_partitions_without_network(monke
         "shards": [_safe_row(dataset_id=f"shard-{n}") for n in range(9)],
     }
     root, parts = partition_index(original, max_partition_bytes=650)
+    addressed_parts = {}
+    for number, descriptor in enumerate(root["partitions"], 1):
+        legacy = descriptor["path"]
+        relative = immutable_partition_path(number, descriptor["sha256"])
+        descriptor["path"] = relative
+        addressed_parts[relative] = parts[legacy]
     raw_index = json.dumps(root).encode("utf-8")
     assets = {"catalog/DATA_INDEX.json": raw_index, **{
-        "catalog/" + key: value for key, value in parts.items()
+        "catalog/" + key: value for key, value in addressed_parts.items()
     }}
     calls = []
     class Response:
@@ -326,14 +338,15 @@ def test_remote_v2_reader_reconstructs_verified_partitions_without_network(monke
     loaded, sha = module.load_index()
     assert loaded == original
     assert sha == hashlib.sha256(raw_index).hexdigest()
-    assert len(calls) == len(parts) + 1
+    assert len(calls) == len(addressed_parts) + 1
     assert len(module.select_safe_shards(loaded)) == 9
 
 
 def test_remote_v2_reader_fails_closed_if_partition_bytes_corrupted(monkeypatch):
     import json
-    from tools.partitioned_data_index import partition_index
+
     from hl_observer.datasets import v2_repository as module
+    from tools.partitioned_data_index import partition_index
 
     root, parts = partition_index({
         "schema": "alina.data_index.v2",
@@ -356,8 +369,9 @@ def test_remote_v2_reader_fails_closed_if_partition_bytes_corrupted(monkeypatch)
 def test_remote_v2_reader_refuses_valid_json_partition_sha_mismatch(monkeypatch):
     """A valid, same-size JSON substitution must not bypass the SHA gate."""
     import json
-    from tools.partitioned_data_index import partition_index
+
     from hl_observer.datasets import v2_repository as module
+    from tools.partitioned_data_index import partition_index
 
     root, parts = partition_index({
         "schema": "alina.data_index.v2",
@@ -389,8 +403,9 @@ def test_remote_v2_reader_refuses_valid_json_partition_sha_mismatch(monkeypatch)
 
 def test_remote_v2_reader_refuses_partition_path_escape(monkeypatch):
     import json
-    from tools.partitioned_data_index import partition_index
+
     from hl_observer.datasets import v2_repository as module
+    from tools.partitioned_data_index import partition_index
 
     root, parts = partition_index({
         "schema": "alina.data_index.v2",

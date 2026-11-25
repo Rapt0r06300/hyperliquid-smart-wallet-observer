@@ -67,7 +67,9 @@ def test_migration_preserves_old_safe_receipt_by_sha256(tmp_path, monkeypatch):
     assert json.loads(moved.read_text())["quality_status"] == "PARTIAL"
     assert json.loads(index.read_text())["shards"][0]["manifest_path"] == "datasets/quarantine/a.manifest.json"
     assert json.loads(catalog.read_text())["partial_shard_count"] == 1
-    assert json.loads(registry.read_text())["active_dataset"]["proof_of_pnl_allowed"] is False
+    active_dataset = json.loads(registry.read_text())["active_dataset"]
+    assert active_dataset["proof_of_pnl_allowed"] is False
+    assert active_dataset["source_index_sha256"] == hashlib.sha256(index.read_bytes()).hexdigest()
 
 
 def test_failed_index_publication_keeps_original_safe_evidence(tmp_path, monkeypatch):

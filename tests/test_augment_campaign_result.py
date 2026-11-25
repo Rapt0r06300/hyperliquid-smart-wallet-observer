@@ -208,7 +208,7 @@ def test_truncated_stdout_does_not_erase_structured_frame_metrics(tmp_path: Path
     result_path = tmp_path / "result.json"
     run_manifest_path = tmp_path / "RUN_MANIFEST.json"
     known_metrics = {
-        "accepted_frames": 12_345,
+        "accepted_frames": 12_340,
         "persisted_frames": 12_340,
         "l2_frames": 8_765,
         "queue_drops": 5,
@@ -243,6 +243,25 @@ def test_truncated_stdout_does_not_erase_structured_frame_metrics(tmp_path: Path
                 "safe_count": 1,
                 "partial_count": 0,
                 "reject_count": 0,
+                "source_admission": {
+                    "excluded_shards": 1,
+                    "excluded_record_count": 12_336,
+                    "excluded_record_count_exact": True,
+                    "no_rejected_payload_published": True,
+                },
+                "frame_reconciliation": {
+                    "schema": "alina.collection_frame_reconciliation.v1",
+                    "status": "MATCHED",
+                    "record_count_unit": "valid_jsonl_records",
+                    "accepted_frames": 12_340,
+                    "persisted_frames": 12_340,
+                    "all_shard_count": 2,
+                    "published_shard_count": 1,
+                    "excluded_shard_count": 1,
+                    "all_shard_record_count": 12_340,
+                    "published_record_count": 4,
+                    "excluded_record_count": 12_336,
+                },
             }
         ),
         encoding="utf-8",

@@ -6,22 +6,42 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import tempfile
 from pathlib import Path
-import re
 from typing import Any, Mapping
 
 try:
+    from tools.index_run_manifest import (
+        _compact_index_row,
+        _normalize_manifest,
+        _sharded_receipt_path,
+        _valid_release_locator,
+    )
     from tools.manifest_policy import classify_manifest
-    from tools.index_run_manifest import _compact_index_row, _normalize_manifest, _valid_release_locator, _sharded_receipt_path
 except ModuleNotFoundError:
+    from index_run_manifest import (
+        _compact_index_row,
+        _normalize_manifest,
+        _sharded_receipt_path,
+        _valid_release_locator,
+    )
     from manifest_policy import classify_manifest
-    from index_run_manifest import _compact_index_row, _normalize_manifest, _valid_release_locator, _sharded_receipt_path
 
 try:
-    from tools.partitioned_data_index import read_index, save_index, partition_index
+    from tools.partitioned_data_index import (
+        index_file_sha256,
+        partition_index,
+        read_index,
+        save_index,
+    )
 except ModuleNotFoundError:
-    from partitioned_data_index import read_index, save_index, partition_index
+    from partitioned_data_index import (
+        index_file_sha256,
+        partition_index,
+        read_index,
+        save_index,
+    )
 
 ROOT = Path(__file__).resolve().parents[1]
 INDEX_PATH = Path("catalog/DATA_INDEX.json")
@@ -338,6 +358,7 @@ def repair(root: str | Path = ROOT, *, dry_run: bool = False) -> dict[str, Any]:
         "partial_count": partial_count,
         "stale_count": stale_count,
         "reject_count": reject_count,
+        "source_index_sha256": index_file_sha256(index_path),
     }
     _atomic_json(registry_path, registry)
 

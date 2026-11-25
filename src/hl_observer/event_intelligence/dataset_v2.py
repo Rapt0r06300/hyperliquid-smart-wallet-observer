@@ -279,13 +279,46 @@ def build_public_event_bundle(
     reasons = dict(prior_admission.get("blocking_reasons") or {})
     for reason, count in additional["blocking_reasons"].items():
         reasons[reason] = int(reasons.get(reason, 0)) + count
+    prior_excluded_shards = prior_admission.get("excluded_shards")
+    if not prior_admission:
+        prior_excluded_shards = 0
+    prior_excluded_shards_exact = (
+        type(prior_excluded_shards) is int and prior_excluded_shards >= 0
+    )
+    prior_compressed_bytes = prior_admission.get("excluded_compressed_bytes")
+    prior_compressed_bytes_exact = (
+        prior_excluded_shards_exact
+        and prior_excluded_shards == 0
+    ) or (
+        prior_admission.get("excluded_compressed_bytes_exact") is True
+        and type(prior_compressed_bytes) is int
+        and prior_compressed_bytes >= 0
+    )
+    if prior_excluded_shards_exact and prior_excluded_shards == 0:
+        prior_compressed_bytes = 0
+    else:
+        prior_compressed_bytes_exact = (
+            prior_compressed_bytes_exact
+            and type(prior_compressed_bytes) is int
+            and prior_compressed_bytes >= 0
+        )
+    total_excluded_shards = (
+        prior_excluded_shards + additional["excluded_shards"]
+        if prior_excluded_shards_exact else None
+    )
+    total_compressed_bytes_exact = (
+        prior_compressed_bytes_exact
+        and additional["excluded_compressed_bytes_exact"] is True
+    )
     bundle["source_admission"] = {
         **prior_admission,
         "mode": "replay_only",
-        "excluded_shards": int(prior_admission.get("excluded_shards") or 0)
-        + additional["excluded_shards"],
-        "excluded_compressed_bytes": int(prior_admission.get("excluded_compressed_bytes") or 0)
-        + additional["excluded_compressed_bytes"],
+        "excluded_shards": total_excluded_shards,
+        "excluded_compressed_bytes": (
+            prior_compressed_bytes + additional["excluded_compressed_bytes"]
+            if total_compressed_bytes_exact else None
+        ),
+        "excluded_compressed_bytes_exact": total_compressed_bytes_exact,
         "blocking_reasons": dict(sorted(reasons.items())),
         "no_rejected_payload_published": True,
     }

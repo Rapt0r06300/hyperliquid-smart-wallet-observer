@@ -7,10 +7,12 @@ import os
 from pathlib import Path
 
 from manifest_policy import classify_manifest, load_json, verify_asset
+from partitioned_data_index import index_file_sha256
 
 ROOT = Path(__file__).resolve().parents[1]
 INDEX_PATH = ROOT / "catalog" / "DATA_INDEX.json"
 REGISTRY_PATH = ROOT / "catalog" / "DATA_QUALITY_REGISTRY.json"
+CATALOG_PATH = ROOT / "catalog" / "DATA_CATALOG.json"
 
 _STAGE_BY_STATUS = {
     "SAFE": "safe",
@@ -83,11 +85,32 @@ def promote(manifest_path: str | Path, *, asset_path: str | Path | None = None) 
     )
     _atomic_json(INDEX_PATH, index)
 
+    counts = {
+        quality: sum(row.get("quality_status") == quality for row in shards)
+        for quality in ("SAFE", "PARTIAL", "STALE", "REJECT")
+    }
+    catalog = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
+    catalog.update({
+        "active_data_status": index["active_data_status"],
+        "indexed_shard_count": len(shards),
+        "safe_shard_count": counts["SAFE"],
+        "partial_shard_count": counts["PARTIAL"],
+        "stale_shard_count": counts["STALE"],
+        "reject_shard_count": counts["REJECT"],
+    })
+    _atomic_json(CATALOG_PATH, catalog)
+
     registry = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
     registry["active_dataset"] = {
         "status": index["active_data_status"],
         "validation_allowed": index["active_data_status"] == "SAFE",
         "proof_of_pnl_allowed": False,
+        "indexed_shards": len(shards),
+        "safe_count": counts["SAFE"],
+        "partial_count": counts["PARTIAL"],
+        "stale_count": counts["STALE"],
+        "reject_count": counts["REJECT"],
+        "source_index_sha256": index_file_sha256(INDEX_PATH),
     }
     _atomic_json(REGISTRY_PATH, registry)
     return {

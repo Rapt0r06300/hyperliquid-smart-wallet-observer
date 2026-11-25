@@ -19,7 +19,6 @@ import json
 import os
 import sys
 import time
-from collections import deque
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -28,11 +27,13 @@ RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "tools"))
 sys.path.insert(0, str(RACINE / "src"))
 import heartbeat_collecteur as HB  # noqa: E402
+
 from hl_observer.collection.bounded_tick_queue import (  # noqa: E402
     BoundedTickEnvelopeQueue,
+)
+from hl_observer.collection.bounded_tick_queue import (  # noqa: E402
     estimate_tick_envelope_bytes as _estimated_tick_envelope_bytes,
 )
-
 from hl_observer.config.cross_venue_instruments import (  # noqa: E402
     ATOMIC_BBO_SOURCE_MODE,
     MAPPING_SCHEMA_VERSION,
@@ -690,7 +691,13 @@ async def _boucle(
     from hl_observer.collection import collecte_fiable as CF
     cache = CF.CacheDedup()
     atomic_bbo_cache = CF.CacheDedup()
-    dataset = PartitionedTickDatasetWriter(root / TICK_DATASET_DIR, flush_every=1)
+    # Data batches stay fsynced; refresh derived manifests at most every 5s,
+    # or on first write / shard rotation, instead of every 250ms.
+    dataset = PartitionedTickDatasetWriter(
+        root / TICK_DATASET_DIR,
+        flush_every=100_000,
+        manifest_interval_s=5.0,
+    )
     # Canonical event ledger is a disk audit trail only — replays and backtests
     # never read it back. It is disabled by default to avoid a multi-GB file;
     # set ALINA_CANONICAL_EVENT_LEDGER=1 to re-enable the on-disk ledger.
@@ -1305,7 +1312,8 @@ async def _boucle(
                                     source_id="binance_usdm_public_readonly",
                                     channel="bbo",
                                     instrument=coin_name,
-                                    event_kind=FeedEventKind.UPDATE,
+                                    # Binance bookTicker carries the complete top-of-book state.
+                                    event_kind=FeedEventKind.SNAPSHOT,
                                     # Keep the already-decoded wire frame as text. Retaining its
                                     # Python dict for every queued trade/BBO event multiplies RAM;
                                     # TickEnvelope accepts the original frame without schema loss.

@@ -1,10 +1,16 @@
 """Cloud CI regression for lossless, fail-closed catalogue partition planning."""
 import hashlib
 import json
+from pathlib import Path
 
 import pytest
 
-from tools.partitioned_data_index import load_partitioned_index, partition_index
+from tools.partitioned_data_index import (
+    index_file_sha256,
+    load_partitioned_index,
+    partition_index,
+    require_index_sha256_binding,
+)
 
 
 def _index():
@@ -24,7 +30,7 @@ def _index():
 
 def _stage(tmp_path, root, files):
     catalog = tmp_path / "catalog"
-    catalog.mkdir(exist_ok=True)
+    catalog.mkdir(parents=True, exist_ok=True)
     index_path = catalog / "DATA_INDEX.json"
     index_path.write_text(json.dumps(root), encoding="utf-8")
     for name, content in files.items():
@@ -160,6 +166,21 @@ def test_partition_refuses_missing_file(tmp_path):
         load_partitioned_index(path)
 
 
+def test_quality_receipt_requires_exact_current_index_root_sha(tmp_path):
+    path = tmp_path / "DATA_INDEX.json"
+    path.write_bytes(b'{"schema":"test","shard_count":0}\n')
+    expected = hashlib.sha256(path.read_bytes()).hexdigest()
+
+    assert index_file_sha256(path) == expected
+    assert require_index_sha256_binding({"source_index_sha256": expected}, path) == expected
+    with pytest.raises(ValueError, match="DATA_INDEX_SHA_BINDING_MISSING_OR_INVALID"):
+        require_index_sha256_binding({}, path)
+    with pytest.raises(ValueError, match="DATA_INDEX_SHA_BINDING_RECEIPT_INVALID"):
+        require_index_sha256_binding(None, path)
+    with pytest.raises(ValueError, match="DATA_INDEX_SHA_BINDING_STALE"):
+        require_index_sha256_binding({"source_index_sha256": "0" * 64}, path)
+
+
 def test_partition_refuses_path_escape_and_missing_partition(tmp_path):
     root, files = partition_index(_index(), max_partition_bytes=240)
     root["partitions"][0]["path"] = "../outside.json"
@@ -266,6 +287,28 @@ def test_read_index_verifies_both_legacy_and_partitioned(tmp_path):
         read_index(partition_path)
 
 
+def test_partitioned_reader_accepts_content_addressed_sequence_path(tmp_path):
+    from tools.partitioned_data_index import immutable_partition_path, read_index
+
+    logical = _index()
+    root, files = partition_index(logical, max_partition_bytes=240)
+    renamed_files = {}
+    for number, descriptor in enumerate(root["partitions"], 1):
+        old_path = descriptor["path"]
+        new_path = immutable_partition_path(number, descriptor["sha256"])
+        descriptor["path"] = new_path
+        renamed_files[new_path] = files[old_path]
+    index_path = _stage(tmp_path, root, renamed_files)
+    assert read_index(index_path) == logical
+
+    root["partitions"][0]["path"] = immutable_partition_path(
+        1, "0" * 64,
+    )
+    invalid_path = _stage(tmp_path / "invalid", root, renamed_files)
+    with pytest.raises(ValueError, match="PARTITION_PARITY_NONCANONICAL_SEQUENCE"):
+        read_index(invalid_path)
+
+
 def test_read_index_refuses_unknown_partition_layout(tmp_path):
     from tools.partitioned_data_index import read_index
 
@@ -323,6 +366,38 @@ def test_save_index_keeps_small_inline_and_switches_to_verified_partitions(tmp_p
     third = save_index(path, logical, max_inline_bytes=100000, max_partition_bytes=240)
     assert third["format"] == "PARTITIONED"  # Never revert to inline accidentally.
     assert read_index(path) == logical
+
+
+def test_save_index_root_switch_failure_keeps_old_catalog_readable(tmp_path, monkeypatch):
+    import os
+
+    from tools.partitioned_data_index import read_index, save_index
+
+    path = tmp_path / "catalog" / "DATA_INDEX.json"
+    original = _index()
+    save_index(path, original, max_inline_bytes=1024, max_partition_bytes=240)
+    original_root = path.read_bytes()
+    old_files = {
+        item.name: item.read_bytes()
+        for item in (path.parent / "data-index-parts").glob("part-*.json")
+    }
+    updated = _index()
+    updated["shards"][0]["dataset_id"] = "data-00x"
+    real_replace = os.replace
+
+    def fail_root_replace(source, destination):
+        if Path(destination) == path:
+            raise OSError("simulated root publication interruption")
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(os, "replace", fail_root_replace)
+    with pytest.raises(OSError, match="simulated root publication interruption"):
+        save_index(path, updated, max_inline_bytes=1024, max_partition_bytes=240)
+
+    assert path.read_bytes() == original_root
+    assert read_index(path) == original
+    for name, content in old_files.items():
+        assert (path.parent / "data-index-parts" / name).read_bytes() == content
 
 
 def test_save_index_refuses_preexisting_tampered_partition(tmp_path):

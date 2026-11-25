@@ -1478,6 +1478,74 @@ def _bundle_index(
     }
 
 
+def _exact_nonnegative_count(value: Any) -> int | None:
+    return value if type(value) is int and value >= 0 else None
+
+
+def _frame_reconciliation(
+    *,
+    all_shards: list[Mapping[str, Any]],
+    published_shards: list[Mapping[str, Any]],
+    excluded_shards: list[Mapping[str, Any]],
+    accepted_frames: Any,
+    persisted_frames: Any,
+) -> dict[str, Any]:
+    """Reconcile writer frames against all shard records before SAFE filtering.
+
+    The published bundle intentionally omits rejected shards. Comparing writer
+    totals only to published manifests therefore confuses collection volume
+    with replay-admitted volume. Keep all three counts explicit and fail closed
+    unless every generated shard is either published or exactly accounted for
+    as excluded.
+    """
+    def records(rows: list[Mapping[str, Any]]) -> int | None:
+        values: list[int] = []
+        for row in rows:
+            raw = row.get("record_count")
+            if raw is None:
+                raw = row.get("event_count")
+            exact = _exact_nonnegative_count(raw)
+            if exact is None:
+                return None
+            values.append(exact)
+        return sum(values)
+
+    accepted = _exact_nonnegative_count(accepted_frames)
+    persisted = _exact_nonnegative_count(persisted_frames)
+    all_records = records(all_shards)
+    published_records = records(published_shards)
+    excluded_records = records(excluded_shards)
+    shards_accounted = len(published_shards) + len(excluded_shards) == len(all_shards)
+    counters_complete = None not in (
+        accepted, persisted, all_records, published_records, excluded_records,
+    )
+    matched = (
+        counters_complete
+        and shards_accounted
+        and accepted == persisted
+        and persisted == all_records
+        and all_records == published_records + excluded_records
+    )
+    status = (
+        "INCOMPLETE" if not counters_complete or not shards_accounted
+        else "MATCHED" if matched
+        else "MISMATCH"
+    )
+    return {
+        "schema": "alina.collection_frame_reconciliation.v1",
+        "status": status,
+        "record_count_unit": "valid_jsonl_records",
+        "accepted_frames": accepted,
+        "persisted_frames": persisted,
+        "all_shard_count": len(all_shards),
+        "published_shard_count": len(published_shards),
+        "excluded_shard_count": len(excluded_shards),
+        "all_shard_record_count": all_records,
+        "published_record_count": published_records,
+        "excluded_record_count": excluded_records,
+    }
+
+
 def _load_plan_rows(path: Path) -> list[dict[str, Any]]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, Mapping):
@@ -2088,6 +2156,14 @@ async def collect(
         "mode": "replay_only",
         **summarize_admission_rejections(rejected_admission),
     }
+    frame_reconciliation = _frame_reconciliation(
+        all_shards=[manifest for _shard, manifest in shard_preliminaries],
+        published_shards=manifests,
+        excluded_shards=rejected_admission,
+        accepted_frames=sink.accepted,
+        persisted_frames=sink.persisted,
+    )
+    bundle_index["frame_reconciliation"] = frame_reconciliation
     bundle_index["unattributed_queue_drops"] = orphan_drops
     bundle_index["collection_window_integrity_verified"] = not any(sink.drops.values())
     write_manifest(bundle_index, output / "BUNDLE_INDEX.json")
@@ -2113,6 +2189,7 @@ async def collect(
         },
         "asset_count": len(manifests),
         "source_admission": bundle_index["source_admission"],
+        "frame_reconciliation": frame_reconciliation,
         "l2_coverage": {
             **l2_coverage,
             "required": bool(require_l2),

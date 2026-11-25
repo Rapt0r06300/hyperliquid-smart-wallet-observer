@@ -10,7 +10,9 @@ import os
 import subprocess
 import sys
 import time
+from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -28,6 +30,273 @@ from tools.alina_git_code_sync import (
     _verify_push_porcelain,
 )
 
+
+def test_stale_index_lock_removed_only_after_three_clear_git_censuses(tmp_path: Path) -> None:
+    lock = tmp_path / ".git" / "index.lock"
+    lock.parent.mkdir()
+    lock.write_bytes(b"")
+    stale = time.time() - sync_module.STALE_INDEX_LOCK_MIN_AGE_SECONDS - 30
+    os.utime(lock, (stale, stale))
+    calls = []
+
+    def clear_census():
+        calls.append(1)
+        return []
+
+    output = []
+    result = sync_module.repair_stale_index_lock(
+        tmp_path, process_census=clear_census, sleep=lambda _seconds: None,
+        settle_seconds=0, max_wait_seconds=0, emit=output.append,
+    )
+    assert result == 0
+    assert len(calls) == 3
+    assert not lock.exists()
+    assert "trois controles sans proprietaire Git possible" in output[-1]
+    receipt = json.loads(
+        (tmp_path / "runtime" / "reports" / "git-sync" / "LOCK_REPAIR.json").read_text()
+    )
+    assert receipt["status"] == "LOCK_REMOVED"
+
+
+def test_stale_index_lock_is_preserved_while_any_git_command_is_active(
+    tmp_path: Path,
+) -> None:
+    lock = tmp_path / ".git" / "index.lock"
+    lock.parent.mkdir()
+    lock.write_bytes(b"")
+    stale = time.time() - sync_module.STALE_INDEX_LOCK_MIN_AGE_SECONDS - 30
+    os.utime(lock, (stale, stale))
+    output = []
+    result = sync_module.repair_stale_index_lock(
+        tmp_path,
+        process_census=lambda: [{
+            "pid": "31448", "name": "git.exe",
+            "command_line": "git status --porcelain",
+            "creation_time_utc": datetime.fromtimestamp(stale - 1, UTC).isoformat(),
+        }],
+        sleep=lambda _seconds: None, settle_seconds=0, max_wait_seconds=0,
+        emit=output.append,
+    )
+    assert result == 2
+    assert lock.exists()
+    assert any("Git est encore actif" in line for line in output)
+    assert any("git.exe PID 31448" in line for line in output)
+    receipt = json.loads(
+        (tmp_path / "runtime" / "reports" / "git-sync" / "LOCK_REPAIR.json").read_text()
+    )
+    assert receipt["status"] == "NO_GO"
+    assert receipt["blocking_processes"] == [{"pid": "31448", "name": "git.exe"}]
+
+
+def test_stale_index_lock_ignores_git_started_after_that_lock(tmp_path: Path) -> None:
+    lock = tmp_path / ".git" / "index.lock"
+    lock.parent.mkdir()
+    lock.write_bytes(b"")
+    stale = time.time() - sync_module.STALE_INDEX_LOCK_MIN_AGE_SECONDS - 3600
+    os.utime(lock, (stale, stale))
+    process = {
+        "pid": "43210",
+        "name": "git.exe",
+        "command_line": "git status --porcelain",
+        "creation_time_utc": datetime.now(UTC).isoformat(),
+    }
+    output = []
+
+    result = sync_module.repair_stale_index_lock(
+        tmp_path,
+        process_census=lambda: [process],
+        sleep=lambda _seconds: None,
+        settle_seconds=0,
+        max_wait_seconds=0,
+        emit=output.append,
+    )
+
+    assert result == 0
+    assert not lock.exists()
+    assert any("ont démarré après index.lock" in line for line in output)
+    receipt = json.loads(
+        (tmp_path / "runtime" / "reports" / "git-sync" / "LOCK_REPAIR.json").read_text()
+    )
+    assert receipt["status"] == "LOCK_REMOVED"
+    assert receipt["non_blocking_processes"] == [
+        {"pid": "43210", "name": "git.exe", "reason": "started_after_lock"}
+    ]
+
+
+def test_stale_index_lock_keeps_git_when_creation_time_is_unknown(tmp_path: Path) -> None:
+    lock = tmp_path / ".git" / "index.lock"
+    lock.parent.mkdir()
+    lock.write_bytes(b"")
+    stale = time.time() - sync_module.STALE_INDEX_LOCK_MIN_AGE_SECONDS - 3600
+    os.utime(lock, (stale, stale))
+    result = sync_module.repair_stale_index_lock(
+        tmp_path,
+        process_census=lambda: [{
+            "pid": "43211",
+            "name": "git.exe",
+            "command_line": "git status --porcelain",
+        }],
+        sleep=lambda _seconds: None,
+        settle_seconds=0,
+        max_wait_seconds=0,
+        emit=lambda _line: None,
+    )
+    assert result == 2
+    assert lock.exists()
+
+
+def test_windows_git_process_census_keeps_creation_time(monkeypatch) -> None:
+    creation_time = datetime.now(UTC).isoformat()
+    payload = json.dumps([{
+        "pid": "43212",
+        "name": "git.exe",
+        "command_line": "git status --porcelain",
+        "creation_time_utc": creation_time,
+    }])
+    monkeypatch.setattr(sync_module, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(
+        sync_module.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            returncode=0, stdout=payload, stderr="",
+        ),
+    )
+
+    rows = sync_module._query_git_processes()
+
+    assert rows == [{
+        "pid": "43212",
+        "name": "git.exe",
+        "command_line": "git status --porcelain",
+        "creation_time_utc": creation_time,
+    }]
+
+
+def test_stale_index_lock_waits_for_git_then_rechecks_before_removal(
+    tmp_path: Path,
+) -> None:
+    lock = tmp_path / ".git" / "index.lock"
+    lock.parent.mkdir()
+    lock.write_bytes(b"")
+    stale = time.time() - sync_module.STALE_INDEX_LOCK_MIN_AGE_SECONDS - 30
+    os.utime(lock, (stale, stale))
+    states = [
+        [{"name": "git.exe", "command_line": "git status --porcelain"}],
+        [],
+        [],
+        [],
+    ]
+    sleeps = []
+
+    def census():
+        return states.pop(0)
+
+    result = sync_module.repair_stale_index_lock(
+        tmp_path, process_census=census, sleep=sleeps.append,
+        settle_seconds=0, max_wait_seconds=1, poll_interval_seconds=0.2,
+        emit=lambda _line: None,
+    )
+    assert result == 0
+    assert sleeps == [0.2]
+    assert not lock.exists()
+
+
+def test_stale_index_lock_ignores_only_git_fsmonitor_daemon(tmp_path: Path) -> None:
+    lock = tmp_path / ".git" / "index.lock"
+    lock.parent.mkdir()
+    lock.write_bytes(b"")
+    stale = time.time() - sync_module.STALE_INDEX_LOCK_MIN_AGE_SECONDS - 30
+    os.utime(lock, (stale, stale))
+    output = []
+    result = sync_module.repair_stale_index_lock(
+        tmp_path,
+        process_census=lambda: [{
+            "name": "git.exe",
+            "command_line": "git fsmonitor--daemon run --detach --ipc-threads=8",
+        }],
+        sleep=lambda _seconds: None, settle_seconds=0, max_wait_seconds=0,
+        emit=output.append,
+    )
+    assert result == 0
+    assert not lock.exists()
+
+
+def test_stale_index_lock_fails_closed_on_unknown_process_inventory(tmp_path: Path) -> None:
+    lock = tmp_path / ".git" / "index.lock"
+    lock.parent.mkdir()
+    lock.write_bytes(b"")
+    stale = time.time() - sync_module.STALE_INDEX_LOCK_MIN_AGE_SECONDS - 30
+    os.utime(lock, (stale, stale))
+    output = []
+
+    def failed_census():
+        raise OSError("CIM unavailable")
+
+    result = sync_module.repair_stale_index_lock(
+        tmp_path, process_census=failed_census, settle_seconds=0,
+        max_wait_seconds=0, emit=output.append,
+    )
+    assert result == 2
+    assert lock.exists()
+    assert "verrou conserve" in output[-1]
+
+
+def test_stale_index_lock_quarantine_never_overwrites_a_new_lock(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    lock = tmp_path / ".git" / "index.lock"
+    lock.parent.mkdir()
+    lock.write_bytes(b"")
+    stale = time.time() - sync_module.STALE_INDEX_LOCK_MIN_AGE_SECONDS - 30
+    os.utime(lock, (stale, stale))
+    real_rename = Path.rename
+    renamed = []
+
+    def rename_then_create_new_lock(source: Path, target: Path) -> Path:
+        result = real_rename(source, target)
+        if source == lock:
+            lock.write_bytes(b"new Git owner")
+            renamed.append(target)
+        return result
+
+    monkeypatch.setattr(Path, "rename", rename_then_create_new_lock)
+    result = sync_module.repair_stale_index_lock(
+        tmp_path, process_census=lambda: [], sleep=lambda _seconds: None,
+        settle_seconds=0, max_wait_seconds=0, emit=lambda _line: None,
+    )
+    assert result == 2
+    assert lock.read_bytes() == b"new Git owner"
+    assert len(renamed) == 1 and renamed[0].exists()
+
+
+def test_stale_index_lock_refuses_recent_or_changed_lock(tmp_path: Path) -> None:
+    lock = tmp_path / ".git" / "index.lock"
+    lock.parent.mkdir()
+    lock.write_bytes(b"")
+    output = []
+    recent = sync_module.repair_stale_index_lock(
+        tmp_path, process_census=lambda: [], settle_seconds=0,
+        max_wait_seconds=0, emit=output.append,
+    )
+    assert recent == 2 and lock.exists()
+
+    old = time.time() - sync_module.STALE_INDEX_LOCK_MIN_AGE_SECONDS - 30
+    os.utime(lock, (old, old))
+    calls = []
+
+    def changes_lock_on_second_census():
+        calls.append(1)
+        if len(calls) == 2:
+            lock.write_bytes(b"new owner")
+        return []
+
+    changed = sync_module.repair_stale_index_lock(
+        tmp_path, process_census=changes_lock_on_second_census,
+        sleep=lambda _seconds: None, settle_seconds=0, max_wait_seconds=0,
+        emit=output.append,
+    )
+    assert changed == 2
+    assert lock.read_bytes() == b"new owner"
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows process-tree contract")
 def test_terminate_process_tree_kills_descendant_process(tmp_path: Path) -> None:
@@ -748,7 +1017,7 @@ def test_write_report_keeps_last_receipt_and_bounded_history(
 def test_launcher_uses_tracked_canonical_engine_and_preserves_failure_status() -> None:
     launcher = Path("POUSSER-GITHUB.cmd").read_text(encoding="utf-8")
     lifecycle = Path("tools/launcher_lifecycle.cmd").read_text(encoding="utf-8")
-    assert "ALINA_ENGINE_REQUIRED_BUILD=2026-11-12-compact-fresh-index-v15" in launcher
+    assert f"ALINA_ENGINE_REQUIRED_BUILD={sync_module.GIT_SYNC_ENGINE_BUILD}" in launcher
     assert r"tools\alina_git_code_sync.py" in launcher
     assert r"tools\sync_complete_clone.py" in launcher
     assert r"tools\launcher_lifecycle.cmd" in launcher
@@ -758,8 +1027,14 @@ def test_launcher_uses_tracked_canonical_engine_and_preserves_failure_status() -
     assert "ALINA_LOCAL_ENGINE_SHA256" not in launcher
     assert 'set "RC=%ERRORLEVEL%"' in launcher
     assert "exit /b %RC%" in launcher
-    assert "fsmonitor--daemon" in launcher
-    assert "IsNullOrWhiteSpace($p.CommandLine)" in launcher
+    guard = launcher.split(":ensure_no_stale_lock", 1)[1]
+    assert "--repair-stale-lock" in guard
+    assert "if errorlevel 1" in guard
+    assert 'summary "%ALINA_ROOT%runtime\\reports\\git-sync\\LOCK_REPAIR.json"' in launcher
+    assert 'set "RC=2"' in guard
+    assert "exit /b 1" in guard
+    assert "del /f /q" not in guard
+    assert "IsNullOrWhiteSpace($p.CommandLine)" not in launcher
 
 
 @pytest.mark.parametrize("verb", ["fetch", "push"])
@@ -1611,25 +1886,52 @@ def test_tracked_protected_local_change_does_not_block_code_only_fast_forward(re
     assert git(local, "rev-parse", "HEAD") == git(origin, "rev-parse", "main")
 
 
-def test_tracked_protected_collision_still_fails_closed(repos):
+def test_tracked_protected_collision_is_preserved_as_local_overlay(repos):
+    """The 161-path NO_GO case advances main while preserving every local SAFE file."""
     local, cloud, origin = repos
-    cloud_commit(cloud, "catalog/state.json", "initial\n")
+    paths = [
+        "catalog/CAMPAIGN_RESILIENCE_RECEIPT.json",
+        "catalog/CAMPAIGN_WATCHDOG_RECEIPT.json",
+        "catalog/campaign-history/market-e8-0-20261018-v7.pending.39a55ff54c09.e54ef518f163e59cc.json",
+        *(
+            f"catalog/campaign-history/receipt-{index:03d}.json"
+            for index in range(158)
+        ),
+    ]
+    for path in paths:
+        dst = cloud / path
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_text("remote v1\n", encoding="utf-8")
+    git(cloud, "add", "catalog")
+    git(cloud, "commit", "-m", "initial protected receipts")
+    git(cloud, "push", "origin", "main")
     git(local, "fetch", "origin", "main")
     git(local, "merge", "--ff-only", "origin/main")
-    protected = local / "catalog" / "state.json"
-    protected.write_text("local protected value\n", encoding="utf-8")
-    cloud_commit(cloud, "catalog/state.json", "remote protected value\n")
+
+    for index, path in enumerate(paths):
+        (local / path).write_text(f"local SAFE {index}\n", encoding="utf-8")
+        (cloud / path).write_text(f"remote v2 {index}\n", encoding="utf-8")
+    code_path = local / "tools" / "local_fix.py"
+    code_path.parent.mkdir(parents=True, exist_ok=True)
+    code_path.write_text("fixed = True\n", encoding="utf-8")
+    git(cloud, "add", "catalog")
+    git(cloud, "commit", "-m", "update protected receipts")
+    git(cloud, "push", "origin", "main")
 
     rc, receipt = run_sync(local)
 
-    assert rc == 2 and receipt["status"] == "NO_GO"
-    assert receipt["head_after"] == git(local, "rev-parse", "HEAD")
-    assert any(marker in receipt["error"].casefold() for marker in (
-        "protege", "overwritten by merge", "would be overwritten",
-    ))
-    assert protected.read_text(encoding="utf-8") == "local protected value\n"
-    assert git(origin, "show", "main:catalog/state.json") == "remote protected value"
-    assert receipt["push_attempts"] == 0
+    assert rc == 0 and receipt["status"] == "SYNCHRONIZED"
+    assert git(local, "rev-parse", "HEAD") == git(origin, "rev-parse", "main")
+    assert receipt["adoption_protected_overlay_count"] == 161
+    assert receipt["adoption_protected_local_worktree_changes"] == 161
+    assert len(receipt["adoption_protected_overlay_paths"]) == 100
+    assert receipt["local_commit_created"] is True
+    assert receipt["push_attempts"] == 1
+    assert git(origin, "show", "main:tools/local_fix.py") == "fixed = True"
+    assert code_path.read_text(encoding="utf-8") == "fixed = True\n"
+    for index, path in enumerate(paths):
+        assert (local / path).read_text(encoding="utf-8") == f"local SAFE {index}\n"
+        assert git(origin, "show", f"main:{path}") == f"remote v2 {index}"
 
 
 def test_workflow_modify_delete_resolves_to_github_deletion_and_pushes(repos):
@@ -1879,7 +2181,7 @@ def test_windows_launcher_uses_repository_tools_without_external_bootstrap() -> 
     assert "ALINA_LOCAL_ENGINE_SHA256=" not in source
     assert 'if exist "%ProgramFiles%\\Git\\cmd\\git.exe"' in source
     assert 'if exist "%LOCALAPPDATA%\\Programs\\Git\\cmd\\git.exe"' in source
-    assert "ALINA_ENGINE_REQUIRED_BUILD=2026-11-12-compact-fresh-index-v15" in source
+    assert f"ALINA_ENGINE_REQUIRED_BUILD={sync_module.GIT_SYNC_ENGINE_BUILD}" in source
     assert "ast.parse(" in source
     assert ":missing_engine" in source and ":invalid_engine" in source
     assert "--shards-only" in source and "--all-safe" in source
@@ -2105,6 +2407,90 @@ def _monte_adoption(local, cloud, contenu_local=None):
     return task, depart, arrivee
 
 
+def test_l_adoption_accepte_si_le_contenu_local_est_deja_la_cible_distante(repos):
+    """Un changement local identique a la cible distante ne doit pas bloquer."""
+    local, cloud, _origin = repos
+    task, depart, arrivee = _monte_adoption(
+        local, cloud, contenu_local="v2" + chr(10),
+    )
+
+    task._adopter_tete_sans_balayage(arrivee, depart, "test contenu identique")
+
+    assert git(local, "rev-parse", "HEAD") == arrivee
+    assert (local / "catalog" / "state.json").read_text(encoding="utf-8") == "v2" + chr(10)
+    assert task.report["adoption_protected_collisions"] == 0
+
+
+def test_l_adoption_accepte_un_stage_protege_identique_a_la_cible(repos):
+    """Un stage deja egal a GitHub peut etre adopte sans perdre d'octets."""
+    local, cloud, _origin = repos
+    task, depart, arrivee = _monte_adoption(
+        local, cloud, contenu_local="v2" + chr(10),
+    )
+    git(local, "add", "catalog/state.json")
+
+    task._adopter_tete_sans_balayage(arrivee, depart, "test stage identique")
+
+    assert git(local, "rev-parse", "HEAD") == arrivee
+    assert git(local, "show", ":catalog/state.json") == "v2"
+    assert task.report["adoption_protected_collisions"] == 0
+
+
+def test_l_adoption_keeps_identical_untracked_protected_file(repos):
+    """A duplicate local file can be adopted without deleting its bytes."""
+    local, cloud, _origin = repos
+    cloud_commit(cloud, "catalog/state.json", "remote value\n")
+    protected = local / "catalog" / "state.json"
+    protected.parent.mkdir(parents=True, exist_ok=True)
+    protected.write_text("remote value\n", encoding="utf-8")
+
+    rc, receipt = run_sync(local)
+
+    assert rc == 0 and receipt["status"] == "SYNCHRONIZED"
+    assert protected.read_text(encoding="utf-8") == "remote value\n"
+    assert receipt.get("adoption_identical_untracked_preserved", 0) == 1
+
+
+def test_l_adoption_preserve_une_suppression_protegee_stagee(repos):
+    """A staged deletion remains local when GitHub recreates the protected path."""
+    local, cloud, _origin = repos
+    task, depart, arrivee = _monte_adoption(local, cloud)
+    protected = local / "catalog" / "state.json"
+    protected.unlink()
+    git(local, "add", "-u", "--", "catalog/state.json")
+    task.report["protected_local_changes"] = []
+    task._deferred_staged_protected_paths.add("catalog/state.json")
+
+    task._adopter_tete_sans_balayage(arrivee, depart, "test staged delete overlay")
+
+    assert git(local, "rev-parse", "HEAD") == arrivee
+    assert git(local, "ls-files", "--", "catalog/state.json") == ""
+    assert not protected.exists()
+    assert task.report["adoption_protected_overlay_count"] == 1
+    assert task.report["adoption_protected_skip_worktree_count"] == 0
+
+
+def test_l_adoption_preserve_un_stage_protege_different_de_la_cible(repos):
+    """La version stagee locale reste intacte comme overlay apres adoption."""
+    local, cloud, _origin = repos
+    task, depart, arrivee = _monte_adoption(
+        local, cloud, contenu_local="v2" + chr(10),
+    )
+    protected = local / "catalog" / "state.json"
+    protected.write_text("staged local value" + chr(10), encoding="utf-8")
+    git(local, "add", "catalog/state.json")
+    protected.write_text("v2" + chr(10), encoding="utf-8")
+
+    with task._preserve_local_protected_index():
+        task._adopter_tete_sans_balayage(arrivee, depart, "test stage overlay")
+
+    assert git(local, "rev-parse", "HEAD") == arrivee
+    assert git(local, "show", ":catalog/state.json") == "staged local value"
+    assert protected.read_text(encoding="utf-8") == "v2" + chr(10)
+    assert "catalog/state.json" in git(local, "diff", "--cached", "--name-only")
+    assert not git(local, "ls-files", "-v", "--", "catalog/state.json").startswith("S ")
+
+
 def test_l_adoption_ne_refuse_que_sur_un_ecart_de_contenu(repos):
     """Un chemin signale par le STAT mais identique a HEAD ne doit PAS bloquer.
 
@@ -2203,24 +2589,19 @@ def test_l_adoption_ne_touche_ni_le_churn_ni_un_secret_ni_une_archive() -> None:
     assert adoptable("catalog/../ailleurs.json") is False
     assert adoptable("") is False
 
-def test_l_adoption_refuse_quand_le_contenu_diverge_vraiment(repos):
-    """Meme montage, vrais octets locaux : REFUS, et rien ne bouge.
-
-    Avant le 21/11/2026 ce refus venait de GIT (<< Your local changes to the
-    following files would be overwritten by merge >>), pas du lanceur :
-    remplacer le merge sans le reecrire ouvrait la garde.
-    """
+def test_l_adoption_preserve_un_contenu_protege_divergent(repos):
+    """Real differing local SAFE bytes remain visible after remote adoption."""
     local, cloud, _origin = repos
     task, depart, arrivee = _monte_adoption(local, cloud, "octets locaux" + chr(10))
     fichier = local / "catalog" / "state.json"
 
-    with pytest.raises(SyncBlocked) as leve:
-        task._adopter_tete_sans_balayage(arrivee, depart, "le test")
+    with task._preserve_local_protected_index():
+        task._adopter_tete_sans_balayage(arrivee, depart, "le test overlay")
 
-    assert "protege" in str(leve.value)
-    assert "catalog/state.json" in str(leve.value)
-    assert git(local, "rev-parse", "HEAD") == depart, "HEAD a bouge malgre le refus"
+    assert git(local, "rev-parse", "HEAD") == arrivee
+    assert git(local, "show", "HEAD:catalog/state.json") == "v2"
     assert fichier.read_text(encoding="utf-8") == "octets locaux" + chr(10)
+    assert task.report["adoption_protected_overlay_paths"] == ["catalog/state.json"]
 
 def test_une_lecture_locale_garde_son_budget_court() -> None:
     """Elargir le merge ne doit pas elargir le reste."""

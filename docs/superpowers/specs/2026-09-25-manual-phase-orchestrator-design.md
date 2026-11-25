@@ -22,6 +22,12 @@ runtime modules: `src/`, `hyper_smart_observer/`, `tools/`, `scripts/`, root-lev
 The workflow runner-selector gate remains independent from the source scan.
 These static checks are fail-closed tripwires, not proof of runtime reachability;
 dynamic URL construction and indirect calls still require focused negative tests.
+The operational-source inventory MUST expose whether every in-scope directory
+was traversed and every selected source file was read. Any traversal or read
+error MUST mark the inventory incomplete and fail the corresponding security
+gates; APIs that silently skip unreadable paths (including `os.walk` without an
+`onerror` handler) are not acceptable. An omitted path is never evidence that it
+contains no prohibited capability.
 
 ## Current CopyVault-only operating scope
 
@@ -890,12 +896,29 @@ Each segment manifest records at least:
 - first and last sequence/update IDs when available;
 - raw event/frame count;
 - normalized event count;
+- exact frame-to-manifest reconciliation for the full pre-admission shard set;
 - byte count before/after compression;
 - queue-drop count;
 - reconnect/reset count;
 - parser failures;
 - SHA-256 of every asset;
 - previous sealed segment hash for that logical stream.
+
+Collection receipts MUST keep accepted/persisted frames, all-shard valid JSONL
+records, published records, and pre-publication excluded records as separate
+counts. The bundle manifest lists only admitted assets, so its record total
+MUST NOT be compared directly with the writer's all-shard persisted-frame
+total. A frame reconciliation is complete only when every generated shard is
+accounted for exactly once as published or excluded, all counts are exact, and
+`all_shard_records = published_records + excluded_records = persisted_frames`.
+Missing or mismatched exclusion counts remain `INCOMPLETE`/`MISMATCH` and MUST
+not be promoted to a complete collection receipt.
+
+Excluded compressed bytes are exact only when every excluded shard has a
+verified non-negative byte count. If any size is missing or invalid, the total
+MUST remain unknown (`null`) with `excluded_compressed_bytes_exact=false`; it
+MUST NOT be summed by silently treating missing sizes as zero. A zero byte total
+is exact when there are no excluded shards.
 
 The previous-segment reference forms a per-stream hash chain so missing, reordered, or replaced segments are detectable.
 
@@ -1003,6 +1026,8 @@ The planner must size symbol/channel shards from observed throughput and venue l
 A shard that experiences queue loss, persistent processing lag, or rate-limit pressure is automatically reduced/split for the next unit.
 
 All in-memory collector queues must be bounded by both event count and a documented byte budget. Queue overflow is a quality incident: count and byte pressure, oversized-event rejects, and evictions must remain observable, mark the affected stream degraded, and prevent certification of continuity. An estimated queue-byte gauge is not an RSS measurement and must be labeled accordingly. Diagnostic refresh throttling must never throttle raw event capture or conceal drops.
+
+For the local partitioned BBO tick writer, derived manifest refresh may be time-bounded (currently 5 seconds) to avoid repeating per-partition metadata scans on every 250 ms supervision cycle. This does not relax data durability: each appended JSONL batch remains flushed and `fsync`ed; a new partition manifest is written on first data, on its configured record threshold, on the time bound, and on shard rotation. The active manifest can therefore lag the durable current file by at most the configured interval; raw capture, queue-drop accounting, and fail-closed admission must remain independent of that cadence.
 
 ### Replay-grade timestamps and clock discipline
 
@@ -1128,6 +1153,12 @@ admissible for an economic replay. These totals can therefore differ without
 indicating a stale index, but every consumer must preserve their distinct
 meaning and verify the shared `source_index_sha256` before comparing them.
 
+`DATA_QUALITY_REGISTRY.active_dataset` is also a derived catalogue receipt and
+must include `source_index_sha256` for the exact published bytes of
+`DATA_INDEX.json`. Every producer that changes the canonical index must publish
+the matching hash and exact status counters in the registry; the dataset-quality
+gate rejects a missing, malformed, or stale binding before authorizing validation.
+
 A trade counted outside the replay-admissible total is not automatically proven
 unusable: reports must distinguish a genuinely invalid asset from an asset
 whose replay proof is still missing. Replay-compatibility diagnostics therefore
@@ -1138,6 +1169,14 @@ The derived `catalog/REPLAY_COMPATIBILITY_REASONS.json` receipt must remain a
 compact SHA-index-bound **aggregate**, not a second per-shard copy of the full
 index: GitHub rejects ordinary Git blobs over 100 MiB. Original identities and
 reasons remain in the partitioned canonical DATA_INDEX and immutable manifests.
+Partition publication is crash-safe: newly changed partition bytes are stored
+under `data-index-parts/part-NNNNNN-<sha256>.json`; readers may also accept the
+legacy `part-NNNNNN.json` path when the descriptor SHA matches the file. A
+writer must never replace or delete a partition that an existing root may
+reference. It writes and verifies the complete new partition set first, then
+atomically replaces `DATA_INDEX.json` as the sole publication boundary. If
+interrupted before that root switch, the prior catalog remains fully readable;
+unreferenced immutable partitions may be retained for later reuse or review.
 All replay-compatibility receipt capture and reapplication code, including
 `tools/replay_receipt_publish.py`, must load the complete, parity-checked index
 through `read_index` rather than expecting a root-level `shards` array. A
@@ -14601,3 +14640,68 @@ Validation : `tests/test_eta_donnees_labo.py tests/test_run_bounded_collector.py
 Mesure locale ponctuelle sur le reçu de **26 078 958 octets** : première lecture complète **0,146 s**, lecture réutilisée **0,002 s** dans le même processus, sorties identiques (`REPLAY_READY_COMPLETE`, contrat courant vérifié, 1 792 577 shards déclarés). Ce micro-benchmark démontre seulement le coût de la relecture de ce reçu sur cette machine; il ne certifie pas les octets physiques des shards. Test de cache/invalidation : `tests/test_eta_donnees_labo.py` (**50 réussis** au total); collecteur natif : `tests/test_native_venues_collector.py` (**13 réussis**); Ruff et `py_compile` propres.
 
 Le contrôle du `UNPACK_REPORT.json` local confirme qu'il s'agit d'un ancien reçu incomplet : il annonce `SAFE_UNPACK_COMPLETE` / `FULL_JSONL` et 15 456 shards, mais omet les champs explicites de disponibilité physique et de mode de lecture; l'ETA le rejette donc (`UNPACK_CONTRACT_INCONSISTENT`) au lieu de le compter. Le producteur actuel `tools/unpack_verified_safe.py` émet ces champs pour les prochaines exécutions et `tests/test_alina_unpack_safe.py` les vérifie. Aucune extraction des 1 792 577 shards n'a été relancée; le reçu existant n'est pas réécrit ni promu.
+
+### 2026-11-25 -- Patch compact des identités de trades globales
+
+Le reçu v4 `TRADE_UNIQUE_COUNT_PATCH.json` faisait **93 675 488 octets** pour 204 000 preuves par shard; le workflow s'arrête à 95 000 000 octets pour respecter le plafond GitHub de 100 MiB. Le générateur écrit maintenant le schéma v5 : chaque entrée est un tuple fixe `[asset_sha256, trade_count_scanned, unique_trade_count, global_new_identity_count, cross_shard_overlap_count, exact]`; la version d'identité reste unique au niveau racine. Les lecteurs métriques, index-manifest et replay acceptent v4 et v5; un tuple invalide ne fournit aucune preuve. Les champs SHA/comptes, l'égalité `global_new + overlap = unique`, la reprise SQLite et les conditions de couverture globale sont conservés.
+
+Représentation non publiée reconstruite à partir du reçu local actuel : les **204 000 lignes** se décodent avec les mêmes SHA et comptes dans les deux formats; le JSON v5 compact projeté fait **32 883 384 octets**, soit **64,9 %** de moins, sous le garde de 95 Mo. Cette conversion n'a pas réécrit le catalogue. Le reçu actuel reste incomplet : **89 888** shards candidats ne sont pas scannés, donc le total global demeure `null` et la couverture `false`. Validation logicielle : `tests/test_global_unique_trade_backfill.py` (26), `tests/test_dataset_metrics.py` (14), `tests/test_index_run_manifest_trade_patch.py` (8) et `tests/test_backfill_replay_compatibility_candidates.py` (34), toutes réussies. Ces tests et la mesure de sérialisation ne remplacent pas le scan manquant des données SAFE.
+
+Le contrôle en lecture seule du checkpoint global révèle une seconde exigence de déterminisme : `completed` conserve un `global_new` attribué selon l'ordre des insertions SQLite, mais les anciens reçus ne versionnent pas cet ordre. Sur les **204 000** lignes comparables au checkpoint, SHA, nombre brut et nombre unique concordent tous; **92 466** valeurs `global_new` diffèrent, et **89 888** shards du checkpoint ne figurent pas dans le reçu publié. Ces écarts ne changent pas l'union des identités, mais interdisent de certifier l'attribution par shard. Le générateur trie donc les candidats par `dataset_id`, attend chaque scan dans cet ordre avant fusion, et s'arrête au premier échec pour conserver un préfixe reprenable. Un checkpoint non vide sans `merge_order_version` est refusé sans modification ni suppression; il faut le reconstruire à partir des assets SAFE vérifiés avant toute nouvelle publication complète. Le checkpoint existant n'a pas été rescanné. Les tests du générateur passent maintenant (**29**).
+
+### 2026-11-25 -- Portée explicite de la couverture des métriques de collecte
+
+Dans `COLLECTION_METRICS.instant`, le champ historique `coverage_complete` signifie uniquement que les comptes de trades sont complets pour les unités de collecte durables observées; il ne prouve ni la complétude de toutes les métriques, ni celle des admissions, des shards SAFE ou de l'unicité globale. Le générateur publie aussi `trade_count_coverage_complete` et `coverage_complete_scope=observed_durable_collection_trade_counts_only`; `all_collection_metrics_complete` et `quality_status` restent les contrôles de complétude générale. Le champ historique est conservé pour compatibilité. Le catalogue local n'a pas été régénéré ni réécrit.
+
+Validation : `tests/test_collection_metrics.py` (**16 réussis**), dont le cas où la couverture des comptes de trades est vraie alors que les métriques de frames restent incomplètes. `py_compile` et `git diff --check` passent.
+
+### 2026-11-25 -- Déclenchement CI du codec global v5
+
+Le workflow `backfill-global-unique-trade-counts.yml` ne surveillait pas `tools/global_unique_trade_patch.py`; un changement du codec de sérialisation pouvait donc ne pas déclencher son contrôle spécialisé sur `push`. Le chemin est maintenant inclus dans le filtre `paths`, avec un test de contrat dans `tests/test_ci_workflows.py`. Le test a d'abord échoué faute de déclencheur, puis passe après correction.
+
+Validation groupée locale : **205 tests réussis, 1 ignoré** dans les suites CI, sécurité, AlinaSync, pont Copy-Vault, ETA et métriques; aucune CI GitHub ni publication n'a été déclenchée. HEAD local observé pendant cette validation : `c884db89b50d`.
+
+### 2026-11-25 -- Reprise sûre du NO_GO causé par `index.lock`
+
+Le lanceur ne doit jamais continuer vers le synchroniseur en présence d'un `index.lock` qu'il n'a pas pu réparer : cette ancienne branche retournait un succès depuis le garde puis le moteur échouait plus tard avec le même diagnostic. La décision est maintenant centralisée dans `tools/alina_git_code_sync.py --repair-stale-lock`. Le garde attend au plus 20 secondes sans arrêter aucun processus; tout Git actif (hors daemon `fsmonitor`), inventaire CIM indisponible, verrou âgé de moins de 5 minutes ou empreinte du verrou modifiée entraîne un refus explicite et non destructif. La suppression ne se fait qu'après un premier inventaire sans Git actif, un second une seconde plus tard, puis un contrôle post-quarantaine, et si périphérique, inode, taille et date du verrou sont restés identiques. Le fichier est renommé atomiquement sous un nom de quarantaine unique; un verrou neuf apparu dans la course reste intact et bloque le lancement. Le moteur normal continue de refuser tout verrou présent.
+
+Validation v18 : dix tests ciblés réussis (attente bornée, activité Git, `fsmonitor`, erreurs et changements de recensement, course de recréation du verrou, préflight et contrat du lanceur); quatre tests d'overlay protégé réussis; `POUSSER-GITHUB.cmd --portable-self-check` retourne `PORTABLE_GITHUB_PUSH_CHECK_OK`. Sur le dépôt réel, un essai du garde précédent a observé `index.lock` vide, daté du 25/11 à 11:47, et un `git status` actif; il a attendu 20 secondes, conservé le verrou et renvoyé le code 2. Le garde v18 n'a pas été autorisé à déplacer ce verrou tant que Git reste actif. Aucun processus n'a été arrêté, aucun verrou réel supprimé, et aucune synchronisation/push lancée. Après la fin du `git status`, relancer le CMD permettra de vérifier l'orphelinat puis d'avancer sans toucher aux données SAFE.
+
+### 2026-11-25 — Correction du faux blocage NO_GO de `index.lock`
+
+Le contrôle v18/v20 comptait tout `git status` comme propriétaire possible, y compris un processus créé plusieurs heures après le verrou et incapable de l'avoir créé (Git ouvre le verrou exclusivement). Le recensement CIM inclut maintenant l'heure de création UTC. Pour un `index.lock` dont l'identité reste inchangée, un Git n'est exclu que si son démarrage est postérieur à la date de modification du fichier avec une marge conservatrice de 2 secondes; un horodatage absent, invalide ou antérieur garde le comportement fail-closed. Les daemons `fsmonitor` restent exclus. Les censuses, la comparaison complète de l'identité du verrou, le renommage atomique et la vérification d'un éventuel nouveau verrou restent obligatoires.
+
+Sur le dépôt local, le verrou vide avait 18 275 secondes d'âge. Le seul `git status` actif avait démarré après son horodatage; il a été classé `started_after_lock`. Le reçu `runtime/reports/git-sync/LOCK_REPAIR.json` indique `LOCK_REMOVED`, `index.lock` est absent et aucune commande de synchronisation, aucun push, reset/clean ou téléchargement de shards n'a été lancé. L'empreinte du moteur et celle exigée par `POUSSER-GITHUB.cmd` sont synchronisées en `2026-11-25-protected-overlay-v21`.
+
+Validation : **138 tests** de `tests/test_alina_git_code_sync.py` réussis; 11 tests ciblés de verrou/census, Ruff et `py_compile` réussis; `POUSSER-GITHUB.cmd --self-check` retourne `PORTABLE_GITHUB_PUSH_CHECK_OK`. Aucun processus Git/collecteur n'a été arrêté et aucune donnée SAFE n'a été modifiée.
+
+### 2026-11-25 — Reçu de santé L2 actualisé pendant la session
+
+`tools/collecter_l2_lane.py` écrivait `l2_lane_sante_<lane>.json` uniquement à la fin de la session; un collecteur de six heures pouvait donc laisser un reçu périmé pendant toute sa durée. Il publie maintenant un état initial avant l'ouverture des sockets, puis le remplace atomiquement à chaque heartbeat (10 s par défaut), même sans heartbeat du superviseur local. Le reçu détaille les coins attendus, premier carnet reçu, âge de la dernière observation, compteurs L2/BBO, connexion et époque de gap. `SILENCE_OBSERVE` est un diagnostic de fraîcheur, jamais une panne certifiée. Les coins découverts lors de la relecture périodique sont ajoutés à l'état attendu sans modifier les sockets existants; l'état final est également publié.
+
+Validation locale : `tests/test_l2_lane.py` et `tests/test_univers_perps_et_coins_lanes.py` (**26 réussis**); `tests/test_live_l2_service_v2.py`, `tests/test_l2_snapshot_cache_identity.py` et `tests/test_hyperlab_lanes_e2e.py` (**21 réussis**); ETA/heartbeats `tests/test_eta_donnees_labo.py` et `tests/test_watch_economic_collectors.py` (**64 réussis**); Ruff, `py_compile` et `git diff --check` propres pour les fichiers concernés. Le collecteur déjà actif conserve le code chargé avant cette correction; il n'a pas été arrêté ni relancé. Le reçu existant ne deviendra périodique qu'au prochain démarrage normal de cette lane.
+
+### 2026-11-25 — Publication atomique du reçu d'unicité globale
+
+`tools/backfill_global_unique_trade_counts.py` écrivait `TRADE_UNIQUE_COUNT_PATCH.json` directement à sa destination. Une interruption pendant l'écriture pouvait détruire le dernier reçu de progression, alors que le scan et le checkpoint SQLite étaient durables. Le producteur écrit maintenant un temporaire unique dans le même dossier, vide le tampon et appelle `fsync`, refuse un reçu de 95 000 000 octets ou plus, puis remplace atomiquement le fichier final. Une erreur d'écriture, de taille ou de remplacement conserve le reçu précédent et nettoie le temporaire.
+
+Validation : `tests/test_global_unique_trade_backfill.py` (**30 réussis**), dont échec simulé de remplacement et refus de taille; Ruff, `py_compile` et `git diff --check` propres. Aucun backfill réel n'a été lancé, et ni DATA_INDEX, ni manifests, ni patch, ni checkpoint SQLite n'ont été modifiés.
+
+
+### 2026-11-25 — Inventaires de sécurité incomplets et lignes JSONL surdimensionnées
+
+Les scanners statiques de données fictives et d’exécution ne peuvent jamais rendre un résultat propre après un inventaire partiel. Les répertoires explicitement exclus sont élagués avant la descente; toute erreur de parcours, racine absente, lecture impossible ou erreur d’encodage ajoute un constat `SCAN_INCOMPLETE` et fait échouer le contrôle global. Les exclusions servent uniquement à réduire le périmètre déclaré; elles ne justifient pas d’ignorer silencieusement une erreur dans le périmètre conservé.
+
+Lors de la validation SAFE en streaming d’un JSONL gzip, chaque enregistrement est lu avec une limite bornée (`readline(MAX_JSONL_RECORD_BYTES + 1)`) **avant** l’allocation de la ligne complète. Un enregistrement au-delà de 64 Mio est refusé avant publication du JSONL ou du sceau; les contrôles de taille totale, JSON objet, hash, fin de ligne, identité de l’archive et publication atomique restent obligatoires.
+
+Validation du correctif : le test d’excès de taille refuse la ligne avant écriture; le scanner retourne `SCAN_INCOMPLETE` sur échec d’inventaire ou de lecture. Ces contrôles techniques ne certifient aucun shard non relu et n’autorisent aucune promotion SAFE ou économique.
+
+### 2026-11-25 — Réconciliation des reçus de collecte Copy-Vault
+
+Les campagnes Copy-Vault doivent publier dans `BUNDLE_INDEX.json` un reçu `alina.collection_frame_reconciliation.v1` calculé sur tous les manifestes candidats : reçus/écrits par le writer, total des enregistrements, manifestes publiés et shards exclus. Une preuve est `MATCHED` uniquement si tous les compteurs sont exacts et les additions concordent; champs manquants donnent `INCOMPLETE`, toute divergence donne `MISMATCH`. Le résumé durable répète ce reçu et l’état d’admission pour permettre le contrôle ultérieur. Les familles `copy_vault_bbo` et `copy_vault_l2` doivent contribuer aux métriques BBO/L2 comme leurs formes génériques.
+
+Un reçu incomplet n’est ni remplacé par zéro ni promu SAFE ou économique. Les assets exclus restent exclus et leur compte exact est conservé uniquement si les manifestes le prouvent.
+
+### 2026-11-25 — Mesure d’activité de l’ETA collecte
+
+Le compteur d’activité de fichiers de l’ETA mesure uniquement la croissance locale des rubans de données identifiés (`.jsonl`, `.ndjson`, `.csv` et chemins de rubans explicitement connus). Les JSON d’état/checkpoint, rapports, catalogues, archives et shards ne sont pas des flux de débit et doivent être exclus du dénominateur. L’interface doit appeler ce nombre « fichiers de flux locaux », le distinguer du nombre de processus/collecteurs, et ne pas présenter cette mesure locale comme l’activité de GitHub ou d’AlinaSync. La santé des collecteurs provient de leurs reçus dédiés.

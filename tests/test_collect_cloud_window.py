@@ -307,6 +307,34 @@ def test_bundle_index_is_publisher_compatible_and_counts_quality() -> None:
     ]
 
 
+def test_frame_reconciliation_accounts_published_and_excluded_shards() -> None:
+    m = _module()
+    receipt = m._frame_reconciliation(
+        all_shards=[
+            {"record_count": 7},
+            {"record_count": 3},
+        ],
+        published_shards=[{"record_count": 7}],
+        excluded_shards=[{"record_count": 3}],
+        accepted_frames=10,
+        persisted_frames=10,
+    )
+
+    assert receipt["status"] == "MATCHED"
+    assert receipt["all_shard_record_count"] == 10
+    assert receipt["published_record_count"] == 7
+    assert receipt["excluded_record_count"] == 3
+
+    mismatch = m._frame_reconciliation(
+        all_shards=[{"record_count": 7}, {"record_count": 3}],
+        published_shards=[{"record_count": 7}],
+        excluded_shards=[{"record_count": 2}],
+        accepted_frames=10,
+        persisted_frames=10,
+    )
+    assert mismatch["status"] == "MISMATCH"
+
+
 def test_hyperliquid_active_asset_ctx_is_preserved_without_fake_exchange_time() -> None:
     m = _module()
     tick = m._hyperliquid_envelope(

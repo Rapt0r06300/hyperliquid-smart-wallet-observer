@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 
 import pytest
 
@@ -118,13 +119,29 @@ def test_metrics_file_is_machine_readable_and_counts_shards(tmp_path, monkeypatc
     }), encoding="utf-8")
     monkeypatch.setattr(metrics, "INDEX", index_path)
     monkeypatch.setattr(metrics, "METRICS", tmp_path / "DATA_METRICS.json")
+    unique_path = tmp_path / "UNIQUE_PATCH"
     for name in (
         "TRADE_COUNT_PATCH", "UNIQUE_PATCH", "RECORD_PATCH", "UNCOMPRESSED_PATCH",
     ):
         patch_path = tmp_path / name
         patch_path.write_text("{}", encoding="utf-8")
         monkeypatch.setattr(metrics, name, patch_path)
+    unique_path.write_text(json.dumps({
+        "identity_version": metrics.GLOBAL_IDENTITY_VERSION,
+        "counts": {},
+    }), encoding="utf-8")
+    original_read_text = Path.read_text
+    unique_patch_reads = 0
+
+    def count_unique_patch_reads(path, *args, **kwargs):
+        nonlocal unique_patch_reads
+        if path == unique_path:
+            unique_patch_reads += 1
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", count_unique_patch_reads)
     out = metrics.build()
+    assert unique_patch_reads == 1
     totals = out["totals"]
     assert totals["TOTAL_SHARDS"] == 2
     assert "TOTAL_TRADES_COLLECTED" in totals
@@ -372,6 +389,10 @@ def test_metrics_reject_v3_global_unique_patch_that_did_not_cover_all_trade_shar
 
 def test_metrics_uses_current_global_unique_patch_for_bybit_per_shard_unique(tmp_path, monkeypatch):
     import tools.build_catalog_metrics as metrics
+    from tools.global_unique_trade_patch import (
+        SCHEMA_V5,
+        compact_global_unique_count_rows,
+    )
 
     catalog = tmp_path / "catalog"
     catalog.mkdir()
@@ -414,6 +435,7 @@ def test_metrics_uses_current_global_unique_patch_for_bybit_per_shard_unique(tmp
     )
     (catalog / "TRADE_UNIQUE_COUNT_PATCH.json").write_text(
         json.dumps({
+            "schema": SCHEMA_V5,
             "identity_version": metrics.GLOBAL_IDENTITY_VERSION,
             "coverage_complete": True,
             "candidate_trade_shards": 1,
@@ -424,14 +446,17 @@ def test_metrics_uses_current_global_unique_patch_for_bybit_per_shard_unique(tmp
             "global_identity_digest": "c" * 64,
             "cross_shard_overlap_count": 0,
             "failure_reasons": {},
-            "counts": {
+            "counts": compact_global_unique_count_rows({
                 "bybit-archive": {
                     "asset_sha256": sha,
                     "trade_count_scanned": 190000,
                     "unique_trade_count": 190000,
+                    "global_new_identity_count": 190000,
+                    "cross_shard_overlap_count": 0,
                     "unique_trade_count_exact": True,
+                    "identity_version": metrics.GLOBAL_IDENTITY_VERSION,
                 }
-            },
+            }, identity_version=metrics.GLOBAL_IDENTITY_VERSION),
         }),
         encoding="utf-8",
     )
@@ -468,7 +493,7 @@ def test_metrics_uses_current_global_unique_patch_for_bybit_per_shard_unique(tmp
         assert rejected["TOTAL_UNIQUE_TRADES_GLOBAL"] is None
     patch_path.write_text(json.dumps(complete_patch), encoding="utf-8")
     stale = json.loads(patch_path.read_text(encoding="utf-8"))
-    stale["counts"]["bybit-archive"]["asset_sha256"] = "f" * 64
+    stale["counts"]["bybit-archive"][0] = "f" * 64
     patch_path.write_text(json.dumps(stale), encoding="utf-8")
     stale_totals = metrics.build()["totals"]
     assert stale_totals["GLOBAL_UNIQUE_TRADES_COVERAGE_COMPLETE"] is False

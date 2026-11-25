@@ -211,6 +211,26 @@ def test_copy_vault_subscription_diagnostics_reach_adapter_receipt(tmp_path):
                     "safe_count": 1,
                     "partial_count": 0,
                     "reject_count": 0,
+                    "source_admission": {
+                        "mode": "replay_only",
+                        "excluded_shards": 0,
+                        "excluded_record_count": 0,
+                        "excluded_record_count_exact": True,
+                        "no_rejected_payload_published": True,
+                    },
+                    "frame_reconciliation": {
+                        "schema": "alina.collection_frame_reconciliation.v1",
+                        "status": "MATCHED",
+                        "record_count_unit": "valid_jsonl_records",
+                        "accepted_frames": 1,
+                        "persisted_frames": 1,
+                        "all_shard_count": 1,
+                        "published_shard_count": 1,
+                        "excluded_shard_count": 0,
+                        "all_shard_record_count": 1,
+                        "published_record_count": 1,
+                        "excluded_record_count": 0,
+                    },
                 }
             ),
             encoding="utf-8",
@@ -223,6 +243,26 @@ def test_copy_vault_subscription_diagnostics_reach_adapter_receipt(tmp_path):
                     "persisted_frames": 1,
                     "l2_frames": 0,
                     "queue_drops": 0,
+                    "source_admission": {
+                        "mode": "replay_only",
+                        "excluded_shards": 0,
+                        "excluded_record_count": 0,
+                        "excluded_record_count_exact": True,
+                        "no_rejected_payload_published": True,
+                    },
+                    "frame_reconciliation": {
+                        "schema": "alina.collection_frame_reconciliation.v1",
+                        "status": "MATCHED",
+                        "record_count_unit": "valid_jsonl_records",
+                        "accepted_frames": 1,
+                        "persisted_frames": 1,
+                        "all_shard_count": 1,
+                        "published_shard_count": 1,
+                        "excluded_shard_count": 0,
+                        "all_shard_record_count": 1,
+                        "published_record_count": 1,
+                        "excluded_record_count": 0,
+                    },
                     "vault_observation_start_ts_ms": {address: 10_000},
                     "vault_subscription_attempts": {
                         address: [
@@ -977,7 +1017,7 @@ def test_collection_checkpoint_metrics_certify_complete_frame_sources(tmp_path):
         json.dumps(
             {
                 "family": "l2book",
-                "record_count": 7,
+                "record_count": 6,
                 "bytes": 128,
                 "uncompressed_size_exact": True,
                 "uncompressed_bytes": 512,
@@ -999,14 +1039,41 @@ def test_collection_checkpoint_metrics_certify_complete_frame_sources(tmp_path):
         ),
         encoding="utf-8",
     )
+    (manifest_dir / "bbo.json").write_text(
+        json.dumps({"family": "copy_vault_bbo", "record_count": 1, "bytes": 32}),
+        encoding="utf-8",
+    )
     (tmp_path / "BUNDLE_INDEX.json").write_text(
         json.dumps(
             {
-                "manifests": ["manifests/l2.json", "manifests/trades.json"],
-                "shard_count": 2,
-                "safe_count": 2,
+                "manifests": [
+                    "manifests/l2.json",
+                    "manifests/trades.json",
+                    "manifests/bbo.json",
+                ],
+                "shard_count": 3,
+                "safe_count": 3,
                 "partial_count": 0,
                 "reject_count": 0,
+                "source_admission": {
+                    "excluded_shards": 0,
+                    "excluded_record_count": 0,
+                    "excluded_record_count_exact": True,
+                    "no_rejected_payload_published": True,
+                },
+                "frame_reconciliation": {
+                    "schema": "alina.collection_frame_reconciliation.v1",
+                    "status": "MATCHED",
+                    "record_count_unit": "valid_jsonl_records",
+                    "accepted_frames": 10,
+                    "persisted_frames": 10,
+                    "all_shard_count": 3,
+                    "published_shard_count": 3,
+                    "excluded_shard_count": 0,
+                    "all_shard_record_count": 10,
+                    "published_record_count": 10,
+                    "excluded_record_count": 0,
+                },
             }
         ),
         encoding="utf-8",
@@ -1016,7 +1083,72 @@ def test_collection_checkpoint_metrics_certify_complete_frame_sources(tmp_path):
 
     assert metrics["accepted_frames"] == 10
     assert metrics["persisted_frames"] == 10
-    assert metrics["l2_frames"] == 7
+    assert metrics["l2_frames"] == 6
+    assert metrics["bbo_frames"] == 1
+    assert metrics["frame_metrics_complete"] is True
+    assert metrics["all_shard_record_count_observed"] == 10
+    assert metrics["published_record_count_observed"] == 10
+    assert metrics["excluded_record_count_observed"] == 0
+
+
+def test_collection_checkpoint_reconciles_published_and_excluded_records(tmp_path):
+    summary = {
+        "started_at_ms": 1000,
+        "ended_at_ms": 61000,
+        "duration_s": 60.0,
+        "accepted_frames": 10,
+        "persisted_frames": 10,
+        "l2_frames": 7,
+        "queue_drops": {},
+    }
+    (tmp_path / "collection_summary.json").write_text(
+        json.dumps(summary), encoding="utf-8"
+    )
+    manifest_dir = tmp_path / "manifests"
+    manifest_dir.mkdir()
+    (manifest_dir / "l2.json").write_text(
+        json.dumps({"family": "l2book", "record_count": 7, "bytes": 128}),
+        encoding="utf-8",
+    )
+    (tmp_path / "BUNDLE_INDEX.json").write_text(
+        json.dumps(
+            {
+                "manifests": ["manifests/l2.json"],
+                "shard_count": 1,
+                "safe_count": 1,
+                "partial_count": 0,
+                "reject_count": 0,
+                "source_admission": {
+                    "excluded_shards": 1,
+                    "excluded_record_count": 3,
+                    "excluded_record_count_exact": True,
+                    "no_rejected_payload_published": True,
+                },
+                "frame_reconciliation": {
+                    "schema": "alina.collection_frame_reconciliation.v1",
+                    "status": "MATCHED",
+                    "record_count_unit": "valid_jsonl_records",
+                    "accepted_frames": 10,
+                    "persisted_frames": 10,
+                    "all_shard_count": 2,
+                    "published_shard_count": 1,
+                    "excluded_shard_count": 1,
+                    "all_shard_record_count": 10,
+                    "published_record_count": 7,
+                    "excluded_record_count": 3,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    metrics = _collection_checkpoint_metrics(tmp_path)
+
+    assert metrics["record_count_observed"] == 7
+    assert metrics["persisted_frames"] == 10
+    assert metrics["all_shard_record_count_observed"] == 10
+    assert metrics["excluded_record_count_observed"] == 3
+    assert metrics["frame_counter_consistent"] is True
     assert metrics["frame_metrics_complete"] is True
 
 

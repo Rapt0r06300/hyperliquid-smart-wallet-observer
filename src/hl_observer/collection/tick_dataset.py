@@ -202,6 +202,7 @@ class TickDatasetWriter:
         stream_name: str = "hyperliquid_market_ticks",
         rotate_bytes: int = 128 * 1024 * 1024,
         flush_every: int = 1,
+        manifest_interval_s: float = 0.0,
     ) -> None:
         self.directory = _windows_io_path(Path(directory))
         self.directory.mkdir(parents=True, exist_ok=True)
@@ -210,6 +211,8 @@ class TickDatasetWriter:
         self.stream_name = str(stream_name)
         self.rotate_bytes = max(1, int(rotate_bytes))
         self.flush_every = max(1, int(flush_every))
+        self.manifest_interval_s = max(0.0, float(manifest_interval_s))
+        self._last_manifest_write_ns = 0
         self.current_path = self.directory / f"{self.stream_name}.current.jsonl"
         self.manifest_path = self.directory / f"{self.stream_name}.manifest.json"
         self.records_written = 0
@@ -288,9 +291,23 @@ class TickDatasetWriter:
         self.bytes_written += len(encoded.encode("utf-8"))
         if self.current_path.stat().st_size >= self.rotate_bytes:
             self.rotate()
-        elif self._records_since_manifest >= self.flush_every:
-            self._write_manifest()
-            self._records_since_manifest = 0
+        else:
+            now_ns = time.monotonic_ns()
+            interval_due = (
+                self.manifest_interval_s > 0
+                and now_ns - self._last_manifest_write_ns
+                >= int(self.manifest_interval_s * 1_000_000_000)
+            )
+            if (
+                self._records_since_manifest >= self.flush_every
+                or (
+                    self.manifest_interval_s > 0
+                    and not self.manifest_path.is_file()
+                )
+                or interval_due
+            ):
+                self._write_manifest()
+                self._records_since_manifest = 0
         return records if records is not None else count
 
     def rotate(self) -> Path | None:
@@ -358,6 +375,7 @@ class TickDatasetWriter:
         return {
             "schema_version": SCHEMA_VERSION,
             "stream_name": self.stream_name,
+            "manifest_interval_s": self.manifest_interval_s,
             "current_path": str(self.current_path),
             "shards_directory": str(self.shards_directory),
             "records_written": self.records_written,
@@ -395,6 +413,7 @@ class TickDatasetWriter:
             encoding="utf-8",
         )
         remplacer_avec_reprises(temporary, self.manifest_path)
+        self._last_manifest_write_ns = time.monotonic_ns()
 
 
 __all__ = ["SCHEMA_VERSION", "TickDatasetWriter", "TickEnvelope"]

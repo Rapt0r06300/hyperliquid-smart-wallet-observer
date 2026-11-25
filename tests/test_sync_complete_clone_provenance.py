@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from tools.sync_complete_clone import _read_restore_status, REPOSITORY
+from tools.sync_complete_clone import REPOSITORY, _read_restore_status
 
 SOURCE = "a" * 64
 OLD = "b" * 64

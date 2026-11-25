@@ -19,8 +19,8 @@ import json
 import math
 import os
 import shutil
-import sys
 import subprocess
+import sys
 import time
 import uuid
 from collections import defaultdict, deque
@@ -4020,6 +4020,8 @@ def build_copy_vault_bundle(
     collection_run_id: str,
     historical_backfill: Mapping[str, Mapping[str, Any]] | None = None,
     connection_heartbeats: Mapping[str, Mapping[str, Any]] | None = None,
+    accepted_frames: int | None = None,
+    persisted_frames: int | None = None,
 ) -> dict[str, Any]:
     assets = output / "assets"
     manifests_dir = output / "manifests"
@@ -4027,6 +4029,7 @@ def build_copy_vault_bundle(
     manifests_dir.mkdir(parents=True, exist_ok=True)
 
     manifests: list[dict[str, Any]] = []
+    all_manifests: list[dict[str, Any]] = []
     rejected_admission: list[dict[str, Any]] = []
     for shard in sorted(raw_root.glob("**/shards/*.jsonl.gz")):
         shard_io = _windows_io_path(shard)
@@ -4127,6 +4130,7 @@ def build_copy_vault_bundle(
             "historical_only": historical_only,
         }
         manifest = finalize_manifest(preliminary)
+        all_manifests.append(manifest)
         if not locally_replay_admissible(manifest):
             rejected_admission.append(admission_rejection(manifest))
             # No unreplayable market payload or trade enters the publish bundle.
@@ -4140,6 +4144,17 @@ def build_copy_vault_bundle(
         write_manifest(manifest, manifests_dir / f"{manifest['dataset_id']}.json")
         manifests.append(manifest)
 
+    source_admission = {
+        "mode": "replay_only",
+        **summarize_admission_rejections(rejected_admission),
+    }
+    frame_reconciliation = _copy_vault_frame_reconciliation(
+        all_shards=all_manifests,
+        published_shards=manifests,
+        excluded_shards=rejected_admission,
+        accepted_frames=accepted_frames,
+        persisted_frames=persisted_frames,
+    )
     index = {
         "schema": V2_SCHEMA,
         "repository": V2_REPOSITORY,
@@ -4156,10 +4171,8 @@ def build_copy_vault_bundle(
             for vault, report in (historical_backfill or {}).items()
         },
         "collection_queue_drops": sum(int(v) for v in queue_drops.values()),
-        "source_admission": {
-            "mode": "replay_only",
-            **summarize_admission_rejections(rejected_admission),
-        },
+        "source_admission": source_admission,
+        "frame_reconciliation": frame_reconciliation,
         "shard_count": len(manifests),
         "safe_count": sum(1 for row in manifests if row["quality_status"] == "SAFE"),
         "partial_count": sum(1 for row in manifests if row["quality_status"] == "PARTIAL"),
@@ -4172,6 +4185,77 @@ def build_copy_vault_bundle(
     }
     write_manifest(index, output / "BUNDLE_INDEX.json")
     return index
+
+
+def _copy_vault_frame_reconciliation(
+    *,
+    all_shards: list[Mapping[str, Any]],
+    published_shards: list[Mapping[str, Any]],
+    excluded_shards: list[Mapping[str, Any]],
+    accepted_frames: Any,
+    persisted_frames: Any,
+) -> dict[str, Any]:
+    """Reconcile Copy-Vault writer counts with every candidate shard.
+
+    Excluded payloads are represented only by their exact admission receipts;
+    the reconciliation never promotes them into the published bundle.
+    """
+    def exact_count(value: Any) -> int | None:
+        return value if type(value) is int and value >= 0 else None
+
+    def record_total(rows: list[Mapping[str, Any]]) -> int | None:
+        values: list[int] = []
+        for row in rows:
+            raw = row.get("record_count")
+            if raw is None:
+                raw = row.get("event_count")
+            count = exact_count(raw)
+            if count is None:
+                return None
+            values.append(count)
+        return sum(values)
+
+    accepted = exact_count(accepted_frames)
+    persisted = exact_count(persisted_frames)
+    all_records = record_total(all_shards)
+    published_records = record_total(published_shards)
+    excluded_records = record_total(excluded_shards)
+    accounted_shards = len(published_shards) + len(excluded_shards) == len(all_shards)
+    counts_complete = all(
+        value is not None
+        for value in (
+            accepted,
+            persisted,
+            all_records,
+            published_records,
+            excluded_records,
+        )
+    )
+    matched = (
+        counts_complete
+        and accounted_shards
+        and accepted == persisted
+        and persisted == all_records
+        and all_records == published_records + excluded_records
+    )
+    status = (
+        "INCOMPLETE"
+        if not counts_complete or not accounted_shards
+        else "MATCHED" if matched else "MISMATCH"
+    )
+    return {
+        "schema": "alina.collection_frame_reconciliation.v1",
+        "status": status,
+        "record_count_unit": "valid_jsonl_records",
+        "accepted_frames": accepted,
+        "persisted_frames": persisted,
+        "all_shard_count": len(all_shards),
+        "published_shard_count": len(published_shards),
+        "excluded_shard_count": len(excluded_shards),
+        "all_shard_record_count": all_records,
+        "published_record_count": published_records,
+        "excluded_record_count": excluded_records,
+    }
 
 
 async def collect(
@@ -4459,6 +4543,8 @@ async def collect(
         collection_run_id=run_id,
         historical_backfill=historical_reports,
         connection_heartbeats=l2_state["connection_heartbeats"],
+        accepted_frames=sink.accepted,
+        persisted_frames=sink.persisted,
     )
     effective_start_ms = min(
         observation_start_ms.values(),
@@ -4508,6 +4594,8 @@ async def collect(
         "broad_position_fingerprints_changed": changed_fingerprints,
         "accepted_frames": sink.accepted,
         "persisted_frames": sink.persisted,
+        "frame_reconciliation": index["frame_reconciliation"],
+        "source_admission": index["source_admission"],
         "backpressure_events": sink.backpressure_events,
         "queue_drops": sum(int(v) for v in sink.drops.values()),
         "live_fill_counts": dict(sorted(live_fill_counts.items())),

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import json
+
 from tools import prune_irrecoverable_dataset as gc
 
 
@@ -34,6 +37,31 @@ def _row(dataset_id: str, status: str, asset: str) -> dict:
             "evidence_sha256": "f" * 64,
         }
     return row
+
+
+def test_refresh_catalog_binds_registry_to_exact_index_bytes(tmp_path):
+    catalog = tmp_path / "catalog"
+    catalog.mkdir()
+    (catalog / "DATA_CATALOG.json").write_text("{}", encoding="utf-8")
+    (catalog / "DATA_QUALITY_REGISTRY.json").write_text("{}", encoding="utf-8")
+    index = {
+        "schema": "alina.data_index.v2",
+        "shards": [
+            {"dataset_id": "safe-a", "quality_status": "SAFE"},
+            {"dataset_id": "partial-a", "quality_status": "PARTIAL"},
+        ],
+    }
+
+    gc._refresh_catalog(index, tmp_path)
+
+    index_path = catalog / "DATA_INDEX.json"
+    registry = json.loads((catalog / "DATA_QUALITY_REGISTRY.json").read_text())
+    data_catalog = json.loads((catalog / "DATA_CATALOG.json").read_text())
+    expected_sha = hashlib.sha256(index_path.read_bytes()).hexdigest()
+    assert registry["active_dataset"]["source_index_sha256"] == expected_sha
+    assert registry["active_dataset"]["indexed_shards"] == 2
+    assert data_catalog["safe_shard_count"] == 1
+    assert data_catalog["partial_shard_count"] == 1
 
 
 def test_prepare_protects_safe_member_and_selects_terminal_standalone(monkeypatch, tmp_path):

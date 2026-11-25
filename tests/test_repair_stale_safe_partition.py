@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from tools.partitioned_data_index import partition_index
+from tools.partitioned_data_index import index_file_sha256, partition_index
 from tools.repair_stale_safe_classifications import repair
 
 
@@ -42,6 +42,8 @@ def test_repair_unproven_partitioned_shard_stays_quarantined(tmp_path):
     assert result["safe_count"] == 0
     assert result["partial_count"] == 1
     assert index.read_bytes() == before
+    registry = json.loads((index.parent / "DATA_QUALITY_REGISTRY.json").read_text())
+    assert registry["active_dataset"]["source_index_sha256"] == index_file_sha256(index)
     for rel, expected in parts.items():
         assert (index.parent / rel).read_bytes() == expected
 

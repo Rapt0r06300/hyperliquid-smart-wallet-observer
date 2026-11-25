@@ -1242,7 +1242,7 @@ def _collection_checkpoint_metrics(output_root: Path) -> dict[str, Any]:
                 manifest_inventory_complete = False
             if family in {"l2book", "copy_vault_l2", "native_market"}:
                 l2_manifest_frames += records
-            elif family == "bbo":
+            elif family in {"bbo", "copy_vault_bbo"}:
                 bbo_frames += records
             if family in {
                 "trades",
@@ -1312,12 +1312,79 @@ def _collection_checkpoint_metrics(output_root: Path) -> dict[str, Any]:
         else None
     )
     bbo_frames_exact = bbo_frames if manifest_inventory_complete else None
+    frame_reconciliation = index.get("frame_reconciliation")
+    source_admission = index.get("source_admission")
+    excluded_shards = (
+        _exact_nonnegative_int(source_admission.get("excluded_shards"))
+        if isinstance(source_admission, Mapping) else None
+    )
+    excluded_records = (
+        _exact_nonnegative_int(source_admission.get("excluded_record_count"))
+        if isinstance(source_admission, Mapping)
+        and source_admission.get("excluded_record_count_exact") is True
+        else None
+    )
+    all_shard_count = (
+        _exact_nonnegative_int(frame_reconciliation.get("all_shard_count"))
+        if isinstance(frame_reconciliation, Mapping) else None
+    )
+    published_shard_count = (
+        _exact_nonnegative_int(frame_reconciliation.get("published_shard_count"))
+        if isinstance(frame_reconciliation, Mapping) else None
+    )
+    reconciliation_excluded_shards = (
+        _exact_nonnegative_int(frame_reconciliation.get("excluded_shard_count"))
+        if isinstance(frame_reconciliation, Mapping) else None
+    )
+    all_shard_records = (
+        _exact_nonnegative_int(frame_reconciliation.get("all_shard_record_count"))
+        if isinstance(frame_reconciliation, Mapping) else None
+    )
+    published_records = (
+        _exact_nonnegative_int(frame_reconciliation.get("published_record_count"))
+        if isinstance(frame_reconciliation, Mapping) else None
+    )
+    reconciliation_excluded_records = (
+        _exact_nonnegative_int(frame_reconciliation.get("excluded_record_count"))
+        if isinstance(frame_reconciliation, Mapping) else None
+    )
+    reconciliation_accepted = (
+        _exact_nonnegative_int(frame_reconciliation.get("accepted_frames"))
+        if isinstance(frame_reconciliation, Mapping) else None
+    )
+    reconciliation_persisted = (
+        _exact_nonnegative_int(frame_reconciliation.get("persisted_frames"))
+        if isinstance(frame_reconciliation, Mapping) else None
+    )
     frame_counter_consistent = (
         manifest_inventory_complete
         and accepted_frames is not None
         and persisted_frames is not None
-        and accepted_frames >= persisted_frames
-        and persisted_frames == record_count
+        and accepted_frames == persisted_frames
+        and isinstance(frame_reconciliation, Mapping)
+        and frame_reconciliation.get("schema")
+        == "alina.collection_frame_reconciliation.v1"
+        and frame_reconciliation.get("status") == "MATCHED"
+        and frame_reconciliation.get("record_count_unit") == "valid_jsonl_records"
+        and all_shard_records is not None
+        and published_records is not None
+        and excluded_records is not None
+        and all_shard_count is not None
+        and published_shard_count is not None
+        and excluded_shards is not None
+        and reconciliation_excluded_shards is not None
+        and reconciliation_excluded_records is not None
+        and reconciliation_accepted == accepted_frames
+        and reconciliation_persisted == persisted_frames
+        and all_shard_records == persisted_frames
+        and published_records == record_count
+        and reconciliation_excluded_records == excluded_records
+        and reconciliation_excluded_shards == excluded_shards
+        and published_shard_count == manifest_count
+        and all_shard_count == published_shard_count + excluded_shards
+        and persisted_frames == published_records + excluded_records
+        and isinstance(source_admission, Mapping)
+        and source_admission.get("no_rejected_payload_published") is True
     )
     frame_metrics_complete = (
         summary_valid
@@ -1356,6 +1423,12 @@ def _collection_checkpoint_metrics(output_root: Path) -> dict[str, Any]:
             and historical_snapshot_shards == historical_snapshot_shards_exact
         ),
         "record_count_observed": record_count,
+        "all_shard_record_count_observed": all_shard_records,
+        "published_record_count_observed": published_records,
+        "excluded_record_count_observed": excluded_records,
+        "all_shard_count_observed": all_shard_count,
+        "published_shard_count_observed": published_shard_count,
+        "excluded_shard_count_observed": excluded_shards,
         "accepted_frames": accepted_frames,
         "persisted_frames": persisted_frames,
         "l2_frames": l2_frames,
@@ -1363,6 +1436,10 @@ def _collection_checkpoint_metrics(output_root: Path) -> dict[str, Any]:
         "l2_frames_manifest_records": l2_frames_manifest,
         "l2_frames_reconciled": l2_frames_reconciled,
         "frame_counter_consistent": frame_counter_consistent,
+        "frame_reconciliation": (
+            dict(frame_reconciliation)
+            if isinstance(frame_reconciliation, Mapping) else None
+        ),
         "bbo_frames": bbo_frames_exact,
         "queue_drops": queue_drops,
         "frame_metrics_complete": frame_metrics_complete,

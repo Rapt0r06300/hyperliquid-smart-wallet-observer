@@ -311,6 +311,24 @@ def test_restore_exact_counts_prefers_current_global_v3_unique_proof(tmp_path):
 
 
 
+def test_replay_compatibility_reads_compact_global_unique_patch_v5(tmp_path):
+    catalog = tmp_path / "catalog"
+    catalog.mkdir()
+    (catalog / "TRADE_UNIQUE_COUNT_PATCH.json").write_text(json.dumps({
+        "schema": "alina.global_unique_trade_patch.v5",
+        "identity_version": backfill.GLOBAL_IDENTITY_VERSION,
+        "counts": {
+            "dataset-a": ["a" * 64, 5, 4, 3, 1, True],
+        },
+    }), encoding="utf-8")
+
+    rows = backfill._load_global_unique_rows(root=tmp_path)
+
+    assert rows["dataset-a"]["trade_count_scanned"] == 5
+    assert rows["dataset-a"]["unique_trade_count"] == 4
+    assert rows["dataset-a"]["asset_sha256"] == "a" * 64
+
+
 def test_rejected_receive_only_copy_vault_enters_verified_backfill(tmp_path, monkeypatch):
     monkeypatch.setattr(backfill, "ROOT", tmp_path)
     dataset_id = "vault-observation-old"
@@ -625,6 +643,10 @@ def test_replay_refresh_preserves_reversible_compaction(tmp_path):
     }
     backfill._refresh_catalog(index, tmp_path)
     saved = json.loads((catalog / "DATA_INDEX.json").read_text(encoding="utf-8"))
+    registry = json.loads((catalog / "DATA_QUALITY_REGISTRY.json").read_text(encoding="utf-8"))
+    assert registry["active_dataset"]["source_index_sha256"] == backfill.index_file_sha256(
+        catalog / "DATA_INDEX.json"
+    )
     assert all("collection_run_id" not in r for r in saved["shards"])
     assert all("run_manifest_release_tag" not in r for r in saved["shards"])
     assert all("release_repository" not in r for r in saved["shards"])
