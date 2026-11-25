@@ -289,25 +289,45 @@ def recenser(root: Path, *, verifier_sha: bool = False, max_listes: int = 200) -
                 "error": type(exc).__name__,
             })
 
-    def lire_entrees(path: Path, rel: str):
-        """Yield directory entries and record open/iteration errors explicitly."""
-        try:
-            it = os.scandir(path)
-        except OSError as exc:
-            noter_erreur_parcours(rel, "ouvrir_dossier", exc)
-            return
-        try:
-            with it:
-                while True:
-                    try:
-                        yield next(it)
-                    except StopIteration:
-                        return
-                    except OSError as exc:
-                        noter_erreur_parcours(rel, "iterer_dossier", exc)
-                        return
-        except OSError as exc:
-            noter_erreur_parcours(rel, "fermer_dossier", exc)
+    class ParcoursDossier:
+        """Stream one directory and convert I/O failures into an incomplete scan."""
+
+        def __init__(self, path: Path, rel: str):
+            self.path = path
+            self.rel = rel
+            self.it = None
+
+        def __enter__(self):
+            try:
+                self.it = os.scandir(self.path)
+            except OSError as exc:
+                noter_erreur_parcours(self.rel, "ouvrir_dossier", exc)
+            return self
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            if self.it is None:
+                raise StopIteration
+            try:
+                return next(self.it)
+            except StopIteration:
+                raise
+            except OSError as exc:
+                noter_erreur_parcours(self.rel, "iterer_dossier", exc)
+                self.it.close()
+                self.it = None
+                raise StopIteration from exc
+
+        def __exit__(self, *_):
+            if self.it is not None:
+                try:
+                    self.it.close()
+                except OSError as exc:
+                    noter_erreur_parcours(self.rel, "fermer_dossier", exc)
+                self.it = None
+            return False
 
     def noter(verdict: str, rel: str, taille: int, zone: str, detail: str, famille: str | None = None) -> None:
         t = totaux.setdefault(verdict, [0, 0])
@@ -329,11 +349,7 @@ def recenser(root: Path, *, verifier_sha: bool = False, max_listes: int = 200) -
     while pile:
         rel_d = pile.pop()
         dossiers_vus += 1
-        try:
-            it = os.scandir(root / rel_d if rel_d else root)
-        except OSError:
-            continue
-        with it:
+        with ParcoursDossier(root / rel_d if rel_d else root, rel_d) as it:
             for e in it:
                 rel = f"{rel_d}/{e.name}" if rel_d else e.name
                 try:
@@ -351,7 +367,8 @@ def recenser(root: Path, *, verifier_sha: bool = False, max_listes: int = 200) -
                         continue
                     fichiers_vus += 1
                     taille = e.stat().st_size
-                except OSError:
+                except OSError as exc:
+                    noter_erreur_parcours(rel, "inspecter_entree", exc)
                     continue
                 z = zone_de(rel)
                 nom_zone = z.motif if z else "(aucune règle)"
@@ -393,11 +410,18 @@ def recenser(root: Path, *, verifier_sha: bool = False, max_listes: int = 200) -
                     noter("PAR_CONCEPTION", rel, taille, nom_zone, f"{z.genre} : {z.pourquoi}")
     bloquants = sum(totaux.get(v, [0])[0] for v in BLOQUANTS)
     n = sum(t[0] for t in totaux.values())
+    parcours_complet = erreurs_parcours_count == 0
     return {
         "schema": "hypersmart.recensement_donnees.v1", "genere_ms": int(time.time() * 1000),
         "duree_s": round(time.time() - t0, 1), "dossiers_parcourus": dossiers_vus, "fichiers_de_donnees": n,
-        "complet": True, "couverture_pct": round(100.0 * (n - bloquants) / n, 4) if n else 100.0,
-        "cent_pour_cent": bloquants == 0,
+        "complet": parcours_complet,
+        "couverture_pct": (
+            round(100.0 * (n - bloquants) / n, 4)
+            if parcours_complet and n
+            else (0.0 if parcours_complet else None)
+        ),
+        "cent_pour_cent": parcours_complet and n > 0 and bloquants == 0,
+        "erreurs_parcours": {"count": erreurs_parcours_count, "samples": erreurs_parcours},
         "totaux": {k: {"fichiers": v[0], "octets": v[1]} for k, v in sorted(totaux.items())},
         "zones": dict(sorted(zones_vues.items(), key=lambda kv: -kv[1]["octets"])),
         "non_parcourus": non_parcourus, "listes": listes, "a_sceller": a_sceller, "a_prouver_gz": a_prouver_gz,
