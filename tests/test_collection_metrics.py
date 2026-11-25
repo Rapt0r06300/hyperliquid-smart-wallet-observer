@@ -68,8 +68,13 @@ def test_instant_collection_metrics_counts_durable_copy_vault_fills(tmp_path, mo
         "reconciliation": {
             "0xabc": {
                 "status": "MATCHED",
+                "live_count": 50,
                 "reference_count": 50,
                 "matched_count": 50,
+                "missing_from_live": 0,
+                "live_only": 0,
+                "duplicate_live_keys": 0,
+                "audit": {"status": "COMPLETE"},
             }
         },
         "bundle": {
@@ -381,3 +386,187 @@ def test_source_admission_counts_no_viable_checkpoint_without_inventing_shards(
         "SEQUENCE_OR_QUEUE_GAP": 2,
     }
     assert out["paper_only"] is True
+
+def test_explicit_complete_flags_cannot_turn_missing_counts_into_zero(tmp_path, monkeypatch):
+    catalog = tmp_path / "catalog"
+    campaigns = catalog / "campaigns"
+    campaigns.mkdir(parents=True)
+    (campaigns / "malformed.json").write_text(
+        json.dumps(
+            {
+                "kind": "market_collection",
+                "status": "COMPLETE",
+                "completed_units": {
+                    "0": {
+                        "result": {
+                            "durable_persisted": True,
+                            "release_tag": "data-v2-malformed",
+                            "source_admission": {
+                                "excluded_shards": 0,
+                                "excluded_compressed_bytes": 0,
+                                "blocking_reasons": {},
+                                "no_rejected_payload_published": True,
+                            },
+                            "collection_metrics": {
+                                "trade_count_observed": None,
+                                "trade_count_coverage_complete": True,
+                                "record_count_observed": None,
+                                "accepted_frames": 0,
+                                "persisted_frames": 0,
+                                "l2_frames": 0,
+                                "bbo_frames": 0,
+                                "queue_drops": 0,
+                                "manifest_inventory_complete": True,
+                                "frame_metrics_complete": True,
+                                "shard_count": None,
+                                "safe_count": None,
+                                "partial_count": None,
+                                "reject_count": None,
+                                "compressed_bytes": None,
+                                "uncompressed_bytes": None,
+                                "uncompressed_size_coverage_complete": True,
+                            },
+                        }
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    data_metrics = catalog / "DATA_METRICS.json"
+    data_metrics.write_text(json.dumps({"totals": {}}), encoding="utf-8")
+    monkeypatch.setattr(metrics, "CAMPAIGNS", campaigns)
+    monkeypatch.setattr(metrics, "DATA_METRICS", data_metrics)
+    monkeypatch.setattr(metrics, "OUTPUT", catalog / "COLLECTION_METRICS.json")
+
+    out = metrics.build()
+
+    assert out["quality_status"] == "INCOMPLETE"
+    assert out["instant"]["all_collection_metrics_complete"] is False
+    assert out["instant"]["coverage_complete"] is False
+    assert out["totals"]["trades_observed"] is None
+    assert out["totals"]["records_observed"] is None
+    assert out["totals"]["shards"] is None
+    assert out["totals"]["compressed_bytes"] is None
+    assert out["totals"]["uncompressed_bytes"] is None
+
+
+def test_sha_bound_indexed_metrics_reject_boolean_counters(tmp_path, monkeypatch):
+    catalog = tmp_path / "catalog"
+    campaigns = catalog / "campaigns"
+    campaigns.mkdir(parents=True)
+    index = catalog / "DATA_INDEX.json"
+    index.write_text(json.dumps({"shard_count": 1}), encoding="utf-8")
+    data_metrics = catalog / "DATA_METRICS.json"
+    data_metrics.write_text(
+        json.dumps(
+            {
+                "source_index_sha256": hashlib.sha256(index.read_bytes()).hexdigest(),
+                "totals": {
+                    "TOTAL_TRADES_COLLECTED": True,
+                    "TOTAL_TRADES_REPLAYABLE": 0,
+                    "TOTAL_TRADES_SAFE": 0,
+                    "TOTAL_UNIQUE_TRADES_GLOBAL": True,
+                    "GLOBAL_UNIQUE_TRADES_COVERAGE_COMPLETE": True,
+                    "TOTAL_SHARDS": 1,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(metrics, "CAMPAIGNS", campaigns)
+    monkeypatch.setattr(metrics, "INDEX", index)
+    monkeypatch.setattr(metrics, "DATA_METRICS", data_metrics)
+    monkeypatch.setattr(metrics, "OUTPUT", catalog / "COLLECTION_METRICS.json")
+
+    try:
+        metrics.build()
+    except ValueError as exc:
+        assert str(exc) == "COLLECTION_METRICS_INDEX_COUNTERS_INVALID"
+    else:  # pragma: no cover - protects exact integer semantics
+        raise AssertionError("boolean values were accepted as indexed trade counts")
+
+
+def test_raw_summary_missing_counters_stays_unknown_not_zero(tmp_path, monkeypatch):
+    catalog = tmp_path / "catalog"
+    campaigns = catalog / "campaigns"
+    campaigns.mkdir(parents=True)
+    summary = {
+        "assets": [],
+        "manifest_inventory_complete": True,
+        "frame_metrics_complete": True,
+        "accepted_frames": 0,
+        "persisted_frames": 0,
+        "l2_frames": 0,
+        "bbo_frames": 0,
+        "queue_drops": 0,
+        "trade_count_coverage_complete": True,
+        "trade_count_observed": 0,
+        "bundle": {
+            "shard_count": None,
+            "safe_count": None,
+            "partial_count": None,
+            "reject_count": None,
+        },
+        "compressed_bytes": None,
+        "uncompressed_bytes": None,
+        "uncompressed_size_coverage_complete": True,
+    }
+    (campaigns / "raw.json").write_text(
+        json.dumps(
+            {
+                "kind": "market_collection",
+                "status": "COMPLETE",
+                "completed_units": {
+                    "0": {
+                        "result": {
+                            "durable_persisted": True,
+                            "release_tag": "data-v2-raw",
+                            "stdout": json.dumps(summary),
+                        }
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    data_metrics = catalog / "DATA_METRICS.json"
+    data_metrics.write_text(json.dumps({"totals": {}}), encoding="utf-8")
+    monkeypatch.setattr(metrics, "CAMPAIGNS", campaigns)
+    monkeypatch.setattr(metrics, "DATA_METRICS", data_metrics)
+    monkeypatch.setattr(metrics, "OUTPUT", catalog / "COLLECTION_METRICS.json")
+
+    out = metrics.build()
+
+    assert out["quality_status"] == "INCOMPLETE"
+    assert out["instant"]["shards_published"] is None
+    assert out["instant"]["compressed_bytes_known"] is None
+    assert out["by_kind"]["market_collection"]["records_observed"] is None
+
+
+def test_matched_reconciliation_requires_exact_count_parity_and_complete_audit():
+    compact = metrics._summary_from_result(
+        {
+            "stdout": json.dumps(
+                {
+                    "live_fill_counts": {"0xabc": 50},
+                    "reconciliation": {
+                        "0xabc": {
+                            "status": "MATCHED",
+                            "reference_count": 50,
+                            "matched_count": 49,
+                            "live_count": 50,
+                            "missing_from_live": 1,
+                            "live_only": 0,
+                            "duplicate_live_keys": 0,
+                            "audit": {"status": "COMPLETE"},
+                        }
+                    },
+                }
+            )
+        }
+    )
+
+    assert compact is not None
+    assert compact["trade_count_coverage_complete"] is False
+    assert compact["trade_count_observed"] is None

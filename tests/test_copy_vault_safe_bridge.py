@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 import tools.copy_vault_safe_bridge as bridge_module
+import tools.unpack_verified_safe as unpack_module
 from tools.restore_alina import _windows_io_path as canonical_windows_io_path
 
 from tools.copy_vault_safe_bridge import SafeBridgeError, build_safe_copy_workspace
@@ -226,6 +227,45 @@ def test_bridge_streams_seal_only_archives_without_claiming_physical_unpack(
         row["jsonl_bytes"] for row in proof["safe_input_shards"]
     )
     assert proof["source_read_mode_shards"] == {"GZIP_STREAM": 2}
+
+
+def test_copy_vault_scope_keeps_only_active_registry_rows_in_memory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recovery = _corpus(
+        tmp_path,
+        [
+            _envelope("copy_vault_fills"),
+            _envelope("copy_vault_l2"),
+            _envelope("bbo"),
+        ],
+    )
+    unpack_path = recovery / "UNPACK_REPORT.json"
+    unpack = json.loads(unpack_path.read_text(encoding="utf-8"))
+    unpack.update({
+        "unpack_scope": "COPY_VAULT_ONLY",
+        "unpacked_shards": 2,
+    })
+    unpack_path.write_text(json.dumps(unpack), encoding="utf-8")
+
+    shard_paths = sorted((recovery / "usable" / "shards" / "test-release").glob("*.gz"))
+    active = {
+        path: (path.stat().st_size, _sha(path.read_bytes()))
+        for path in shard_paths[:2]
+    }
+    monkeypatch.setattr(
+        unpack_module,
+        "_catalog_safe_bytes",
+        lambda *_args, **_kwargs: (active, ["copy_vault_fills", "copy_vault_l2"]),
+    )
+
+    report = build_safe_copy_workspace(tmp_path)
+
+    assert report["status"] == "SAFE_COPY_WORKSPACE_READY"
+    assert report["selected_shards"] == 2
+    assert report["counts"]["copy_vault_fills"] == 1
+    assert report["counts"]["copy_vault_l2"] == 1
+    assert report["counts"]["copy_vault_snapshot"] == 0
 
 
 def test_bridge_reports_mixed_physical_and_stream_reads_accurately(tmp_path: Path) -> None:

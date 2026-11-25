@@ -402,6 +402,21 @@ def _safe_registry_rows(
         or not isinstance(catalog, str) or len(catalog) != 64
     ):
         raise SafeBridgeError("AlinaSync SAFE restoration and extraction are not certified")
+    active_paths: set[str] | None = None
+    if unpack.get("unpack_scope") == "COPY_VAULT_ONLY":
+        try:
+            from tools.unpack_verified_safe import PREFIXE_ACTIF, _catalog_safe_bytes
+        except ModuleNotFoundError:
+            from unpack_verified_safe import PREFIXE_ACTIF, _catalog_safe_bytes
+        selection, _families = _catalog_safe_bytes(
+            catalog_path, recovery, catalog, family_prefix=PREFIXE_ACTIF,
+        )
+        active_paths = {
+            shard.relative_to(recovery).as_posix()
+            for shard in selection
+        }
+        if not active_paths or len(active_paths) != len(selection):
+            raise SafeBridgeError("active-family catalog selection is empty or ambiguous")
     if (
         catalog_path.is_symlink() or not catalog_path.is_file()
         or _digest(catalog_path) != catalog
@@ -429,31 +444,46 @@ def _safe_registry_rows(
             ))
             if metadata.get("run_status") != "COMPLETE" or metadata.get("active_catalog_sha256") != catalog:
                 raise SafeBridgeError("SAFE registry does not match final catalog")
-            raw = db.execute(
+            query = (
                 "SELECT relative_path, bytes, sha256, stat_dev, stat_ino, "
-                "stat_mtime_ns, stat_ctime_ns FROM current_safe_shards "
-                "ORDER BY relative_path"
-            ).fetchall()
+                "stat_mtime_ns, stat_ctime_ns FROM current_safe_shards"
+            )
+            if active_paths is None:
+                raw = db.execute(query + " ORDER BY relative_path").fetchall()
+                registry_count = len(raw)
+            else:
+                # Keep only the active Copy-Vault rows in memory. The full SAFE
+                # view still gets scanned once to verify global registry parity,
+                # but we avoid fetchall() plus a sort of ~1.8M off-scope rows.
+                raw = []
+                registry_count = 0
+                for row in db.execute(query):
+                    registry_count += 1
+                    relative = str(row[0]).replace(chr(92), "/")
+                    if relative in active_paths:
+                        raw.append(row)
+                raw.sort(key=lambda row: str(row[0]).replace(chr(92), "/"))
     except sqlite3.Error as exc:
         raise SafeBridgeError("unreadable SAFE_SHARDS registry") from exc
     expected = classification.get("usable_shards")
-    if (type(expected) is not int or expected <= 0 or len(raw) != expected
-            or unpack.get("certified_shards") != expected):
+    if (
+        type(expected) is not int
+        or expected <= 0
+        or registry_count != expected
+        or (active_paths is None and len(raw) != expected)
+        or type(unpack.get("certified_shards")) is not int
+        or unpack.get("certified_shards") != expected
+    ):
         raise SafeBridgeError("SAFE archive, extraction and registry shard counts disagree")
     # 23/11/2026 : le deballage se limite aux familles ACTIVES (copy_vault_*) ; le registre complet
     # vient d'etre controle ci-dessus, on ne lit ensuite que ce qui a ete deballe. Avant, le pont
     # parcourait les 1 792 577 shards (deux empreintes chacun) pour en ecarter 99 %.
-    if unpack.get("unpack_scope") == "COPY_VAULT_ONLY":
-        try:
-            from tools.unpack_verified_safe import PREFIXE_ACTIF, _catalog_safe_bytes
-        except ModuleNotFoundError:
-            from unpack_verified_safe import PREFIXE_ACTIF, _catalog_safe_bytes
-        selection, _familles = _catalog_safe_bytes(
-            catalog_path, recovery, catalog, family_prefix=PREFIXE_ACTIF,
-        )
-        actifs = {s.relative_to(recovery).as_posix() for s in selection}
-        raw = [row for row in raw if str(row[0]).replace(chr(92), "/") in actifs]
-        if len(raw) != len(actifs) or unpack.get("unpacked_shards") != len(raw):
+    if active_paths is not None:
+        if (
+            len(raw) != len(active_paths)
+            or type(unpack.get("unpacked_shards")) is not int
+            or unpack.get("unpacked_shards") != len(raw)
+        ):
             raise SafeBridgeError("active-family SAFE shards and their extraction disagree")
     return catalog, [
         (str(row[0]), int(row[1]), str(row[2]), tuple(int(v) for v in row[3:]))

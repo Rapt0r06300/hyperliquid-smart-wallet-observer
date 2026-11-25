@@ -1097,7 +1097,9 @@ def lignes_resume(
     etude = progression_etude(besoins)
     etat_clair = {
         "ACTIF": (
-            f"Collecte active : {mesure.get('active_sources', 0)}/"
+            f"Croissance mesurée : {mesure.get('active_sources', 0)}/"
+            f"{mesure.get('source_count', 0)} fichiers entre les deux relevés; "
+            "ce n’est ni le nombre de collecteurs ni une limite à 10."
             f"{mesure.get('source_count', 0)} fichiers ont grandi."
         ),
         "EN_ATTENTE": "En attente : pas encore assez de recul pour mesurer le débit.",
@@ -1128,8 +1130,9 @@ def lignes_resume(
         *besoins_live(besoins),
         *lignes_sources_live(sources),
         f"| DÉBIT FICHIERS      : {debit} (tous les fichiers) | ETA moteur : {eta_txt}",
-        f"| ACTIVITÉ FICHIERS   : {mesure.get('active_sources', 0)}/{mesure.get('source_count', 0)} actifs | "
-        f"{mesure.get('recent_sources', 0)}/{mesure.get('source_count', 0)} récents",
+        f"| ACTIVITÉ FICHIERS   : {mesure.get('active_sources', 0)}/{mesure.get('source_count', 0)} "
+        f"ont grandi depuis le relevé précédent | "
+        f"{mesure.get('recent_sources', 0)}/{mesure.get('source_count', 0)} modifiés récemment",
         *_lignes_suivi_collecteurs(suivi_collecteurs),
         *_lignes_detail_suivi_collecteurs(suivi_collecteurs),
         f"| À SAVOIR            : {mesure.get('source_count', 0)} fichiers observés, pas {mesure.get('source_count', 0)} collecteurs",
@@ -1270,7 +1273,10 @@ def etat_flux_global(mesure: dict, *, maintenant: float | None = None) -> dict:
     if actifs:
         return {
             "code": "ACTIF",
-            "detail": f"{actifs}/{total} fichiers de données en croissance; {recents}/{total} modifiés récemment",
+            "detail": (
+                f"{actifs}/{total} fichiers ont grandi entre les deux relevés "
+                f"(aucun plafond); {recents}/{total} modifiés récemment"
+            ),
             "age_s": mesure.get("age_s"),
         }
     if recents:

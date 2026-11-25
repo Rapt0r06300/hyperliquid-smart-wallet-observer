@@ -466,9 +466,11 @@ def test_le_resume_operateur_montre_vivant_progression_debit_et_eta(tmp_path):
     assert "EN DIRECT" in texte
     assert "50.0 %" in texte
     assert "12.5 lignes/min" in texte
-    assert "7/94 fichiers de données" in texte
+    assert "7/94 fichiers entre les deux relevés" in texte
+    assert "ni le nombre de collecteurs ni une limite à 10" in texte
+    assert "7/94 ont grandi depuis le relevé précédent" in texte
     assert "94 fichiers observés, pas 94 collecteurs" in texte
-    assert "12/94 récents" in texte
+    assert "12/94 modifiés récemment" in texte
     assert "ETA moteur" in texte
     assert "demo [base]" in texte
 

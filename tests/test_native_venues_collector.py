@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from types import SimpleNamespace
 from pathlib import Path
 
@@ -110,6 +111,8 @@ def test_native_runner_publishes_canonical_harvest_heartbeat() -> None:
     assert '"required_venues_ready"' in text
     assert '"queue_estimated_bytes"' in text
     assert '"queue_oversized_drops"' in text
+    assert "HEARTBEAT_WRITE_INTERVAL_S = 5.0" in text
+    assert "writer.stats(include_partitions=False)" in text
     assert "counts.get(venue, 0) > 0" in text
     assert "last_event_ms.get(venue, 0) > 0" in text
     assert "final_health = coordinator.health" in text
@@ -132,6 +135,8 @@ def test_native_heartbeat_exposes_per_channel_counts() -> None:
 def test_native_enqueue_records_each_envelope_once(
     monkeypatch, tmp_path, capsys, reject_queue_event
 ) -> None:
+    coordinator_instances = []
+
     class FakeCoordinator:
         def __init__(self, *, on_snapshot, **_kwargs):
             self.on_snapshot = on_snapshot
@@ -140,6 +145,8 @@ def test_native_enqueue_records_each_envelope_once(
                 rest_base_url="https://api.bybit.com",
             )
             self.emitted = False
+            self.loop_ticks = 0
+            coordinator_instances.append(self)
 
         def discover(self):
             return ["BTCUSDT"]
@@ -151,19 +158,21 @@ def test_native_enqueue_records_each_envelope_once(
             return ("BTCUSDT",) if venue == "bybit" else ()
 
         async def run_bybit(self):
-            if not self.emitted:
-                self.emitted = True
-                now_ms = 1_700_000_000_000
-                self.on_snapshot(TickEnvelope(
-                    source_id="bybit_public_readonly",
-                    channel="orderbook_snapshot",
-                    instrument="BTCUSDT",
-                    event_kind="L2_SNAPSHOT",
-                    raw_payload='{"test":"real-shape"}',
-                    received_ts_ms=now_ms,
-                    exchange_ts_ms=now_ms,
-                ))
-            await asyncio.sleep(60)
+            while True:
+                self.loop_ticks += 1
+                if not self.emitted:
+                    self.emitted = True
+                    now_ms = 1_700_000_000_000
+                    self.on_snapshot(TickEnvelope(
+                        source_id="bybit_public_readonly",
+                        channel="orderbook_snapshot",
+                        instrument="BTCUSDT",
+                        event_kind="L2_SNAPSHOT",
+                        raw_payload='{"test":"real-shape"}',
+                        received_ts_ms=now_ms,
+                        exchange_ts_ms=now_ms,
+                    ))
+                await asyncio.sleep(0.01)
 
         async def run_clock_sync(self):
             await asyncio.sleep(60)
@@ -176,14 +185,26 @@ def test_native_enqueue_records_each_envelope_once(
             self.rows = []
 
         def append_batch(self, rows):
+            if rows and not reject_queue_event:
+                time.sleep(0.6)  # simulate a slow local disk write
             self.rows.extend(rows)
             return len(rows)
 
         def rotate_all(self):
             return None
 
-        def stats(self):
-            return {"rows": len(self.rows)}
+        def stats(self, *, include_partitions=True):
+            result = {
+                "partition_count": 1,
+                "records_written": len(self.rows),
+                "bytes_written": 0,
+                "partition_details_included": include_partitions,
+                "read_only": True,
+                "real_execution": False,
+            }
+            if include_partitions:
+                result["partitions"] = {"test": {"records_written": len(self.rows)}}
+            return result
 
     writer = FakeWriter()
     heartbeats = []
@@ -224,12 +245,19 @@ def test_native_enqueue_records_each_envelope_once(
         tmp_path,
         max_symbols=1,
         stale_after_ms=1_000,
-        duration_s=0.01,
+        duration_s=0.6,
         universe_refresh_s=0,
         enabled_venues=("bybit",),
     ))
 
     assert result == 0
+    assert coordinator_instances[0].loop_ticks >= 50
+    expected_states = (
+        ["RUNNING", "STOPPING", "STOPPED"]
+        if reject_queue_event
+        else ["STOPPING", "STOPPED"]
+    )
+    assert [row["state"] for row in heartbeats] == expected_states
     assert len(writer.rows) == (0 if reject_queue_event else 1)
     assert heartbeats
     final = heartbeats[-1]
@@ -241,6 +269,9 @@ def test_native_enqueue_records_each_envelope_once(
         0 if reject_queue_event else 1_700_000_000_000
     )
     assert "bybit reconnect #1" not in capsys.readouterr().out
+    assert "partitions" not in final["dataset"]
+    assert final["dataset"]["partition_details_included"] is False
+    assert final["dataset"]["records_written"] == len(writer.rows)
 
 
 async def _async_empty(*_args, **_kwargs):

@@ -44,6 +44,33 @@ def test_partitioned_writer_never_mixes_symbol_or_channel(tmp_path) -> None:
         assert len({(row["source_id"], row["channel"], row["instrument"]) for row in rows}) == 1
 
 
+def test_partitioned_writer_compact_stats_keep_exact_totals(tmp_path) -> None:
+    writer = PartitionedTickDatasetWriter(tmp_path, rotate_bytes=10_000_000)
+    writer.append_batch_records(
+        [
+            envelope("bybit_public_ws", "l2Book", "BTCUSDT", 1000),
+            envelope("bybit_public_ws", "trades", "BTCUSDT", 1001),
+            envelope("okx_public_ws", "trades", "ETH-USDT-SWAP", 1002),
+        ]
+    )
+
+    full = writer.stats()
+    compact = writer.stats(include_partitions=False)
+
+    assert len(full["partitions"]) == 3
+    assert "partitions" not in compact
+    for key in (
+        "partition_count",
+        "records_written",
+        "bytes_written",
+        "read_only",
+        "real_execution",
+    ):
+        assert compact[key] == full[key]
+    assert full["partition_details_included"] is True
+    assert compact["partition_details_included"] is False
+
+
 def test_rotate_all_seals_each_partition(tmp_path) -> None:
     writer = PartitionedTickDatasetWriter(tmp_path, rotate_bytes=10_000_000)
     writer.append(envelope("okx_public_ws", "l2Book", "BTC-USDT-SWAP", 1000))

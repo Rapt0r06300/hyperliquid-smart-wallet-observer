@@ -46,6 +46,7 @@ QUEUE_BATCH_MAX_BYTES = 32 * 1024 * 1024
 STREAM_NAME = "native_venues_market_ticks"
 VENUES = ("bybit", "okx", "gate", "bitget")
 DEFAULT_UNIVERSE_REFRESH_S = 900.0
+HEARTBEAT_WRITE_INTERVAL_S = 5.0
 
 
 def _atomic_json(path: Path, payload: Mapping[str, Any]) -> None:
@@ -219,6 +220,8 @@ async def _run(
     }
     canonical_last_written = 0
     canonical_last_beat_ns = 0
+    heartbeat_last_write_ns = 0
+    required = tuple(venue for venue in ("bybit", "okx") if venue in enabled_venues)
     started = time.time()
     collection_start_wall_ms = int(started * 1000)
     github_run_id = str(os.getenv("GITHUB_RUN_ID") or "").strip()
@@ -432,7 +435,7 @@ async def _run(
                     max_items=5_000,
                     max_estimated_bytes=QUEUE_BATCH_MAX_BYTES,
                 )
-                written += writer.append_batch(batch)
+                written += await asyncio.to_thread(writer.append_batch, batch)
 
             now = time.time()
             marker_path = root / MARQUEUR
@@ -443,13 +446,9 @@ async def _run(
             elif duration_s > 0 and now - started >= duration_s:
                 stop_reason = "DURATION_REACHED"
 
-            health = coordinator.health(now_ms=int(now * 1000))
             now_ms = int(now * 1000)
             now_mono_ns = time.monotonic_ns()
             if now_mono_ns - canonical_last_beat_ns >= 2_000_000_000:
-                required = tuple(
-                    venue for venue in ("bybit", "okx") if venue in enabled_venues
-                )
                 required_ready = all(
                     counts.get(venue, 0) > 0 and last_event_ms.get(venue, 0) > 0
                     for venue in required
@@ -476,47 +475,57 @@ async def _run(
                 )
                 canonical_last_written = int(written)
                 canonical_last_beat_ns = now_mono_ns
-            _atomic_json(
-                root / HEARTBEAT,
-                {
-                    "schema_version": "alina.native_venues_heartbeat.v1",
-                    "ts": now,
-                    "duration_s": round(now - started, 3),
-                    "state": "STOPPING" if stop_reason else "RUNNING",
-                    "stop_reason": stop_reason or None,
-                    "discovered_registry_coins": len(registry),
-                    "subscribed_symbols": {
-                        venue: len(coordinator.symbols_for(venue))
-                        for venue in VENUES
-                    },
-                    "initial_subscribed_symbols": counts,
-                    "universe_refreshes": universe_refreshes,
-                    "universe_changes": universe_changes,
-                    "universe_refresh_interval_s": universe_refresh_s,
-                    "records_written": written,
-                    "queue_depth": len(queue),
-                    "queue_estimated_bytes": queue.estimated_bytes,
-                    "queue_estimated_byte_limit": queue.max_estimated_bytes,
-                    "queue_drops": dropped,
-                    "queue_oversized_drops": oversized_dropped,
-                    "reconnects": reconnects,
-                    "last_event_ms": last_event_ms,
-                    "last_exchange_ts": last_exchange_ts,
-                    "channel_counts": {
-                        venue: dict(sorted(channel_counts.get(venue, {}).items()))
-                        for venue in enabled_venues
-                    },
-                    "required_venues": list(required),
-                    "required_venues_ready": all(
-                        counts.get(venue, 0) > 0 and last_event_ms.get(venue, 0) > 0
-                        for venue in required
-                    ),
-                    "coordinator_health": health,
-                    "dataset": writer.stats(),
-                    "read_only": True,
-                    "real_execution": False,
-                },
+            heartbeat_due = (
+                heartbeat_last_write_ns == 0
+                or now_mono_ns - heartbeat_last_write_ns
+                >= int(HEARTBEAT_WRITE_INTERVAL_S * 1_000_000_000)
+                or bool(stop_reason)
             )
+            if heartbeat_due:
+                health = coordinator.health(now_ms=now_ms)
+                _atomic_json(
+                    root / HEARTBEAT,
+                    {
+                        "schema_version": "alina.native_venues_heartbeat.v1",
+                        "ts": now,
+                        "duration_s": round(now - started, 3),
+                        "state": "STOPPING" if stop_reason else "RUNNING",
+                        "stop_reason": stop_reason or None,
+                        "discovered_registry_coins": len(registry),
+                        "subscribed_symbols": {
+                            venue: len(coordinator.symbols_for(venue))
+                            for venue in VENUES
+                        },
+                        "initial_subscribed_symbols": counts,
+                        "universe_refreshes": universe_refreshes,
+                        "universe_changes": universe_changes,
+                        "universe_refresh_interval_s": universe_refresh_s,
+                        "records_written": written,
+                        "queue_depth": len(queue),
+                        "queue_estimated_bytes": queue.estimated_bytes,
+                        "queue_estimated_byte_limit": queue.max_estimated_bytes,
+                        "queue_drops": dropped,
+                        "queue_oversized_drops": oversized_dropped,
+                        "reconnects": reconnects,
+                        "last_event_ms": last_event_ms,
+                        "last_exchange_ts": last_exchange_ts,
+                        "channel_counts": {
+                            venue: dict(sorted(channel_counts.get(venue, {}).items()))
+                            for venue in enabled_venues
+                        },
+                        "required_venues": list(required),
+                        "required_venues_ready": all(
+                            counts.get(venue, 0) > 0
+                            and last_event_ms.get(venue, 0) > 0
+                            for venue in required
+                        ),
+                        "coordinator_health": health,
+                        "dataset": writer.stats(include_partitions=False),
+                        "read_only": True,
+                        "real_execution": False,
+                    },
+                )
+                heartbeat_last_write_ns = now_mono_ns
             if stop_reason:
                 break
     finally:
@@ -610,7 +619,7 @@ async def _run(
                 for venue in ("bybit", "okx") if venue in enabled_venues
             ),
             "coordinator_health": final_health,
-            "dataset": writer.stats(),
+            "dataset": writer.stats(include_partitions=False),
             "dataset_v2_bundle": bundle,
             "collection_run_id": collection_run_id,
             "read_only": True,

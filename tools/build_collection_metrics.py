@@ -87,14 +87,61 @@ def _summary_from_result(result: Mapping[str, Any]) -> dict[str, Any] | None:
         if "trade_count_coverage_complete" not in compact:
             observed = compact.get("trade_count_observed")
             compact["trade_count_coverage_complete"] = (
-                isinstance(observed, int)
-                and not isinstance(observed, bool)
-                and observed >= 0
+                _exact_nonnegative_int(observed) is not None
             )
-        compact["manifest_inventory_complete"] = (
+        manifest_inventory_complete = (
             compact.get("manifest_inventory_complete") is True
         )
-        compact["frame_metrics_complete"] = _frame_metrics_are_complete(compact)
+        manifest_counters = (
+            _exact_nonnegative_int(compact.get("shard_count")),
+            _exact_nonnegative_int(compact.get("safe_count")),
+            _exact_nonnegative_int(compact.get("partial_count")),
+            _exact_nonnegative_int(compact.get("reject_count")),
+        )
+        manifest_inventory_complete = (
+            manifest_inventory_complete
+            and all(value is not None for value in manifest_counters)
+            and manifest_counters[1] + manifest_counters[2] + manifest_counters[3]
+            == manifest_counters[0]
+        )
+        compact["manifest_inventory_complete"] = manifest_inventory_complete
+        compact["record_count_coverage_complete"] = (
+            compact.get("record_count_coverage_complete") is not False
+            and _exact_nonnegative_int(compact.get("record_count_observed")) is not None
+        )
+        compact["compressed_size_coverage_complete"] = (
+            compact.get("compressed_size_coverage_complete") is not False
+            and _exact_nonnegative_int(compact.get("compressed_bytes")) is not None
+        )
+        compact["trade_count_coverage_complete"] = (
+            compact.get("trade_count_coverage_complete") is True
+            and _exact_nonnegative_int(compact.get("trade_count_observed")) is not None
+        )
+        compact["uncompressed_size_coverage_complete"] = (
+            compact.get("uncompressed_size_coverage_complete") is True
+            and _exact_nonnegative_int(compact.get("uncompressed_bytes")) is not None
+        )
+        frame_metrics_complete = _frame_metrics_are_complete(compact)
+        if frame_metrics_complete:
+            accepted = _exact_nonnegative_int(compact.get("accepted_frames"))
+            persisted = _exact_nonnegative_int(compact.get("persisted_frames"))
+            l2 = _exact_nonnegative_int(compact.get("l2_frames"))
+            bbo = _exact_nonnegative_int(compact.get("bbo_frames"))
+            record_count = _exact_nonnegative_int(compact.get("record_count_observed"))
+            frame_metrics_complete = (
+                accepted is not None
+                and persisted is not None
+                and l2 is not None
+                and bbo is not None
+                and record_count is not None
+                and accepted >= persisted
+                and persisted == record_count
+                and l2 <= persisted
+                and bbo <= persisted
+            )
+        compact["frame_metrics_complete"] = (
+            manifest_inventory_complete and frame_metrics_complete
+        )
         return compact
 
     raw = result.get("stdout")
@@ -108,7 +155,7 @@ def _summary_from_result(result: Mapping[str, Any]) -> dict[str, Any] | None:
         return None
 
     assets = summary.get("assets")
-    trade_count = 0
+    trade_count: int | None = 0
     record_count = 0
     trade_assets_seen = False
     asset_frame_counts_complete = isinstance(assets, list)
@@ -122,46 +169,137 @@ def _summary_from_result(result: Mapping[str, Any]) -> dict[str, Any] | None:
             events = _exact_nonnegative_int(row.get("event_count"))
             if events is None:
                 asset_frame_counts_complete = False
-                events = 0
-            record_count += events
+            else:
+                record_count += events
             family = str(row.get("family") or "").lower()
             if not family:
                 asset_frame_counts_complete = False
             if family in {"l2book", "copy_vault_l2", "native_market"}:
-                asset_l2_frames += events
+                if events is not None:
+                    asset_l2_frames += events
             elif family == "bbo":
-                asset_bbo_frames += events
+                if events is not None:
+                    asset_bbo_frames += events
             if family in TRADE_FAMILIES:
                 trade_assets_seen = True
-                trade_count += events
+                if events is None:
+                    trade_count = None
+                elif trade_count is not None:
+                    trade_count += events
+
+    explicit_record_count = _exact_nonnegative_int(
+        summary.get("record_count_observed")
+    )
 
     reconciliation = summary.get("reconciliation")
     reference_fills = 0
     reconciliation_complete = False
     if isinstance(reconciliation, Mapping):
-        reconciliation_complete = True
+        reconciliation_complete = bool(reconciliation)
         for row in reconciliation.values():
             if not isinstance(row, Mapping):
                 reconciliation_complete = False
                 continue
-            if str(row.get("status") or "").upper() != "MATCHED":
+            reference = _exact_nonnegative_int(row.get("reference_count"))
+            matched = _exact_nonnegative_int(row.get("matched_count"))
+            live = _exact_nonnegative_int(row.get("live_count"))
+            missing = _exact_nonnegative_int(row.get("missing_from_live"))
+            live_only = _exact_nonnegative_int(row.get("live_only"))
+            duplicate_keys = _exact_nonnegative_int(row.get("duplicate_live_keys"))
+            audit = row.get("audit")
+            if (
+                str(row.get("status") or "").upper() != "MATCHED"
+                or not isinstance(audit, Mapping)
+                or str(audit.get("status") or "").upper() != "COMPLETE"
+                or None in (reference, matched, live, missing, live_only, duplicate_keys)
+                or reference != matched
+                or reference != live
+                or missing != 0
+                or live_only != 0
+                or duplicate_keys != 0
+            ):
                 reconciliation_complete = False
-            reference_fills += _int(row.get("reference_count"))
+            elif reference is not None:
+                reference_fills += reference
     live_fills = summary.get("live_fill_counts")
+    live_fills_complete = isinstance(live_fills, Mapping) and bool(live_fills)
+    live_total = 0
     if isinstance(live_fills, Mapping):
-        live_total = sum(_int(v) for v in live_fills.values())
-        trade_count = (
-            reference_fills
-            if reference_fills or reconciliation_complete
-            else live_total
-        )
-
+        for value in live_fills.values():
+            count = _exact_nonnegative_int(value)
+            if count is None:
+                live_fills_complete = False
+            else:
+                live_total += count
     bundle = summary.get("bundle_index")
     if not isinstance(bundle, Mapping):
         bundle = summary.get("bundle")
     if not isinstance(bundle, Mapping):
         bundle = {}
 
+    bundle_shards = _exact_nonnegative_int(bundle.get("shard_count"))
+    bundle_safe = _exact_nonnegative_int(bundle.get("safe_count"))
+    bundle_partial = _exact_nonnegative_int(bundle.get("partial_count"))
+    bundle_reject = _exact_nonnegative_int(bundle.get("reject_count"))
+    manifest_inventory_complete = (
+        summary.get("manifest_inventory_complete") is True
+        and None not in (bundle_shards, bundle_safe, bundle_partial, bundle_reject)
+        and bundle_safe + bundle_partial + bundle_reject == bundle_shards
+    )
+    explicit_trade_count = _exact_nonnegative_int(
+        summary.get("trade_count_observed")
+    )
+    explicit_trade_count_complete = (
+        summary.get("trade_count_coverage_complete") is True
+        and explicit_trade_count is not None
+    )
+    has_reconciliation = isinstance(reconciliation, Mapping)
+    has_live_fill_counts = isinstance(live_fills, Mapping)
+    has_asset_inventory = isinstance(assets, list)
+    if has_reconciliation:
+        source_trade_count = reference_fills if reconciliation_complete else None
+        source_trade_count_complete = reconciliation_complete
+    elif has_live_fill_counts:
+        source_trade_count = live_total if live_fills_complete else None
+        source_trade_count_complete = live_fills_complete
+    elif has_asset_inventory:
+        source_trade_count = trade_count if manifest_inventory_complete and asset_frame_counts_complete else None
+        source_trade_count_complete = (
+            manifest_inventory_complete and asset_frame_counts_complete
+        )
+    else:
+        source_trade_count = None
+        source_trade_count_complete = False
+    if source_trade_count_complete and source_trade_count is not None:
+        trade_count = source_trade_count
+        trade_count_coverage_complete = (
+            not explicit_trade_count_complete
+            or explicit_trade_count == source_trade_count
+        )
+        if not trade_count_coverage_complete:
+            trade_count = None
+    elif not (has_reconciliation or has_live_fill_counts or has_asset_inventory):
+        trade_count = explicit_trade_count if explicit_trade_count_complete else None
+        trade_count_coverage_complete = explicit_trade_count_complete
+    else:
+        trade_count = None
+        trade_count_coverage_complete = False
+
+    explicit_record_count_valid = (
+        summary.get("record_count_coverage_complete") is True
+        and explicit_record_count is not None
+        and (
+            not asset_frame_counts_complete
+            or explicit_record_count == record_count
+        )
+    )
+    record_count_coverage_complete = explicit_record_count_valid or (
+        asset_frame_counts_complete
+        and manifest_inventory_complete
+        and (explicit_record_count is None or explicit_record_count == record_count)
+    )
+    if record_count_coverage_complete and explicit_record_count is not None:
+        record_count = explicit_record_count
     accepted_frames = _exact_nonnegative_int(summary.get("accepted_frames"))
     persisted_frames = _exact_nonnegative_int(summary.get("persisted_frames"))
     l2_frames = _exact_nonnegative_int(summary.get("l2_frames"))
@@ -171,38 +309,46 @@ def _summary_from_result(result: Mapping[str, Any]) -> dict[str, Any] | None:
     if bbo_frames is None and asset_frame_counts_complete:
         bbo_frames = asset_bbo_frames
     drops = _exact_queue_drop_total(summary.get("queue_drops"))
-
-    fallback_trade_coverage = (
-        reconciliation_complete
-        if isinstance(reconciliation, Mapping)
-        else not trade_assets_seen
+    frame_metrics_complete = (
+        summary.get("frame_metrics_complete") is True
+        and accepted_frames is not None
+        and persisted_frames is not None
+        and l2_frames is not None
+        and bbo_frames is not None
+        and drops is not None
+        and accepted_frames >= persisted_frames
+        and l2_frames <= persisted_frames
+        and bbo_frames <= persisted_frames
+        and (
+            not asset_frame_counts_complete
+            or persisted_frames == record_count
+        )
     )
+    compressed_bytes = _exact_nonnegative_int(summary.get("compressed_bytes"))
+    uncompressed_bytes = _exact_nonnegative_int(summary.get("uncompressed_bytes"))
 
     return {
         "trade_count_observed": trade_count,
-        "trade_count_coverage_complete": fallback_trade_coverage,
-        "record_count_observed": record_count,
+        "trade_count_coverage_complete": trade_count_coverage_complete,
+        "record_count_observed": record_count if record_count_coverage_complete else None,
         "accepted_frames": accepted_frames,
         "persisted_frames": persisted_frames,
         "l2_frames": l2_frames,
         "bbo_frames": bbo_frames,
         "queue_drops": drops,
-        "manifest_inventory_complete": (
-            summary.get("manifest_inventory_complete") is True
+        "manifest_inventory_complete": manifest_inventory_complete,
+        "frame_metrics_complete": frame_metrics_complete,
+        "shard_count": bundle_shards,
+        "safe_count": bundle_safe,
+        "partial_count": bundle_partial,
+        "reject_count": bundle_reject,
+        "compressed_size_coverage_complete": compressed_bytes is not None,
+        "compressed_bytes": compressed_bytes,
+        "uncompressed_size_coverage_complete": (
+            summary.get("uncompressed_size_coverage_complete") is True
+            and uncompressed_bytes is not None
         ),
-        "frame_metrics_complete": (
-            summary.get("frame_metrics_complete") is not False
-            and accepted_frames is not None
-            and persisted_frames is not None
-            and l2_frames is not None
-            and bbo_frames is not None
-            and drops is not None
-        ),
-        "shard_count": _int(bundle.get("shard_count")),
-        "safe_count": _int(bundle.get("safe_count")),
-        "partial_count": _int(bundle.get("partial_count")),
-        "reject_count": _int(bundle.get("reject_count")),
-        "compressed_bytes": _int(summary.get("compressed_bytes")),
+        "uncompressed_bytes": uncompressed_bytes,
         "trade_count_basis": (
             "copy_vault_reference_reconciliation"
             if isinstance(reconciliation, Mapping)
@@ -214,6 +360,7 @@ def _summary_from_result(result: Mapping[str, Any]) -> dict[str, Any] | None:
 def _empty_bucket() -> dict[str, int]:
     return {
         "durable_units": 0,
+        "units_record_count_incomplete": 0,
         "trades_observed": 0,
         "records_observed": 0,
         "accepted_frames": 0,
@@ -233,6 +380,7 @@ def _empty_bucket() -> dict[str, int]:
         "units_missing_compact_metrics": 0,
         "units_manifest_inventory_incomplete": 0,
         "units_frame_metrics_incomplete": 0,
+        "units_compressed_coverage_incomplete": 0,
         "units_uncompressed_coverage_incomplete": 0,
         "units_trade_count_coverage_incomplete": 0,
     }
@@ -259,11 +407,38 @@ def _verify_index_binding(metrics: Mapping[str, Any]) -> dict[str, Any] | None:
     try:
         index = json.loads(index_bytes)
         index_shards = index["shard_count"]
-        indexed_shards = metrics["totals"]["TOTAL_SHARDS"]
+        totals = metrics["totals"]
+        indexed_shards = totals["TOTAL_SHARDS"]
+        trades_collected = totals["TOTAL_TRADES_COLLECTED"]
+        trades_replayable = totals["TOTAL_TRADES_REPLAYABLE"]
+        trades_safe = totals["TOTAL_TRADES_SAFE"]
+        unique_trades = totals.get("TOTAL_UNIQUE_TRADES_GLOBAL")
+        unique_coverage_complete = (
+            totals.get("GLOBAL_UNIQUE_TRADES_COVERAGE_COMPLETE") is True
+        )
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         raise ValueError("COLLECTION_METRICS_INDEX_BINDING_INVALID") from exc
-    if type(index_shards) is not int or type(indexed_shards) is not int:
-        raise ValueError("COLLECTION_METRICS_INDEX_BINDING_INVALID")
+    exact_counts = tuple(
+        _exact_nonnegative_int(value)
+        for value in (
+            index_shards,
+            indexed_shards,
+            trades_collected,
+            trades_replayable,
+            trades_safe,
+        )
+    )
+    if any(value is None for value in exact_counts):
+        raise ValueError("COLLECTION_METRICS_INDEX_COUNTERS_INVALID")
+    index_shards, indexed_shards, trades_collected, trades_replayable, trades_safe = exact_counts
+    unique_count = _exact_nonnegative_int(unique_trades)
+    if (
+        trades_safe > trades_replayable
+        or trades_replayable > trades_collected
+        or (unique_coverage_complete and unique_count is None)
+        or (unique_count is not None and unique_count > trades_collected)
+    ):
+        raise ValueError("COLLECTION_METRICS_INDEX_COUNTERS_INVALID")
     if index_shards != indexed_shards:
         raise ValueError("COLLECTION_METRICS_INDEX_SHARD_COUNT_MISMATCH")
     return {
@@ -349,8 +524,12 @@ def build() -> dict[str, Any]:
                 bucket["units_missing_compact_metrics"] += 1
                 totals["units_manifest_inventory_incomplete"] += 1
                 bucket["units_manifest_inventory_incomplete"] += 1
+                totals["units_record_count_incomplete"] += 1
+                bucket["units_record_count_incomplete"] += 1
                 totals["units_frame_metrics_incomplete"] += 1
                 bucket["units_frame_metrics_incomplete"] += 1
+                totals["units_compressed_coverage_incomplete"] += 1
+                bucket["units_compressed_coverage_incomplete"] += 1
                 if kind != "event_intelligence_collection":
                     totals["units_trade_count_coverage_incomplete"] += 1
                     bucket["units_trade_count_coverage_incomplete"] += 1
@@ -366,9 +545,15 @@ def build() -> dict[str, Any]:
             if compact.get("trade_count_coverage_complete") is not True:
                 totals["units_trade_count_coverage_incomplete"] += 1
                 bucket["units_trade_count_coverage_incomplete"] += 1
+            if compact.get("record_count_coverage_complete") is not True:
+                totals["units_record_count_incomplete"] += 1
+                bucket["units_record_count_incomplete"] += 1
             if compact.get("uncompressed_size_coverage_complete") is not True:
                 totals["units_uncompressed_coverage_incomplete"] += 1
                 bucket["units_uncompressed_coverage_incomplete"] += 1
+            if compact.get("compressed_size_coverage_complete") is not True:
+                totals["units_compressed_coverage_incomplete"] += 1
+                bucket["units_compressed_coverage_incomplete"] += 1
             frame_metrics_complete = (
                 manifest_inventory_complete
                 and _frame_metrics_are_complete(compact)
@@ -393,6 +578,42 @@ def build() -> dict[str, Any]:
                 "uncompressed_bytes": "uncompressed_bytes",
             }
             for target, source in fields.items():
+                if target == "records_observed":
+                    if compact.get("record_count_coverage_complete") is not True:
+                        continue
+                    value = _exact_nonnegative_int(compact.get(source))
+                    if value is None:
+                        continue
+                    totals[target] += value
+                    bucket[target] += value
+                    continue
+                if target == "trades_observed":
+                    if compact.get("trade_count_coverage_complete") is not True:
+                        continue
+                    value = _exact_nonnegative_int(compact.get(source))
+                    if value is None:
+                        continue
+                    totals[target] += value
+                    bucket[target] += value
+                    continue
+                if target == "compressed_bytes":
+                    if compact.get("compressed_size_coverage_complete") is not True:
+                        continue
+                    value = _exact_nonnegative_int(compact.get(source))
+                    if value is None:
+                        continue
+                    totals[target] += value
+                    bucket[target] += value
+                    continue
+                if target == "uncompressed_bytes":
+                    if compact.get("uncompressed_size_coverage_complete") is not True:
+                        continue
+                    value = _exact_nonnegative_int(compact.get(source))
+                    if value is None:
+                        continue
+                    totals[target] += value
+                    bucket[target] += value
+                    continue
                 if target in FRAME_METRIC_FIELDS:
                     if not frame_metrics_complete:
                         continue
@@ -410,19 +631,27 @@ def build() -> dict[str, Any]:
         index_binding = _verify_index_binding(doc)
         rows = doc.get("totals") if isinstance(doc, Mapping) else {}
         if isinstance(rows, Mapping):
+            unique_trades = _exact_nonnegative_int(
+                rows.get("TOTAL_UNIQUE_TRADES_GLOBAL")
+            )
             indexed = {
-                "trades_indexed_exact": _int(rows.get("TOTAL_TRADES_COLLECTED")),
-                "trades_replayable": _int(rows.get("TOTAL_TRADES_REPLAYABLE")),
-                "trades_safe": _int(rows.get("TOTAL_TRADES_SAFE")),
-                "global_unique_trades": (
-                    int(rows["TOTAL_UNIQUE_TRADES_GLOBAL"])
-                    if isinstance(rows.get("TOTAL_UNIQUE_TRADES_GLOBAL"), int)
-                    else None
+                "trades_indexed_exact": _exact_nonnegative_int(
+                    rows.get("TOTAL_TRADES_COLLECTED")
                 ),
+                "trades_replayable": _exact_nonnegative_int(
+                    rows.get("TOTAL_TRADES_REPLAYABLE")
+                ),
+                "trades_safe": _exact_nonnegative_int(
+                    rows.get("TOTAL_TRADES_SAFE")
+                ),
+                "global_unique_trades": unique_trades,
                 "global_unique_coverage_complete": (
                     rows.get("GLOBAL_UNIQUE_TRADES_COVERAGE_COMPLETE") is True
+                    and unique_trades is not None
                 ),
-                "indexed_shards": _int(rows.get("TOTAL_SHARDS")),
+                "indexed_shards": _exact_nonnegative_int(
+                    rows.get("TOTAL_SHARDS")
+                ),
             }
             if index_binding is not None:
                 indexed.update(index_binding)
@@ -438,10 +667,13 @@ def build() -> dict[str, Any]:
                 "safe_shards",
                 "partial_shards",
                 "rejected_shards",
-                "compressed_bytes",
                 "uncompressed_bytes",
             ):
                 result[field] = None
+        if bucket["units_record_count_incomplete"] > 0:
+            result["records_observed"] = None
+        if bucket["units_compressed_coverage_incomplete"] > 0:
+            result["compressed_bytes"] = None
         if (
             bucket["durable_units"] == 0
             or bucket["units_frame_metrics_incomplete"] > 0
@@ -453,6 +685,8 @@ def build() -> dict[str, Any]:
             or bucket["units_trade_count_coverage_incomplete"] > 0
         ):
             result["trades_observed"] = None
+        if bucket["units_uncompressed_coverage_incomplete"] > 0:
+            result["uncompressed_bytes"] = None
         return result
 
     totals_public = public_bucket(totals)
@@ -462,8 +696,10 @@ def build() -> dict[str, Any]:
     collection_metrics_complete = (
         totals["durable_units"] > 0
         and totals["units_missing_compact_metrics"] == 0
+        and totals["units_record_count_incomplete"] == 0
         and totals["units_manifest_inventory_incomplete"] == 0
         and totals["units_frame_metrics_incomplete"] == 0
+        and totals["units_compressed_coverage_incomplete"] == 0
         and totals["units_trade_count_coverage_incomplete"] == 0
         and totals["units_uncompressed_coverage_incomplete"] == 0
     )
@@ -506,7 +742,7 @@ def build() -> dict[str, Any]:
                 if totals["units_manifest_inventory_incomplete"] > 0
                 else totals["shards"]
             ),
-            "compressed_bytes_known": totals["compressed_bytes"],
+            "compressed_bytes_known": totals_public["compressed_bytes"],
             "uncompressed_bytes_known": (
                 None
                 if totals["units_uncompressed_coverage_incomplete"] > 0

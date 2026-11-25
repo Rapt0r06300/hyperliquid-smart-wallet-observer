@@ -224,23 +224,45 @@ class PartitionedTickDatasetWriter:
             )
         return sorted(shards)
 
-    def stats(self) -> dict[str, Any]:
-        partitions = {
-            "|".join(key): writer.stats()
-            for key, writer in sorted(self._writers.items())
-        }
-        return {
-            "partitions": partitions,
-            "partition_count": len(partitions),
-            "records_written": sum(
+    def stats(self, *, include_partitions: bool = True) -> dict[str, Any]:
+        """Return exact writer counters, optionally omitting high-cardinality detail.
+
+        Persistent heartbeat files are polled frequently and should not repeat a
+        full per-instrument map. Callers needing the full diagnostic inventory
+        keep the default; compact callers still receive the exact aggregate
+        counters and partition count.
+        """
+        partitions: dict[str, dict[str, Any]] = {}
+        if include_partitions:
+            for key, writer in sorted(self._writers.items()):
+                row = writer.stats()
+                partitions["|".join(key)] = row
+            records_written = sum(
                 int(row["records_written"]) for row in partitions.values()
-            ),
-            "bytes_written": sum(
+            )
+            bytes_written = sum(
                 int(row["bytes_written"]) for row in partitions.values()
-            ),
+            )
+        else:
+            records_written = sum(
+                int(writer.records_written) for writer in self._writers.values()
+            )
+            bytes_written = sum(
+                int(writer.bytes_written) for writer in self._writers.values()
+            )
+        partition_count = len(self._writers)
+        result = {
+            "partitions": partitions,
+            "partition_count": partition_count,
+            "records_written": records_written,
+            "bytes_written": bytes_written,
+            "partition_details_included": include_partitions,
             "read_only": True,
             "real_execution": False,
         }
+        if not include_partitions:
+            result.pop("partitions")
+        return result
 
 
 __all__ = ["PartitionedTickDatasetWriter"]
