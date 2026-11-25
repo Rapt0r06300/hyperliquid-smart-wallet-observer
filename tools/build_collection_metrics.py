@@ -823,6 +823,7 @@ def _write_atomic(payload: Mapping[str, Any]) -> None:
     tmp.write_text(
         json.dumps(dict(payload), indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
+        newline="\n",
     )
     tmp.replace(OUTPUT)
 

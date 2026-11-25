@@ -205,9 +205,13 @@ def test_metrics_refresh_is_scheduled_and_serialized():
     assert "schedule:" in text
     assert "group: dataset-v2-control-plane-index" in text
     assert "cancel-in-progress: false" in text
+    assert "timeout-minutes: 45" in text
     assert "tools/build_catalog_metrics.py" in text
     assert "catalog/TRADE_COUNT_PATCH.json" in text
     assert "catalog/TRADE_UNIQUE_COUNT_PATCH.json" in text
+    assert "METRICS_BASE_SHA=$(git rev-parse HEAD)" in text
+    assert 'if [ "$attempt" -eq 1 ] && [ "$remote_sha" = "$METRICS_BASE_SHA" ]; then' in text
+    assert 'git reset --hard "$remote_sha"' in text
 
 
 def test_reconcile_covers_all_production_release_families_and_pins_actions():

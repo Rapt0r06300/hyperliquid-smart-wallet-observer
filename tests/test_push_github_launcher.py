@@ -294,3 +294,35 @@ def test_safe_push_blocks_tracked_runtime_dirt_and_reports_source_dirt_in_dry_ru
     assert "Aucun add, commit, fetch, merge ou push n'a ete execute." in source_result.stdout
     assert _git(local, "rev-parse", "HEAD") == local_head_before
     assert _git(local, "ls-remote", "origin", "refs/heads/main").split()[0] == remote_head_before
+
+
+@pytest.mark.skipif(os.name != "nt", reason="la garde CMD utilise Windows PowerShell")
+def test_pousser_index_lock_probe_fails_closed_under_cmd_parser(tmp_path: Path) -> None:
+    """The embedded PowerShell process probe must survive CMD parsing and fail closed."""
+    source = MAIN_LAUNCHER.read_text(encoding="utf-8")
+    guard = source.split(":ensure_no_stale_lock\n", 1)[1]
+    assert "^|" not in guard
+    assert "UNKNOWN" in guard and '=="CLEAR"' in guard
+    assert "if errorlevel 1 goto :finish" in source
+
+    line = next(row for row in guard.splitlines() if "for /f" in row and "powershell" in row)
+    command = line.split("in ('", 1)[1].rsplit("') do set", 1)[0]
+    harness = tmp_path / "probe.cmd"
+    harness.write_text(
+        "@echo off\r\nsetlocal DisableDelayedExpansion\r\n"
+        "set \"STATE=\"\r\n"
+        f"for /f \"delims=\" %%G in ('{command}') do set \"STATE=%%G\"\r\n"
+        "echo STATE=%STATE%\r\nexit /b 0\r\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        ("cmd.exe", "/d", "/c", str(harness)),
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "STATE=ACTIVE" in result.stdout or "STATE=CLEAR" in result.stdout

@@ -35,10 +35,14 @@ jobs:
   metrics:
     if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # The catalog is ~1.85M rows. A full checkout, validation and a possible
+    # exact-SHA rebuild during publication need more than the former 20m cap.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with: {ref: main, fetch-depth: 0, persist-credentials: true}
+      - name: Record metrics source SHA
+        run: echo "METRICS_BASE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with: {python-version: '3.12'}
       - name: Build replay compatibility reasons
@@ -62,21 +66,26 @@ jobs:
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           published=false
           for attempt in 1 2 3 4 5; do
-            # Generated metrics are valid only for the exact DATA_INDEX bytes
-            # used to build them. Never rebase an older generated file over a
-            # concurrently updated catalog.
+            # Reuse the outputs already built and validated above only when
+            # main is still the exact base SHA. Otherwise rebuild everything
+            # against the new main before publishing; never publish stale data.
             git fetch origin main
-            git reset --hard origin/main
-            python tools/build_replay_compatibility_reasons.py
-            python - <<'PY'
+            remote_sha="$(git rev-parse origin/main)"
+            if [ "$attempt" -eq 1 ] && [ "$remote_sha" = "$METRICS_BASE_SHA" ]; then
+              echo "main unchanged at $remote_sha; reusing validated exact-SHA metrics"
+            else
+              git reset --hard "$remote_sha"
+              python tools/build_replay_compatibility_reasons.py
+              python - <<'PY'
           from pathlib import Path
           path = Path('catalog/REPLAY_COMPATIBILITY_REASONS.json')
           if path.stat().st_size >= 8 * 1024 * 1024:
               raise SystemExit('REPLAY_REASONS_OVER_BUDGET_FAIL_CLOSED')
           PY
-            python tools/build_catalog_metrics.py
-            python tools/build_collection_metrics.py
-            python tools/build_quarantine_audit.py
+              python tools/build_catalog_metrics.py
+              python tools/build_collection_metrics.py
+              python tools/build_quarantine_audit.py
+            fi
             python - <<'PY'
           from tools.build_catalog_metrics import verify_metrics_source
           print(verify_metrics_source())

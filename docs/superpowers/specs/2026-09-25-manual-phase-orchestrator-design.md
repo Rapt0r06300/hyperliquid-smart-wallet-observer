@@ -14455,3 +14455,19 @@ Contrôle ponctuel local en lecture seule : 20/20 processus présents, mais seul
 Précision de périmètre : « heartbeat du collecteur BBO figé » ne signifie pas que toute donnée BBO avait cessé. `copy_vault_bbo_lane.jsonl`, écrit par `tools/collecter_l2_lane.py`, continuait de grossir au contrôle; le heartbeat et `bbo_tape.jsonl` de `bbo-collector`, eux, étaient anciens. Le tableau nomme donc le collecteur concerné, sans conclure à l'absence de tous les flux BBO.
 
 Le wrapper `run_bounded_collector.py` ajoute aussi `data_heartbeat`, son âge, son seuil et son chemin à son journal périodique; ce diagnostic est passif et ne redémarre ni n'arrête le worker.
+
+### 2026-11-25 — Rebuild observé des métriques de collecte
+
+`tools/build_collection_metrics.py` a reconstruit `catalog/COLLECTION_METRICS.json` depuis les checkpoints de campagne et le `DATA_INDEX` disponibles. Le hash source rapporté est `bc1c682f34d2e38d5d4123aa6031f269c60073ceaa5db3978e8ee66be49ac2cf`; le total indexé est 1 853 164 shards, identique au nombre lu par le validateur du `DATA_INDEX`. L'ancien snapshot de métriques indiquait 1 837 403 shards : son écart de 15 761 avec l'index n'est plus présent dans la vue reconstruite. Aucun shard ni statut SAFE n'a été modifié par ce rebuild.
+
+Le reçu est `status=OK`, `stale=false`, mais demeure `quality_status=INCOMPLETE` pour `COLLECTION_METRICS_INCOMPLETE` et `SOURCE_ADMISSION_INCOMPLETE`. `global_unique_trades`, frames persistées, L2, shards publiés et plusieurs compteurs restent `null`; 387 445 404 est un compte cumulatif d'observations de trades/fills, pas un compte global unique. Le rebuild ne certifie donc ni la complétude du corpus, ni son admissibilité économique.
+
+Le générateur écrit désormais ce JSON avec des fins de ligne LF explicites, indépendantes de la plateforme. Cela évite qu'une exécution Windows convertisse toutes les lignes suivies et produise un diff sans changement de données. Le test vérifie le fichier réellement écrit et son parsing JSON.
+
+Validation après génération : `tests/test_collection_metrics.py`, 13 réussis. Les changements de compteurs reflètent le `DATA_INDEX` courant et les checkpoints disponibles; ils ne remplacent pas la preuve d'unicité globale ni la certification SAFE des octets.
+
+### 2026-11-25 — Relevé ETA sur deux cycles
+
+Lecture seule via `tools/eta_donnees_labo.py --racine . --intervalle 2 --tours 2`, relevé 2026-11-25 05:29:17–05:29:19 UTC. Au premier cycle, le débit est `INCONNU (PREMIERE_MESURE)`; au second, 4/95 fichiers observés ont grandi et le débit mesuré sur deux secondes est 3 437,2 lignes/min. Ce compteur est une activité de fichiers, pas un nombre de collecteurs ni un débit de signaux admissibles. Le débit moteur reste `INCONNU`.
+
+Le même relevé trouvait 20/20 processus déclarés actifs, mais 4/5 heartbeats de données récents; le heartbeat du collecteur Multi-venues avait 11,5 h. La sonde de densité avait 12,9 h et indiquait encore 2/6 jours; cette estimation est ancienne et ne prouve pas la progression actuelle. L'ETA n'a démarré ni arrêté aucun processus. Le reçu d'extraction AlinaSync annonçait 15 456 JSONL sans les champs de certification physique exigés par le contrat courant; ces fichiers restent non vérifiés et ne sont pas comptés comme matérialisés.

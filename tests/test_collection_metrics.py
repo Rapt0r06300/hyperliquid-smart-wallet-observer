@@ -6,6 +6,18 @@ import json
 from tools import build_collection_metrics as metrics
 
 
+def test_atomic_metrics_output_uses_canonical_lf_line_endings(tmp_path, monkeypatch):
+    output = tmp_path / "COLLECTION_METRICS.json"
+    monkeypatch.setattr(metrics, "OUTPUT", output)
+
+    metrics._write_atomic({"status": "OK", "read_only": True})
+
+    written = output.read_bytes()
+    assert b"\r\n" not in written
+    assert written.endswith(b"\n")
+    assert json.loads(written) == {"read_only": True, "status": "OK"}
+
+
 def test_collection_metrics_binds_index_and_rejects_stale_derived_view(
     tmp_path, monkeypatch
 ):

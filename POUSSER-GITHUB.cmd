@@ -134,6 +134,7 @@ set "ALINA_ATTEMPT=0"
 :code_attempt
 set /a ALINA_ATTEMPT+=1
 call :ensure_no_stale_lock
+if errorlevel 1 goto :finish
 call "%ALINA_ROOT%tools\launcher_log.cmd" "POUSSER-GITHUB" STEP git-code-sync "attempt-%ALINA_ATTEMPT%-of-%ALINA_MAX_ATTEMPTS%" ""
 echo [TENTATIVE] Synchronisation code %ALINA_ATTEMPT%/%ALINA_MAX_ATTEMPTS%
 set "ALINA_ENGINE_RAN=1"
@@ -159,6 +160,7 @@ set "ALINA_ATTEMPT=0"
 :shards_attempt
 set /a ALINA_ATTEMPT+=1
 call :ensure_no_stale_lock
+if errorlevel 1 goto :finish
 call "%ALINA_ROOT%tools\launcher_log.cmd" "POUSSER-GITHUB" STEP safe-data-sync "attempt-%ALINA_ATTEMPT%-of-%ALINA_MAX_ATTEMPTS%" ""
 if /I "%ALINA_MODE%"=="all" "%HYPERSMART_PYTHON%" %PYARGS% "%ALINA_ROOT%tools\cmd_progress.py" percent 70 "Telechargement SAFE explicite"
 if /I "%ALINA_MODE%"=="shards" "%HYPERSMART_PYTHON%" %PYARGS% "%ALINA_ROOT%tools\cmd_progress.py" percent 35 "Operation SAFE en cours"
@@ -261,14 +263,27 @@ rem  Toute commande Git active ou tout processus sans ligne identifiable
 rem  reste bloque par prudence. Jamais de reset, force, clean ou stash.
 rem  Appele via `call`, retourne par `goto :eof`.
 rem ============================================================
+rem  Remove an index.lock only after a successful process census.
+rem  ACTIVE and UNKNOWN states preserve the lock; query errors fail closed.
+rem  Git fsmonitor daemons are read-only and do not block cleanup.
+rem  No reset, clean, stash, or data mutation is performed here.
+rem ============================================================
 :ensure_no_stale_lock
-if not exist "%ALINA_ROOT%.git\index.lock" goto :eof
-set "ALINA_GIT_WRITER_ACTIVE="
-for /f "delims=" %%G in ('powershell -NoProfile -Command "$p=Get-CimInstance Win32_Process ^| Where-Object { $_.Name -eq 'git.exe' -and ([string]::IsNullOrWhiteSpace($_.CommandLine) -or $_.CommandLine -notmatch 'fsmonitor--daemon') }; if ($p) { 'ACTIVE' }"') do set "ALINA_GIT_WRITER_ACTIVE=%%G"
-if /I "%ALINA_GIT_WRITER_ACTIVE%"=="ACTIVE" (
+if not exist "%ALINA_ROOT%.git\index.lock" exit /b 0
+set "ALINA_GIT_WRITER_STATE="
+for /f "delims=" %%G in ('powershell -NoProfile -NonInteractive -Command "$ErrorActionPreference='Stop'; try { $procs=Get-CimInstance Win32_Process -ErrorAction Stop; $active=$false; foreach($p in $procs){ if($p.Name -eq 'git.exe' -and ([string]::IsNullOrWhiteSpace($p.CommandLine) -or $p.CommandLine -notmatch 'fsmonitor--daemon')) { $active=$true; break } }; if($active){ 'ACTIVE' } else { 'CLEAR' } } catch { 'UNKNOWN'; exit 1 }"') do set "ALINA_GIT_WRITER_STATE=%%G"
+if /I "%ALINA_GIT_WRITER_STATE%"=="ACTIVE" (
   echo [VERROU] Un processus Git d'ecriture est actif; verrou respecte ^(pas de suppression^).
-  goto :eof
+  exit /b 0
 )
-echo [AUTO-REPAIR] Verrou Git perime detecte ^(aucun ecrivain Git; fsmonitor ignore^) -^> suppression securisee.
+if /I not "%ALINA_GIT_WRITER_STATE%"=="CLEAR" (
+  echo [NO_GO] Impossible de confirmer l'absence d'un processus Git; verrou conserve.
+  exit /b 1
+)
+echo [AUTO-REPAIR] Verrou Git perime confirme ^(aucun ecrivain Git; fsmonitor ignore^) -^> suppression securisee.
 del /f /q "%ALINA_ROOT%.git\index.lock" >nul 2>nul
-goto :eof
+if exist "%ALINA_ROOT%.git\index.lock" (
+  echo [NO_GO] Verrou Git toujours present apres la tentative de nettoyage; aucune synchronisation.
+  exit /b 1
+)
+exit /b 0
