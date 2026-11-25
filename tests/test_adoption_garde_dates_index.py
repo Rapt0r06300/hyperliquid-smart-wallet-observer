@@ -104,3 +104,57 @@ def test_si_git_refuse_la_fusion_l_outil_retombe_sur_l_ancien_read_tree(tmp_path
     i_repli = commandes.index(("read-tree", new))
     assert i_fusion < i_repli < commandes.index(("update-ref", "refs/heads/main", new, old))
     assert task.report["adoption_index"] == "READ_TREE_SIMPLE_REPLI"
+
+
+def test_depuis_l_arbre_de_l_index_la_fusion_passe_meme_quand_old_tip_est_refuse(tmp_path):
+    """25/11/2026, premier push reel : l'index n'etait pas `old_tip` (commit construit a part) et un chemin change des
+    deux cotes faisait REFUSER `-m -i <old_tip> <new>`. Depuis l'arbre de l'index, aucun refus, et les dates restent."""
+    depot = tmp_path / "depot"
+    depot.mkdir()
+    _git(depot, "init", "-q")
+    _git(depot, "config", "user.email", "test@example.invalid")
+    _git(depot, "config", "user.name", "test")
+    for nom in ("a.txt", "b.txt", "c.txt"):
+        (depot / nom).write_text(f"{nom} v1\n", encoding="utf-8")
+    _git(depot, "add", ".")
+    _git(depot, "commit", "-q", "-m", "P")
+    p = _git(depot, "rev-parse", "HEAD").strip()
+    (depot / "a.txt").write_text("a.txt local\n", encoding="utf-8")
+    _git(depot, "commit", "-q", "-am", "L (commit local)")
+    old_tip = _git(depot, "rev-parse", "HEAD").strip()
+    (depot / "a.txt").write_text("a.txt distant\n", encoding="utf-8")
+    _git(depot, "commit", "-q", "-am", "R (rejoue sur le distant)")
+    new_tip = _git(depot, "rev-parse", "HEAD").strip()
+    _git(depot, "read-tree", p)                                # l'index est reste sur P, pas sur old_tip
+    _git(depot, "update-index", "-q", "--refresh")
+    avant = _mtimes(depot)
+    refus = subprocess.run(["git", "read-tree", "-m", "-i", old_tip, new_tip], cwd=depot, capture_output=True)
+    assert refus.returncode != 0                                # le refus vu sur le vrai push
+    base = _git(depot, "write-tree").strip()
+    _git(depot, "read-tree", "-m", "-i", base, new_tip)
+    apres = _mtimes(depot)
+    assert apres["b.txt"] == avant["b.txt"] > 0 and apres["c.txt"] == avant["c.txt"] > 0
+    assert _git(depot, "write-tree").strip() == _git(depot, "rev-parse", f"{new_tip}^{{tree}}").strip()
+
+
+def test_l_outil_fusionne_depuis_l_arbre_de_l_index(tmp_path):
+    task = Synchronizer(tmp_path)
+    old, new, arbre = "1" * 40, "2" * 40, "3" * 40
+    commandes: list[tuple[str, ...]] = []
+
+    def fausse_commande(*args: str, **kwargs):
+        commandes.append(args)
+        if args[0] == "replay":
+            return subprocess.CompletedProcess(args, 0, f"update refs/heads/main {new} {old}\n".encode(), b"")
+        if args[0] == "write-tree":
+            return subprocess.CompletedProcess(args, 0, f"{arbre}\n".encode(), b"")
+        if args[:2] == ("rev-parse", "HEAD"):
+            return subprocess.CompletedProcess(args, 0, f"{new}\n".encode(), b"")
+        return subprocess.CompletedProcess(args, 0, b"", b"")
+
+    task.command = fausse_commande  # type: ignore[method-assign]
+    task._assert_no_new_code_changes = lambda: None  # type: ignore[method-assign]
+    assert task._try_git_replay("remote", old, "base") is True
+    assert ("read-tree", "-m", "-i", arbre, new) in commandes
+    assert task.report["adoption_index_base"] == "INDEX"
+    assert task.report["adoption_index"] == "READ_TREE_DEUX_ARBRES_DATES_GARDEES"

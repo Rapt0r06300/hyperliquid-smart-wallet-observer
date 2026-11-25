@@ -4410,9 +4410,26 @@ class Synchronizer:
         # les deux commits, sans regarder l'arbre de travail (comme avant :
         # index seul). Si git la refuse, on retombe EXACTEMENT sur l'ancien
         # `read-tree <new>` : aucun nouveau cas d'echec.
+        # 25/11/2026 -- LA BASE EST L'INDEX LUI-MEME. Premier push reel : git a
+        # REFUSE `-m -i <old_tip> <new>` (adoption_index=READ_TREE_SIMPLE_REPLI) :
+        # l'index n'est pas `old_tip` (commit construit par commit-tree, entrees
+        # protegees indexees), et un chemin change des deux cotes bloque la
+        # fusion. En partant de l'arbre de l'index (`write-tree`), index == base
+        # par construction : aucun refus possible, le resultat est exactement
+        # `new_tip` (comme `read-tree <new>`), et les chemins inchanges gardent
+        # leur date. `write-tree` en echec -> base `old_tip`, comme avant.
         try:
+            base = self.command(
+                "write-tree", check=False,
+                timeout=REPLAY_WORKTREE_TIMEOUT_SECONDS,
+            )
+            arbre_index = (
+                base.stdout.decode("ascii", errors="replace").strip()
+                if base.returncode == 0 and base.stdout else ""
+            )
+            self.report["adoption_index_base"] = "INDEX" if arbre_index else "OLD_TIP"
             fusion = self.command(
-                "read-tree", "-m", "-i", old_tip, new_tip,
+                "read-tree", "-m", "-i", arbre_index or old_tip, new_tip,
                 check=False,
                 timeout=REPLAY_WORKTREE_TIMEOUT_SECONDS,
             )

@@ -275,7 +275,39 @@ def recenser(root: Path, *, verifier_sha: bool = False, max_listes: int = 200) -
     a_sceller: list[dict[str, Any]] = []
     a_prouver_gz: list[dict[str, Any]] = []
     non_parcourus: dict[str, str] = {}
+    erreurs_parcours: list[dict[str, str]] = []
+    erreurs_parcours_count = 0
     fichiers_vus = dossiers_vus = 0
+
+    def noter_erreur_parcours(rel: str, operation: str, exc: OSError) -> None:
+        nonlocal erreurs_parcours_count
+        erreurs_parcours_count += 1
+        if len(erreurs_parcours) < max_listes:
+            erreurs_parcours.append({
+                "path": rel or ".",
+                "operation": operation,
+                "error": type(exc).__name__,
+            })
+
+    def lire_entrees(path: Path, rel: str):
+        """Yield directory entries and record open/iteration errors explicitly."""
+        try:
+            it = os.scandir(path)
+        except OSError as exc:
+            noter_erreur_parcours(rel, "ouvrir_dossier", exc)
+            return
+        try:
+            with it:
+                while True:
+                    try:
+                        yield next(it)
+                    except StopIteration:
+                        return
+                    except OSError as exc:
+                        noter_erreur_parcours(rel, "iterer_dossier", exc)
+                        return
+        except OSError as exc:
+            noter_erreur_parcours(rel, "fermer_dossier", exc)
 
     def noter(verdict: str, rel: str, taille: int, zone: str, detail: str, famille: str | None = None) -> None:
         t = totaux.setdefault(verdict, [0, 0])

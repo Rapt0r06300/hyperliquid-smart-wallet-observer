@@ -140,6 +140,35 @@ def test_le_recensement_n_utilise_pas_la_decouverte_du_certificateur(tmp_path, m
     assert R.recenser(tmp_path)["fichiers_de_donnees"] == 1
 
 
+def test_un_projet_vide_ne_peut_pas_etre_certifie_100(tmp_path):
+    rapport = R.recenser(tmp_path)
+
+    assert rapport["fichiers_de_donnees"] == 0
+    assert rapport["couverture_pct"] == 0.0
+    assert rapport["complet"] is True
+    assert rapport["cent_pour_cent"] is False
+
+
+def test_une_erreur_de_parcours_invalide_la_couverture(tmp_path, monkeypatch):
+    _ecrire(tmp_path / "runtime/data/asset_ctx_tape.jsonl")
+    scandir_reel = R.os.scandir
+    inaccessible = tmp_path / "runtime/data"
+
+    def scandir_avec_erreur(path):
+        if Path(path) == inaccessible:
+            raise PermissionError("accès de test refusé")
+        return scandir_reel(path)
+
+    monkeypatch.setattr(R.os, "scandir", scandir_avec_erreur)
+    rapport = R.recenser(tmp_path)
+
+    assert rapport["complet"] is False
+    assert rapport["cent_pour_cent"] is False
+    assert rapport["couverture_pct"] is None
+    assert rapport["erreurs_parcours"]["count"] == 1
+    assert rapport["erreurs_parcours"]["samples"][0]["path"] == "runtime/data"
+
+
 def test_le_certificateur_scelle_la_donnee_oubliee_et_la_couverture_atteint_100(tmp_path):
     import sceller_coffre_local as S
 
