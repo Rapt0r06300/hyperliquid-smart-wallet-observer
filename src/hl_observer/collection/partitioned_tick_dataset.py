@@ -84,20 +84,34 @@ class PartitionedTickDatasetWriter:
     def append(self, envelope: TickEnvelope) -> int:
         # Route single events through the same reconnect-epoch barriers as
         # batch ingestion. Direct writer.append silently merged connections.
-        return len(self.append_batch_records((envelope,)))
+        return self.append_batch((envelope,))
 
     def append_batch(self, envelopes: Iterable[TickEnvelope]) -> int:
-        return len(self.append_batch_records(envelopes))
+        result = self._append_batch(envelopes, retain_records=False)
+        assert isinstance(result, int)
+        return result
 
     def append_batch_records(self, envelopes: Iterable[TickEnvelope]) -> list[dict[str, Any]]:
+        result = self._append_batch(envelopes, retain_records=True)
+        assert isinstance(result, list)
+        return result
+
+    def _append_batch(
+        self,
+        envelopes: Iterable[TickEnvelope],
+        *,
+        retain_records: bool,
+    ) -> list[dict[str, Any]] | int:
         batch = list(envelopes)
         if not batch:
-            return []
+            return [] if retain_records else 0
         grouped: dict[tuple[str, str, str], list[tuple[int, TickEnvelope]]] = defaultdict(list)
         for index, envelope in enumerate(batch):
             grouped[self._key(envelope)].append((index, envelope))
 
-        output: list[dict[str, Any] | None] = [None] * len(batch)
+        output: list[dict[str, Any] | None] | None = (
+            [None] * len(batch) if retain_records else None
+        )
         for key, rows in grouped.items():
             # A reconnect defines a new causal epoch. Never let one immutable
             # shard span two websocket connection_ids.
@@ -138,14 +152,26 @@ class PartitionedTickDatasetWriter:
                 # an authentic snapshot starts a new causal epoch. Never
                 # synthesize lost exchange deltas.
                 buffered: list[tuple[int, TickEnvelope]] = []
-                def flush_segment() -> None:
+                def flush_segment(
+                    buffered: list[tuple[int, TickEnvelope]] = buffered,
+                    writer: PartitionedTickDatasetWriter = writer,
+                    output: list[dict[str, object]] | None = output,
+                ) -> None:
                     if not buffered:
                         return
-                    persisted = writer.append_batch_records(
-                        envelope for _index, envelope in buffered
-                    )
-                    for (index, _envelope), record in zip(buffered, persisted):
-                        output[index] = record
+                    segment = (envelope for _index, envelope in buffered)
+                    if output is None:
+                        persisted_count = writer.append_batch(segment)
+                        if persisted_count != len(buffered):
+                            raise RuntimeError(
+                                "partition writer failed to persist the full segment"
+                            )
+                    else:
+                        persisted = writer.append_batch_records(segment)
+                        for (index, _envelope), record in zip(
+                            buffered, persisted, strict=True
+                        ):
+                            output[index] = record
                     buffered.clear()
 
                 for indexed in chunk:
@@ -205,6 +231,8 @@ class PartitionedTickDatasetWriter:
                     buffered.append(indexed)
                 flush_segment()
 
+        if output is None:
+            return len(batch)
         if any(record is None for record in output):
             raise RuntimeError("partitioned writer failed to persist the full batch")
         return [record for record in output if record is not None]

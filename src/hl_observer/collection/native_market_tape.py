@@ -125,7 +125,7 @@ def native_tick_envelope(
     transport = dict(transport_raw) if isinstance(transport_raw, Mapping) else {}
 
     receive_ts_ms = _int(transport.get("receive_wall_ts_ms"))
-    if receive_ts_ms is None:
+    if receive_ts_ms is None or receive_ts_ms <= 0:
         return None
     receive_mono_ns = _int(transport.get("receive_mono_ns"))
     connection_id = str(transport.get("connection_id") or "") or None

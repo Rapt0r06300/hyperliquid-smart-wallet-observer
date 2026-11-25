@@ -69,6 +69,11 @@ JOURNAL_COLLECTEURS = Path("runtime/logs/economic-collector-watchdog.jsonl")
 AGE_MAX_JOURNAL_COLLECTEURS_S = 120
 TAILLE_MAX_LECTURE_JOURNAL_COLLECTEURS = 64 * 1024
 
+# Le reçu de restauration peut faire plusieurs dizaines de mégaoctets. L'ETA le
+# relit périodiquement, mais il ne doit pas reparcourir ce JSON tant que le fichier
+# est inchangé. Seuls les champs consommés ci-dessous sont gardés en mémoire.
+_RESTORE_REPORT_CACHE: tuple[str, tuple[int, ...], dict] | None = None
+
 
 def lire_suivi_collecteurs(
     racine: Path,
@@ -245,13 +250,16 @@ def _lignes_suivi_collecteurs(suivi: dict | None) -> list[str]:
             isinstance(row, dict) and row.get("status") == "FRESH"
             for row in heartbeats.values()
         )
-        ligne_flux = f"| FLUX DONNÉES : {frais}/{len(heartbeats)} signaux récents"
+        ligne_flux = (
+            f"| ÉTATS COLLECTEURS : {frais}/{len(heartbeats)} actualisés "
+            "(cela ne garantit pas l'arrivée de nouvelles données)"
+        )
         details_flux = []
         libelles = {
-            "STALE": "aucun signal depuis",
-            "MISSING": "aucun fichier de signal",
-            "UNREADABLE": "signal illisible",
-            "FUTURE": "horodatage à vérifier",
+            "STALE": "état non actualisé depuis",
+            "MISSING": "fichier d'état absent",
+            "UNREADABLE": "fichier d'état illisible",
+            "FUTURE": "date de l'état à vérifier",
         }
         if isinstance(flux_figes, list):
             for nom in flux_figes:
@@ -259,18 +267,23 @@ def _lignes_suivi_collecteurs(suivi: dict | None) -> list[str]:
                 if not isinstance(nom, str) or not isinstance(row, dict):
                     continue
                 label = {
-                    "bbo-collector": "collecteur BBO",
-                    "native-venues": "collecteur Multi-venues",
-                    "l2-leaders": "Carnets L2",
+                    "bbo-collector": "meilleurs prix achat/vente",
+                    "native-venues": "marchés multi-plateformes",
+                    "l2-leaders": "carnets d'ordres des leaders",
                     "allmids-collector": "Prix Hyperliquid",
-                    "lab-microstructure": "Microstructure labo",
+                    "lab-microstructure": "microstructure du labo",
                     "dydx-live": "dYdX",
                 }.get(nom, nom)
                 detail = libelles.get(str(row.get("status")), "signal non confirmé")
                 age_flux = row.get("age_s")
                 if isinstance(age_flux, (int, float)) and not isinstance(age_flux, bool):
                     if age_flux >= 3600:
-                        detail += f" ({age_flux / 3600:.1f} h)"
+                        heures = int(age_flux // 3600)
+                        minutes = int((age_flux % 3600) // 60)
+                        age_lisible = f"{heures} h"
+                        if minutes:
+                            age_lisible += f" {minutes} min"
+                        detail += f" ({age_lisible})"
                     elif age_flux >= 60:
                         detail += f" ({age_flux / 60:.0f} min)"
                     else:
@@ -669,8 +682,86 @@ def lire_sources_alinasync(racine: Path) -> dict:
         "coffre_genere_ms": None,
     }
 
+    def charger_restore(chemin: Path) -> dict | None:
+        """Charge un résumé lié à l'identité du fichier, sans retenir le gros JSON."""
+        global _RESTORE_REPORT_CACHE
+        try:
+            if chemin.is_symlink() or not chemin.is_file():
+                return None
+            avant = chemin.stat()
+            signature = (
+                int(avant.st_dev),
+                int(getattr(avant, "st_ino", 0)),
+                int(avant.st_size),
+                int(avant.st_mtime_ns),
+                int(avant.st_ctime_ns),
+            )
+            cle = str(chemin.absolute())
+            if (
+                _RESTORE_REPORT_CACHE is not None
+                and _RESTORE_REPORT_CACHE[0] == cle
+                and _RESTORE_REPORT_CACHE[1] == signature
+            ):
+                return _RESTORE_REPORT_CACHE[2]
+
+            charge = json.loads(chemin.read_text(encoding="utf-8"))
+            apres = chemin.stat()
+            signature_apres = (
+                int(apres.st_dev),
+                int(getattr(apres, "st_ino", 0)),
+                int(apres.st_size),
+                int(apres.st_mtime_ns),
+                int(apres.st_ctime_ns),
+            )
+        except (OSError, ValueError, UnicodeDecodeError):
+            return None
+        if signature != signature_apres or not isinstance(charge, dict):
+            return None
+
+        classification = charge.get("classification")
+        verification = charge.get("catalog_verification")
+        if not isinstance(classification, dict) or not isinstance(verification, dict):
+            resume = {
+                "status": charge.get("status"),
+                "repository": charge.get("repository"),
+                "selection_scope": charge.get("selection_scope"),
+                "source_inventory_sha256": charge.get("source_inventory_sha256"),
+            }
+        else:
+            resume = {
+                "status": charge.get("status"),
+                "repository": charge.get("repository"),
+                "selection_scope": charge.get("selection_scope"),
+                "source_inventory_sha256": charge.get("source_inventory_sha256"),
+                "classification": {
+                    key: classification.get(key)
+                    for key in (
+                        "expected_usable_shards",
+                        "usable_shards",
+                        "expected_usable_bytes",
+                        "usable_bytes",
+                        "materialization_complete",
+                    )
+                }
+                | {"failures_empty": classification.get("failures") in (None, [])},
+                "catalog_verification": {
+                    key: verification.get(key)
+                    for key in (
+                        "source_index_sha256",
+                        "safe_catalog_shards",
+                        "required_release_assets",
+                        "selection_scope",
+                        "selection_families",
+                    )
+                },
+            }
+        _RESTORE_REPORT_CACHE = (cle, signature, resume)
+        return resume
+
     def charger(nom: str) -> dict | None:
         chemin = dossier / nom
+        if nom == "RESTORE_REPORT.json":
+            return charger_restore(chemin)
         try:
             if chemin.is_symlink() or not chemin.is_file():
                 return None
@@ -728,7 +819,7 @@ def lire_sources_alinasync(racine: Path) -> dict:
                 and type(safe_catalog_shards) is int
                 and safe_catalog_shards == expected_shards
                 and classification.get("materialization_complete") is True
-                and classification.get("failures") in ([], None)
+                and classification.get("failures_empty") is True
             )
             restore_valid = (
                 restore.get("status") == "REPLAY_READY_COMPLETE"
@@ -981,9 +1072,8 @@ def lignes_dashboard_simple(
     etude = progression_etude(besoins)
     clair = {
         "ACTIF": (
-            f"EN DIRECT — {mesure.get('active_sources', 0)}/"
-            f"{mesure.get('source_count', 0)} fichiers de données grossissent "
-            f"(pas {mesure.get('source_count', 0)} collecteurs)"
+            f"EN DIRECT — {mesure.get('active_sources', 0)} fichiers ont grandi sur "
+            f"{mesure.get('source_count', 0)} suivis; ce chiffre n’est pas plafonné à 10"
         ),
         "EN_ATTENTE": "EN ATTENTE — aucune nouvelle écriture mesurée sur ce cycle",
         "SANS_NOUVELLE": "SANS NOUVELLE — aucun fichier observé n'a grossi récemment",
@@ -1098,9 +1188,8 @@ def lignes_resume(
     etat_clair = {
         "ACTIF": (
             f"Croissance mesurée : {mesure.get('active_sources', 0)}/"
-            f"{mesure.get('source_count', 0)} fichiers entre les deux relevés; "
+            f"{mesure.get('source_count', 0)} fichiers locaux suivis ont grandi entre les deux relevés; "
             "ce n’est ni le nombre de collecteurs ni une limite à 10."
-            f"{mesure.get('source_count', 0)} fichiers ont grandi."
         ),
         "EN_ATTENTE": "En attente : pas encore assez de recul pour mesurer le débit.",
         "SANS_NOUVELLE": "Aucun fichier observé n'a grandi récemment ; cela ne prouve pas un arrêt.",
@@ -1129,13 +1218,13 @@ def lignes_resume(
         f"| ETA MINIMUM ACTUEL  : {etude['eta_live']} (si chaque journée reste dense)",
         *besoins_live(besoins),
         *lignes_sources_live(sources),
-        f"| DÉBIT FICHIERS      : {debit} (tous les fichiers) | ETA moteur : {eta_txt}",
+        f"| DÉBIT FICHIERS SUIVIS: {debit} | ETA moteur : {eta_txt}",
         f"| ACTIVITÉ FICHIERS   : {mesure.get('active_sources', 0)}/{mesure.get('source_count', 0)} "
         f"ont grandi depuis le relevé précédent | "
         f"{mesure.get('recent_sources', 0)}/{mesure.get('source_count', 0)} modifiés récemment",
         *_lignes_suivi_collecteurs(suivi_collecteurs),
         *_lignes_detail_suivi_collecteurs(suivi_collecteurs),
-        f"| À SAVOIR            : {mesure.get('source_count', 0)} fichiers observés, pas {mesure.get('source_count', 0)} collecteurs",
+        f"| À SAVOIR            : {mesure.get('source_count', 0)} fichiers locaux surveillés; les archives et shards imbriqués sont hors de ce débit",
         f"| ÉTAT DU RUBAN       : {etat['detail']} | dernière écriture : {etat.get('age_s', '?')} s",
         f"| SONDE DENSITÉ       : âge {sonde_txt} | rapport : {sonde_source} | écran {max(0.5, float(intervalle_s)):.1f} s",
         "+" + "=" * 72 + "+",
@@ -1506,7 +1595,7 @@ def main(argv: list[str] | None = None) -> int:
     sources: dict | None = None
     while True:
         tours += 1
-        if tours == 1 or tours % 12 == 0:              # études et reçus lourds : relus ~1 fois par minute
+        if tours == 1 or tours % 12 == 0:              # intervalle 2 s : études/reçus lourds relus ~24 s
             besoins = besoins_du_labo(racine)
             sources = lire_sources_alinasync(racine)
         denses_acquis, source_denses, age_sonde_h = lire_sonde_denses(racine, args.sonde)

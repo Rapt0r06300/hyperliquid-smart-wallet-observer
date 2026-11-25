@@ -120,7 +120,11 @@ def validate_okx_linear_usdt_swap(item: Mapping[str, object]) -> tuple[bool, str
         return False, "NOT_LINEAR"
     if str(item.get("settleCcy") or "").strip().upper() != "USDT":
         return False, "SETTLEMENT_CURRENCY_MISMATCH"
-    if str(item.get("quoteCcy") or "").strip().upper() != "USDT":
+    # OKX may omit quoteCcy for live USDT swaps. The exact instId suffix and
+    # settleCcy have already been checked above, so an absent value is
+    # acceptable; an explicit conflicting quote currency is still rejected.
+    quote_currency = str(item.get("quoteCcy") or "").strip().upper()
+    if quote_currency and quote_currency != "USDT":
         return False, "QUOTE_CURRENCY_MISMATCH"
     base = inst_id.split("-", 1)[0]
     if str(item.get("ctValCcy") or "").strip().upper() != base:
@@ -142,9 +146,12 @@ def validate_okx_linear_usdt_swap(item: Mapping[str, object]) -> tuple[bool, str
     if minimum < lot or not math.isclose(lots, round(lots), rel_tol=1e-9, abs_tol=1e-9):
         return False, "MIN_SIZE_NOT_ALIGNED_TO_LOT"
     for field in ("listTime", "expTime"):
-        if field in item and item.get(field) not in (None, ""):
-            if validate_okx_timestamp_ms(item.get(field))[0] is False:
-                return False, f"INVALID_{field.upper()}"
+        if (
+            field in item
+            and item.get(field) not in (None, "")
+            and validate_okx_timestamp_ms(item.get(field))[0] is False
+        ):
+            return False, f"INVALID_{field.upper()}"
     return True, "OK"
 
 

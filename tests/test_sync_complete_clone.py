@@ -368,6 +368,7 @@ def test_unpack_contract_distinguishes_seal_from_physical_jsonl():
 
     seal_only = module._unpack_report_contract({
         "status": "SAFE_SEAL_CERTIFICATION_COMPLETE",
+        "mode": "SEAL_ONLY",
         "physical_jsonl_available": False,
         "streamable_gzip_available": True,
         "replay_read_mode": "GZIP_STREAM",
@@ -380,6 +381,7 @@ def test_unpack_contract_distinguishes_seal_from_physical_jsonl():
 
     full = module._unpack_report_contract({
         "status": "SAFE_UNPACK_COMPLETE",
+        "mode": "FULL_JSONL",
         "physical_jsonl_available": True,
         "streamable_gzip_available": True,
         "replay_read_mode": "JSONL",
@@ -405,12 +407,14 @@ def test_unpack_contract_rejects_in_progress_report():
     [
         {
             "status": "SAFE_SEAL_CERTIFICATION_COMPLETE",
+            "mode": "SEAL_ONLY",
             "physical_jsonl_available": True,
             "streamable_gzip_available": True,
             "replay_read_mode": "GZIP_STREAM",
         },
         {
             "status": "SAFE_UNPACK_COMPLETE",
+            "mode": "FULL_JSONL",
             "physical_jsonl_available": True,
             "streamable_gzip_available": True,
             "replay_read_mode": "GZIP_STREAM",
@@ -419,7 +423,40 @@ def test_unpack_contract_rejects_in_progress_report():
 )
 def test_unpack_contract_rejects_inconsistent_certification(report):
     module = _module()
-    assert module._unpack_report_contract(report)["unpack_certified"] is False
+    contract = module._unpack_report_contract(report)
+    assert contract["unpack_certified"] is False
+    assert contract["unpack_complete"] is False
+
+
+@pytest.mark.parametrize(
+    "report",
+    [
+        {
+            "status": "SAFE_UNPACK_COMPLETE",
+            "physical_jsonl_available": True,
+            "streamable_gzip_available": True,
+            "replay_read_mode": "JSONL",
+        },
+        {
+            "status": "SAFE_UNPACK_COMPLETE",
+            "mode": "SEAL_ONLY",
+            "physical_jsonl_available": True,
+            "streamable_gzip_available": True,
+            "replay_read_mode": "JSONL",
+        },
+        {
+            "status": "SAFE_SEAL_CERTIFICATION_COMPLETE",
+            "mode": "FULL_JSONL",
+            "physical_jsonl_available": False,
+            "streamable_gzip_available": True,
+            "replay_read_mode": "GZIP_STREAM",
+        },
+    ],
+)
+def test_unpack_contract_requires_explicit_matching_mode(report):
+    contract = _module()._unpack_report_contract(report)
+    assert contract["unpack_certified"] is False
+    assert contract["unpack_complete"] is False
 
 
 def test_complete_status_is_rejected_without_exact_safe_materialization(tmp_path):

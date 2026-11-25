@@ -7,7 +7,6 @@ observed records become Copy-Vault inputs. No network, trading or collectors.
 from __future__ import annotations
 
 import argparse
-from collections import Counter
 import gzip
 import hashlib
 import json
@@ -16,10 +15,11 @@ import os
 import re
 import shutil
 import sqlite3
-from contextlib import closing
 import subprocess
 import sys
 import tempfile
+from collections import Counter
+from contextlib import closing
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -376,9 +376,14 @@ def _safe_registry_rows(
     binding = restore.get("catalog_verification")
     classification = restore.get("classification")
     catalog = binding.get("source_index_sha256") if isinstance(binding, dict) else None
-    unpack_mode = str(unpack.get("mode") or "FULL_JSONL")
+    unpack_mode = unpack.get("mode")
     if unpack_mode == "FULL_JSONL":
-        unpack_contract_ok = unpack.get("status") == "SAFE_UNPACK_COMPLETE"
+        unpack_contract_ok = (
+            unpack.get("status") == "SAFE_UNPACK_COMPLETE"
+            and unpack.get("physical_jsonl_available") is True
+            and unpack.get("streamable_gzip_available") is True
+            and unpack.get("replay_read_mode") == "JSONL"
+        )
         source_read_mode = "JSONL"
     elif unpack_mode == "SEAL_ONLY":
         unpack_contract_ok = (
@@ -478,13 +483,12 @@ def _safe_registry_rows(
     # 23/11/2026 : le deballage se limite aux familles ACTIVES (copy_vault_*) ; le registre complet
     # vient d'etre controle ci-dessus, on ne lit ensuite que ce qui a ete deballe. Avant, le pont
     # parcourait les 1 792 577 shards (deux empreintes chacun) pour en ecarter 99 %.
-    if active_paths is not None:
-        if (
-            len(raw) != len(active_paths)
-            or type(unpack.get("unpacked_shards")) is not int
-            or unpack.get("unpacked_shards") != len(raw)
-        ):
-            raise SafeBridgeError("active-family SAFE shards and their extraction disagree")
+    if active_paths is not None and (
+        len(raw) != len(active_paths)
+        or type(unpack.get("unpacked_shards")) is not int
+        or unpack.get("unpacked_shards") != len(raw)
+    ):
+        raise SafeBridgeError("active-family SAFE shards and their extraction disagree")
     return catalog, [
         (str(row[0]), int(row[1]), str(row[2]), tuple(int(v) for v in row[3:]))
         for row in raw
@@ -810,7 +814,6 @@ def build_safe_copy_workspace(
             "snapshot_fills_train_only": True,
             "snapshot_fills_excluded_from_forward": True,
             "economic_proof": False,
-            "source_read_mode": source_read_mode,
         }
         provenance_path = proof_dir / "SELECTION_PROVENANCE.json"
         provenance_path.write_text(

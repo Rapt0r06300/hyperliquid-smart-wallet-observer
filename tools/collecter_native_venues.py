@@ -9,6 +9,8 @@ Hyperliquid + Binance restent propriétaires de `tools/collecter_bbo.py`.
 
 Sécurité : endpoints publics uniquement, aucune clé, aucune signature, aucun ordre.
 """
+# The repository paths must be bootstrapped before importing its local packages.
+# ruff: noqa: E402
 from __future__ import annotations
 
 import argparse
@@ -17,25 +19,28 @@ import json
 import os
 import sys
 import time
+from collections.abc import Callable, Mapping
+from copy import copy
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any
 
 RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
 sys.path.insert(0, str(RACINE / "tools"))
 
-from hl_observer.collection.native_venue_coordinator import NativeVenueCoordinator
-from hl_observer.collection.native_venue_market import NativeMarketSnapshot
+import heartbeat_collecteur as HB
+
+from hl_observer.collection.bounded_tick_queue import BoundedTickEnvelopeQueue
 from hl_observer.collection.native_funding_history import (
     fetch_bybit_funding_settlements,
     fetch_okx_funding_settlements,
 )
+from hl_observer.collection.native_venue_coordinator import NativeVenueCoordinator
+from hl_observer.collection.native_venue_market import NativeMarketSnapshot
 from hl_observer.collection.partitioned_tick_dataset import PartitionedTickDatasetWriter
-from hl_observer.collection.bounded_tick_queue import BoundedTickEnvelopeQueue
-from hl_observer.collection.tick_dataset import TickEnvelope
+from hl_observer.collection.tick_dataset import TickEnvelope, _raw_text
 from hl_observer.datasets.v2_pipeline import build_bundle
 from hl_observer.realtime.feed_quality import FeedEventKind
-import heartbeat_collecteur as HB
 
 HEARTBEAT = Path("runtime") / "data" / "native_venues_heartbeat.json"
 TICK_DATASET_DIR = Path("runtime") / "data" / "market_ticks"
@@ -55,6 +60,22 @@ def _atomic_json(path: Path, payload: Mapping[str, Any]) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(dict(payload), ensure_ascii=False, indent=2), encoding="utf-8")
     os.replace(tmp, path)
+
+
+def _prepare_queue_envelope(envelope: TickEnvelope) -> TickEnvelope:
+    """Compact JSON payloads once before queue sizing and durable writing.
+
+    TickDatasetWriter stores ``raw_payload`` as the canonical JSON text. Keeping
+    the original mapping in this bounded queue would serialize it once for the
+    byte estimate and again when writing. A shallow envelope copy preserves the
+    caller's object while making the writer consume the already canonical text.
+    """
+    raw_payload = envelope.raw_payload
+    if isinstance(raw_payload, (str, bytes)):
+        return envelope
+    compacted = copy(envelope)
+    compacted.raw_payload = _raw_text(raw_payload)
+    return compacted
 
 
 def snapshot_summary(
@@ -210,6 +231,8 @@ async def _run(
     dropped = 0
     dropped_by_venue: dict[str, int] = {}
     dropped_by_channel: dict[str, dict[str, int]] = {}
+    invalid_receive_timestamp_count = 0
+    invalid_receive_timestamp_by_venue: dict[str, int] = {}
     oversized_dropped = 0
     written = 0
     enabled_venues = tuple(venue for venue in VENUES if venue in set(enabled_venues))
@@ -238,7 +261,21 @@ async def _run(
     marker0 = (root / MARQUEUR).read_text(encoding="utf-8").strip() if (root / MARQUEUR).exists() else ""
 
     def enqueue(envelope: TickEnvelope) -> bool:
-        nonlocal dropped, oversized_dropped
+        nonlocal dropped, oversized_dropped, invalid_receive_timestamp_count
+
+        source_id = str(getattr(envelope, "source_id", "") or "")
+        venue = source_id.split("_", 1)[0].lower() or "unknown"
+        channel = str(getattr(envelope, "channel", "") or "unknown")
+        try:
+            received_ts_ms = int(envelope.received_ts_ms)
+        except (AttributeError, TypeError, ValueError, OverflowError):
+            received_ts_ms = 0
+        if received_ts_ms <= 0:
+            invalid_receive_timestamp_count += 1
+            invalid_receive_timestamp_by_venue[venue] = (
+                invalid_receive_timestamp_by_venue.get(venue, 0) + 1
+            )
+            return False
 
         def mark_dropped(_envelope: TickEnvelope) -> None:
             nonlocal dropped
@@ -251,18 +288,15 @@ async def _run(
             venue_channels = dropped_by_channel.setdefault(venue, {})
             venue_channels[channel] = venue_channels.get(channel, 0) + 1
 
-        accepted = queue.append(envelope, on_drop=mark_dropped)
+        accepted = queue.append(_prepare_queue_envelope(envelope), on_drop=mark_dropped)
         if not accepted:
             oversized_dropped += 1
             return False
-        venue = envelope.source_id.split("_", 1)[0].lower()
-        if venue in channel_counts:
-            channel = str(envelope.channel or "")
-            if channel:
-                venue_counts = channel_counts[venue]
-                venue_counts[channel] = int(venue_counts.get(channel, 0)) + 1
+        if venue in channel_counts and channel != "unknown":
+            venue_counts = channel_counts[venue]
+            venue_counts[channel] = int(venue_counts.get(channel, 0)) + 1
         if venue in last_event_ms:
-            last_event_ms[venue] = int(envelope.received_ts_ms)
+            last_event_ms[venue] = max(last_event_ms[venue], received_ts_ms)
             if envelope.exchange_ts_ms is not None:
                 last_exchange_ts[venue] = max(
                     int(last_exchange_ts[venue]),
@@ -430,8 +464,7 @@ async def _run(
                 continue
             universe_changes += len(changed)
             print(
-                "[native-venues] univers change: %s -> redemarrage cible"
-                % ",".join(changed),
+                f"[native-venues] univers change: {','.join(changed)} -> redemarrage cible",
                 flush=True,
             )
             for venue in changed:
@@ -539,6 +572,10 @@ async def _run(
                             venue: dict(sorted(channels.items()))
                             for venue, channels in sorted(dropped_by_channel.items())
                         },
+                        "invalid_receive_timestamp_count": invalid_receive_timestamp_count,
+                        "invalid_receive_timestamp_by_venue": dict(
+                            sorted(invalid_receive_timestamp_by_venue.items())
+                        ),
                         "queue_oversized_drops": oversized_dropped,
                         "writer_batch_pending": write_batch_task is not None,
                         "writer_batch_records": write_batch_records,
@@ -661,6 +698,10 @@ async def _run(
                 venue: dict(sorted(channels.items()))
                 for venue, channels in sorted(dropped_by_channel.items())
             },
+            "invalid_receive_timestamp_count": invalid_receive_timestamp_count,
+            "invalid_receive_timestamp_by_venue": dict(
+                sorted(invalid_receive_timestamp_by_venue.items())
+            ),
             "queue_oversized_drops": oversized_dropped,
             "writer_batch_pending": False,
             "writer_batch_records": 0,
@@ -684,7 +725,6 @@ async def _run(
             "coordinator_health": final_health,
             "dataset": writer.stats(include_partitions=False),
             "dataset_v2_bundle": bundle,
-            "collection_run_id": collection_run_id,
             "read_only": True,
             "real_execution": False,
         }

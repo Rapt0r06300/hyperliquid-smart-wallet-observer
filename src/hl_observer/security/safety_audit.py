@@ -57,6 +57,12 @@ EXCLUDED_RELATIVE_PREFIXES = {
     # le manifeste portable. Ses sources de dependances ne sont pas notre code.
     ("tools", "python"),
 }
+OPERATIONAL_RELATIVE_ROOTS = frozenset({
+    "src",
+    "hyper_smart_observer",
+    "tools",
+    "scripts",
+})
 # These files intentionally mention prohibited endpoints/methods while testing
 # or enforcing their refusal. Keep exceptions path-scoped: a same-named
 # operational file elsewhere must still be checked. Every file remains in the
@@ -146,9 +152,13 @@ def _contains_python_exchange_endpoint(text: str) -> bool:
         return None
 
     for node in ast.walk(tree):
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            if id(node) not in docstring_ids and _is_exchange_path(node.value):
-                return True
+        if (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and id(node) not in docstring_ids
+            and _is_exchange_path(node.value)
+        ):
+            return True
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
             combined = constant_string(node)
             if combined is not None and _is_exchange_path(combined):
@@ -182,15 +192,6 @@ def _contains_exchange_endpoint(text: str, suffix: str = ".py") -> bool:
     return False
 
 
-def _is_excluded_project_path(root: Path, path: Path) -> bool:
-    try:
-        rel = path.resolve().relative_to(root.resolve())
-    except ValueError:
-        return False
-    rel_parts = tuple(rel.parts)
-    return any(rel_parts[: len(prefix)] == prefix for prefix in EXCLUDED_RELATIVE_PREFIXES)
-
-
 def _iter_scannable_files(root: Path) -> list[Path]:
     """Parcours ELAGUE : on ne DESCEND jamais dans un dossier exclu.
 
@@ -199,24 +200,7 @@ def _iter_scannable_files(root: Path) -> list[Path]:
     Resultat : ~20 s juste pour lister 1826 fichiers -> `safety-audit` et `autoscan` figeaient.
     Le jeu de fichiers retourne est IDENTIQUE ; seul le parcours est elague.
     """
-    root = Path(root)
-    root_resolved = root.resolve()
-    files: list[Path] = []
-    for dirpath, dirnames, filenames in os.walk(root, topdown=True):
-        current = Path(dirpath)
-        # ELAGAGE : on retire les sous-dossiers exclus AVANT d'y descendre.
-        dirnames[:] = [
-            d
-            for d in dirnames
-            if d not in EXCLUDED_DIRS
-            and not d.startswith(EXCLUDED_DIR_PREFIXES)
-            and not _is_excluded_project_path(root_resolved, current / d)
-        ]
-        for name in filenames:
-            path = current / name
-            if path.suffix.lower() in TEXT_SUFFIXES or path.name == ".env.example":
-                files.append(path)
-    return files
+    return _enumerate_safety_files(root)[0]
 
 
 def _is_git_repo(root: Path) -> bool:
@@ -230,53 +214,171 @@ def _iter_operational_files(root: Path) -> list[Path]:
     them leaves a route from the operator/CI surface outside the static safety
     scan even when the imported Python modules are covered.
     """
+    return _enumerate_safety_files(root)[1]
+
+
+def _enumerate_safety_files(root: str | Path) -> tuple[list[Path], list[Path]]:
+    """Enumerate scannable and operational files in one pruned tree walk.
+
+    The former implementation traversed overlapping source roots twice. Keep
+    both public internal views identical while sharing discovery in the full
+    audit, and use lexical relative paths because ``os.walk`` never follows
+    directory symlinks by default.
+    """
     root = Path(root).resolve()
-    files: list[Path] = []
-    for path in root.iterdir():
-        if path.is_file() and path.suffix.lower() in OPERATIONAL_SUFFIXES:
-            files.append(path)
+    scannable: list[Path] = []
+    operational: list[Path] = []
 
-    for relative_root in (
-        "src",
-        "hyper_smart_observer",
-        "tools",
-        "scripts",
-        ".github/workflows",
-    ):
-        base = root / relative_root
-        if not base.is_dir():
+    def excluded_child(relative_dir: tuple[str, ...], name: str) -> bool:
+        relative_child = relative_dir + (name,)
+        return (
+            name in EXCLUDED_DIRS
+            or name.startswith(EXCLUDED_DIR_PREFIXES)
+            or any(
+                relative_child[: len(prefix)] == prefix
+                for prefix in EXCLUDED_RELATIVE_PREFIXES
+            )
+        )
+
+    for dirpath, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
+        current = Path(dirpath)
+        try:
+            relative_dir = current.relative_to(root).parts
+        except ValueError:
             continue
-        for dirpath, dirnames, filenames in os.walk(base, topdown=True):
-            current = Path(dirpath)
-            dirnames[:] = [
-                name
-                for name in dirnames
-                if name not in EXCLUDED_DIRS
-                and not name.startswith(EXCLUDED_DIR_PREFIXES)
-                and not _is_excluded_project_path(root, current / name)
-            ]
-            for name in sorted(filenames):
-                path = current / name
-                if path.suffix.lower() in OPERATIONAL_SUFFIXES:
-                    files.append(path)
-    return sorted(files, key=lambda path: path.as_posix().casefold())
+        dirnames[:] = [
+            name for name in dirnames
+            if not excluded_child(relative_dir, name)
+        ]
+        for name in filenames:
+            path = current / name
+            suffix = path.suffix.lower()
+            if suffix in TEXT_SUFFIXES or name == ".env.example":
+                scannable.append(path)
+            if suffix not in OPERATIONAL_SUFFIXES:
+                continue
+            in_runtime_root = (
+                not relative_dir
+                or relative_dir[0] in OPERATIONAL_RELATIVE_ROOTS
+                or relative_dir[:2] == (".github", "workflows")
+            )
+            if in_runtime_root:
+                operational.append(path)
+
+    operational.sort(key=lambda path: path.as_posix().casefold())
+    return scannable, operational
 
 
-def _active_self_hosted_workflows(root: Path) -> list[Path]:
-    """Return workflows that can actually select a self-hosted runner."""
+def _workflow_runner_violations(root: Path) -> list[Path]:
+    """Return workflows whose runners are self-hosted or cannot be proven hosted.
+
+    GitHub expressions make a text-only ``runs-on`` check incomplete: a matrix
+    can inject ``self-hosted`` or an operator input can choose an arbitrary
+    runner. Parse the workflow data and allow only literal runner labels or a
+    simple matrix axis whose complete values are statically visible.
+    """
     workflows = root / ".github" / "workflows"
     if not workflows.is_dir():
         return []
+    try:
+        import yaml
+    except ImportError:
+        # The safety result must fail closed if the declared YAML parser is
+        # missing; silently falling back to a weaker text scan is unsafe.
+        return sorted((*workflows.glob("*.yml"), *workflows.glob("*.yaml")))
+
     findings: list[Path] = []
     for path in sorted((*workflows.glob("*.yml"), *workflows.glob("*.yaml"))):
         try:
             text = path.read_text(encoding="utf-8", errors="ignore")
-        except OSError:
+            document = yaml.safe_load(text) or {}
+        except (OSError, yaml.YAMLError):
             findings.append(path)
             continue
-        if re.search(r"(?mi)^\s*runs-on\s*:\s*.*\bself-hosted\b", text):
+        jobs = document.get("jobs") if isinstance(document, dict) else None
+        if not isinstance(jobs, dict):
+            # A non-workflow YAML file in the workflows directory cannot be
+            # certified as safely selecting a hosted runner.
             findings.append(path)
+            continue
+
+        for job in jobs.values():
+            if not isinstance(job, dict):
+                findings.append(path)
+                break
+            runner = job.get("runs-on")
+            if runner is None:
+                reusable = job.get("uses")
+                if isinstance(reusable, str) and reusable.startswith(
+                    "./.github/workflows/"
+                ):
+                    reusable_path = (root / reusable[2:]).resolve()
+                    try:
+                        reusable_path.relative_to(workflows.resolve())
+                    except ValueError:
+                        findings.append(path)
+                        break
+                    if (
+                        reusable_path.parent == workflows.resolve()
+                        and reusable_path.suffix.lower() in {".yml", ".yaml"}
+                        and reusable_path.is_file()
+                    ):
+                        # The referenced local workflow is itself included in
+                        # this directory scan and its jobs are checked below.
+                        continue
+                findings.append(path)
+                break
+            strategy = job.get("strategy")
+            matrix = strategy.get("matrix") if isinstance(strategy, dict) else None
+            if _runner_selection_unproven(runner, matrix):
+                findings.append(path)
+                break
     return findings
+
+
+_MATRIX_RUNNER_EXPRESSION = re.compile(
+    r"^\s*\$\{\{\s*matrix\.([A-Za-z_][A-Za-z0-9_-]*)\s*\}\}\s*$"
+)
+
+
+def _runner_selection_unproven(runner: object, matrix: object) -> bool:
+    """Fail closed on self-hosted labels or runner expressions not statically bounded."""
+    if isinstance(runner, list):
+        return not runner or any(_runner_selection_unproven(value, matrix) for value in runner)
+    if not isinstance(runner, str) or not runner.strip():
+        # The mapping form (runner groups/labels) is intentionally not accepted
+        # until its group can be proven to contain only GitHub-hosted runners.
+        return True
+    if re.search(r"\bself-hosted\b", runner, re.IGNORECASE):
+        return True
+    if "${{" not in runner:
+        return False
+
+    match = _MATRIX_RUNNER_EXPRESSION.fullmatch(runner)
+    if match is None or not isinstance(matrix, dict):
+        return True
+    axis = match.group(1)
+    raw_values = matrix.get(axis)
+    if not isinstance(raw_values, list) or not raw_values:
+        return True
+    values = list(raw_values)
+    include = matrix.get("include", [])
+    if not isinstance(include, list):
+        return True
+    for item in include:
+        if not isinstance(item, dict):
+            return True
+        if axis in item:
+            values.append(item[axis])
+    # Any dynamic/non-string matrix member is unprovable. Exclusion lists only
+    # remove combinations, so considering the full declared axis is conservative.
+    return any(
+        not isinstance(value, str)
+        or not value.strip()
+        or "${{" in value
+        or re.search(r"\bself-hosted\b", value, re.IGNORECASE) is not None
+        for value in values
+    )
 
 
 def _git_tracks_env(root: Path) -> bool:
@@ -297,7 +399,7 @@ def run_safety_audit(root: str | Path = ".") -> SafetyAuditResult:
     checks: dict[str, bool] = {}
     findings: list[str] = []
 
-    source_files = list(_iter_operational_files(project_root))
+    scannable_files, source_files = _enumerate_safety_files(project_root)
     source_file_set = set(source_files)
     source_files_seen: set[Path] = set()
     source_read_errors: list[Path] = []
@@ -305,12 +407,11 @@ def run_safety_audit(root: str | Path = ".") -> SafetyAuditResult:
     no_forbidden_method = True
     no_exchange_endpoint = True
     forbidden_method = "place" + "_mainnet_order"
-    forbidden_exchange_path = "/" + "exchange"
 
     # Read operational files once: use the same bytes for secret detection and
     # forbidden execution-path checks, without retaining a concatenated copy of
     # thousands of files in memory.
-    for path in _iter_scannable_files(project_root):
+    for path in scannable_files:
         if path.name == ".env.example":
             continue
         if path in source_file_set:
@@ -358,12 +459,14 @@ def run_safety_audit(root: str | Path = ".") -> SafetyAuditResult:
 
     checks["no_forbidden_mainnet_order_method"] = source_scan_complete and no_forbidden_method
     checks["no_exchange_endpoint_in_runtime_source"] = source_scan_complete and no_exchange_endpoint
-    self_hosted = _active_self_hosted_workflows(project_root)
-    checks["no_self_hosted_workflows"] = not self_hosted
-    if self_hosted:
+    unsafe_runner_workflows = _workflow_runner_violations(project_root)
+    checks["no_self_hosted_workflows"] = not unsafe_runner_workflows
+    if unsafe_runner_workflows:
         findings.append(
-            "active workflow selects self-hosted runner: "
-            + ", ".join(str(path.relative_to(project_root)) for path in self_hosted)
+            "workflow runner is self-hosted or cannot be proven GitHub-hosted: "
+            + ", ".join(
+                str(path.relative_to(project_root)) for path in unsafe_runner_workflows
+            )
         )
 
     checks["live_executor_disabled_exists"] = (

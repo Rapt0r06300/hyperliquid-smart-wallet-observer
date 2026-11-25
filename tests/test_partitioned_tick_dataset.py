@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 from hl_observer.collection.partitioned_tick_dataset import PartitionedTickDatasetWriter
-from hl_observer.collection.tick_dataset import TickEnvelope
+from hl_observer.collection.tick_dataset import TickDatasetWriter, TickEnvelope
 from hl_observer.datasets.v2_export import build_manifest_from_tick_shard
 
 
@@ -42,6 +42,41 @@ def test_partitioned_writer_never_mixes_symbol_or_channel(tmp_path) -> None:
     for path in paths:
         rows = [json.loads(line) for line in path.read_text().splitlines()]
         assert len({(row["source_id"], row["channel"], row["instrument"]) for row in rows}) == 1
+
+
+def test_count_only_batch_writes_the_same_bytes_without_returning_records(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr("hl_observer.collection.tick_dataset.time.time", lambda: 1_700_000_000)
+    batch = [
+        envelope("bybit_public_ws", "trades", "BTCUSDT", 1000 + index)
+        for index in range(8)
+    ] + [envelope("okx_public_ws", "l2Book", "ETH-USDT-SWAP", 2000 + index) for index in range(5)]
+
+    count_writer = PartitionedTickDatasetWriter(tmp_path / "count", rotate_bytes=10_000_000)
+    records_writer = PartitionedTickDatasetWriter(tmp_path / "records", rotate_bytes=10_000_000)
+
+    with monkeypatch.context() as patch:
+        def fail_if_receipt_records_are_materialized(*_args, **_kwargs):
+            raise AssertionError("count-only write must not materialize receipt records")
+
+        patch.setattr(
+            TickDatasetWriter,
+            "append_batch_records",
+            fail_if_receipt_records_are_materialized,
+        )
+        assert count_writer.append_batch(batch) == len(batch)
+    assert len(records_writer.append_batch_records(batch)) == len(batch)
+
+    count_paths = {
+        path.relative_to(tmp_path / "count"): path.read_bytes()
+        for path in (tmp_path / "count").rglob("ticks.current.jsonl")
+    }
+    records_paths = {
+        path.relative_to(tmp_path / "records"): path.read_bytes()
+        for path in (tmp_path / "records").rglob("ticks.current.jsonl")
+    }
+    assert count_paths == records_paths
 
 
 def test_partitioned_writer_compact_stats_keep_exact_totals(tmp_path) -> None:
@@ -163,9 +198,10 @@ def test_mix_auto_rotate_and_batch_reconnect_preserves_every_record(tmp_path):
             restored.extend(json.loads(line) for line in reader)
     assert len(restored) == len(events)
     assert [row["exchange_ts_ms"] for row in restored] == list(range(1000, 1011))
-    assert all(len({row["connection_id"] for row in
-                    [json.loads(x) for x in gzip.open(file, "rt", encoding="utf-8")]}) == 1
-               for file in files)
+    for file in files:
+        with gzip.open(file, "rt", encoding="utf-8") as reader:
+            rows = [json.loads(line) for line in reader]
+        assert len({row["connection_id"] for row in rows}) == 1
 
 
 

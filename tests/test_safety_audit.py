@@ -4,6 +4,7 @@ from hl_observer.security.fake_data_scanner import scan_for_fake_data
 from hl_observer.security.safety_audit import (
     _contains_exchange_endpoint,
     _iter_scannable_files,
+    _workflow_runner_violations,
     run_safety_audit,
 )
 from hl_observer.security.secrets import contains_secret_pattern, scan_file_for_secret
@@ -191,6 +192,94 @@ def test_safety_audit_covers_legacy_tools_scripts_and_workflows(tmp_path, monkey
     assert result.checks["no_forbidden_mainnet_order_method"] is False
     assert result.checks["no_exchange_endpoint_in_runtime_source"] is False
     assert result.checks["no_self_hosted_workflows"] is False
+
+
+def test_self_hosted_runner_hidden_in_static_matrix_is_rejected(tmp_path):
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    workflow = workflows / "matrix-runner.yml"
+    workflow.write_text(
+        "jobs:\n"
+        "  test:\n"
+        "    strategy:\n"
+        "      matrix:\n"
+        "        runner: [ubuntu-latest, self-hosted]\n"
+        "    runs-on: ${{ matrix.runner }}\n",
+        encoding="utf-8",
+    )
+
+    assert _workflow_runner_violations(tmp_path) == [workflow]
+
+
+def test_unprovable_dynamic_runner_expression_is_rejected(tmp_path):
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    workflow = workflows / "operator-runner.yml"
+    workflow.write_text(
+        "jobs:\n"
+        "  test:\n"
+        "    runs-on: ${{ inputs.runner }}\n",
+        encoding="utf-8",
+    )
+
+    assert _workflow_runner_violations(tmp_path) == [workflow]
+
+
+def test_explicit_github_hosted_matrix_runner_is_allowed(tmp_path):
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    workflow = workflows / "hosted-matrix.yml"
+    workflow.write_text(
+        "jobs:\n"
+        "  test:\n"
+        "    strategy:\n"
+        "      matrix:\n"
+        "        os: [ubuntu-latest, windows-latest]\n"
+        "    runs-on: ${{ matrix.os }}\n",
+        encoding="utf-8",
+    )
+
+    assert _workflow_runner_violations(tmp_path) == []
+
+
+def test_local_reusable_workflow_inherits_runner_audit(tmp_path):
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    caller = workflows / "caller.yml"
+    caller.write_text(
+        "jobs:\n  call:\n    uses: ./.github/workflows/reusable.yml\n",
+        encoding="utf-8",
+    )
+    reusable = workflows / "reusable.yml"
+    reusable.write_text(
+        "jobs:\n  work:\n    runs-on: ubuntu-latest\n",
+        encoding="utf-8",
+    )
+
+    assert _workflow_runner_violations(tmp_path) == []
+
+
+def test_external_reusable_workflow_runner_is_unverifiable(tmp_path):
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    workflow = workflows / "external.yml"
+    workflow.write_text(
+        "jobs:\n"
+        "  call:\n"
+        "    uses: another-org/another-repo/.github/workflows/ci.yml@v1\n",
+        encoding="utf-8",
+    )
+
+    assert _workflow_runner_violations(tmp_path) == [workflow]
+
+
+def test_malformed_workflow_yaml_fails_closed(tmp_path):
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    workflow = workflows / "malformed.yml"
+    workflow.write_text("jobs: [unterminated\n", encoding="utf-8")
+
+    assert _workflow_runner_violations(tmp_path) == [workflow]
 
 
 def test_safety_audit_includes_root_launchers_and_workflow_commands(tmp_path, monkeypatch):

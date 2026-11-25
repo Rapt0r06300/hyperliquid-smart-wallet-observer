@@ -13,10 +13,10 @@ import math
 import os
 import re
 import sqlite3
-from contextlib import closing
 import subprocess
 import sys
 from collections.abc import Mapping, Sequence
+from contextlib import closing
 from pathlib import Path
 
 REPOSITORY = "Rapt0r06300/hyperliquid-smart-wallet-observer"
@@ -37,13 +37,21 @@ TRUSTED_ORIGINS = {
 try:  # exécution directe : tools/ est sur sys.path[0]
     from alina_git_code_sync import (  # type: ignore
         PROTECTED_DIRS as _PROTECTED_DIRS,
+    )
+    from alina_git_code_sync import (
         UNSCANNABLE_PROTECTED_ROOTS as _UNSCANNABLE_PROTECTED_ROOTS,
+    )
+    from alina_git_code_sync import (
         _protected as _is_protected_path,
     )
 except ImportError:  # importé comme paquet (tests : tools.sync_complete_clone)
     from tools.alina_git_code_sync import (  # type: ignore
         PROTECTED_DIRS as _PROTECTED_DIRS,
+    )
+    from tools.alina_git_code_sync import (
         UNSCANNABLE_PROTECTED_ROOTS as _UNSCANNABLE_PROTECTED_ROOTS,
+    )
+    from tools.alina_git_code_sync import (
         _protected as _is_protected_path,
     )
 
@@ -155,8 +163,7 @@ def _modified_code_paths(root: Path) -> list[str]:
             done = subprocess.run(
                 ["git", "-C", str(root), *args],
                 check=False,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                capture_output=True,
                 text=True,
             )
         except OSError as exc:
@@ -363,7 +370,8 @@ def sync_clone_content_range_receipt(*, expected_start: object, observed_start: 
 
 
 def sync_clone_etag_receipt(*, previous_etag: object, current_etag: object) -> dict[str, object]:
-    previous = str(previous_etag or "").strip(); current = str(current_etag or "").strip()
+    previous = str(previous_etag or "").strip()
+    current = str(current_etag or "").strip()
     changed = bool(previous and current and previous != current)
     return _sync_base("PROVEN" if changed else "REJECTED", verdict="SYNC_CLONE_ETAG_CHANGE_INVALIDATES_CACHE" if changed else "SYNC_CLONE_ETAG_CHANGE_UNPROVEN", cache_invalidated=changed, fail_closed=not changed)
 
@@ -477,11 +485,11 @@ def calculate_catalog_budget(
     These are manifest bytes, NOT downloaded/verified bytes or economic proof.
     """
     try:
-        from tools.restore_alina import _load_replay_ready_plan
         from tools.partitioned_data_index import select_index_rows
+        from tools.restore_alina import _load_replay_ready_plan
     except ModuleNotFoundError:
-        from restore_alina import _load_replay_ready_plan
         from partitioned_data_index import select_index_rows
+        from restore_alina import _load_replay_ready_plan
 
     # This existing canonical verifier rejects stale metrics, malformed SAFE
     # asset identities, and incomplete catalog partitions. The budget report
@@ -821,15 +829,20 @@ def _unpack_report_contract(unpack_report: object) -> dict[str, object]:
             "unpack_read_mode": None,
         }
     status = unpack_report.get("status")
+    mode = unpack_report.get("mode")
     physical = unpack_report.get("physical_jsonl_available") is True
     streamable = unpack_report.get("streamable_gzip_available") is True
     read_mode = unpack_report.get("replay_read_mode")
-    certified = (
+    full_jsonl_complete = (
         status == "SAFE_UNPACK_COMPLETE"
+        and mode == "FULL_JSONL"
         and physical
+        and streamable
         and read_mode == "JSONL"
-    ) or (
+    )
+    certified = full_jsonl_complete or (
         status == "SAFE_SEAL_CERTIFICATION_COMPLETE"
+        and mode == "SEAL_ONLY"
         and not physical
         and streamable
         and read_mode == "GZIP_STREAM"
@@ -837,7 +850,7 @@ def _unpack_report_contract(unpack_report: object) -> dict[str, object]:
     return {
         "unpack_status": status,
         "unpack_certified": certified,
-        "unpack_complete": status == "SAFE_UNPACK_COMPLETE" and physical,
+        "unpack_complete": full_jsonl_complete,
         "unpack_physical_jsonl_available": physical,
         "unpack_streamable_gzip_available": streamable,
         "unpack_read_mode": read_mode,
@@ -924,7 +937,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     effective_download = args.download_safe
     effective_preflight = not (args.download_safe or args.prune_cache_only)
-    if sys.version_info < (3, 10):
+    if sys.version_info < (3, 10):  # noqa: UP036 -- keep a clear CLI error on unsupported host Python.
         print("ALINA_SYNC_FAIL: Python 3.10 or newer is required", file=sys.stderr)
         return 2
     root = Path(__file__).resolve().parents[1]

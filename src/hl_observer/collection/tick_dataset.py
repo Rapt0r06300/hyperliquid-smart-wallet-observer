@@ -224,7 +224,9 @@ class TickDatasetWriter:
         return self.append_batch((envelope,))
 
     def append_batch(self, envelopes: Iterable[TickEnvelope]) -> int:
-        return len(self.append_batch_records(envelopes))
+        result = self._append_batch(envelopes, retain_records=False)
+        assert isinstance(result, int)
+        return result
 
     def append_batch_records(self, envelopes: Iterable[TickEnvelope]) -> list[dict[str, Any]]:
         """Persist a batch and return the exact records that reached disk.
@@ -232,15 +234,26 @@ class TickDatasetWriter:
         Returning the durable records lets the canonical-event stage reference
         the real write timestamp instead of inventing an approximate one.
         """
+        result = self._append_batch(envelopes, retain_records=True)
+        assert isinstance(result, list)
+        return result
+
+    def _append_batch(
+        self,
+        envelopes: Iterable[TickEnvelope],
+        *,
+        retain_records: bool,
+    ) -> list[dict[str, Any]] | int:
         batch = list(envelopes)
         if not batch:
-            return []
+            return [] if retain_records else 0
         written_ts_ms = int(time.time() * 1000)
-        records: list[dict[str, Any]] = []
+        records: list[dict[str, Any]] | None = [] if retain_records else None
         lines: list[str] = []
         for envelope in batch:
             record = envelope.as_record(written_ts_ms=written_ts_ms)
-            records.append(record)
+            if records is not None:
+                records.append(record)
             received_ts = int(record["received_ts_ms"])
             self._first_received_ts_ms = (
                 received_ts
@@ -278,7 +291,7 @@ class TickDatasetWriter:
         elif self._records_since_manifest >= self.flush_every:
             self._write_manifest()
             self._records_since_manifest = 0
-        return records
+        return records if records is not None else count
 
     def rotate(self) -> Path | None:
         if not self.current_path.exists() or self.current_path.stat().st_size == 0:

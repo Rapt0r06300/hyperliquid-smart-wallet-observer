@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import time
-from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -14,12 +14,12 @@ from hl_observer.ops.collecteur_registry import (
     COLLECTEURS_HARVEST,
     REGISTRE,
 )
+from tools import collecter_native_venues as native_module
 from tools.collecter_native_venues import (
     RecordingNativeVenueCoordinator,
     envelope_from_snapshot,
     snapshot_summary,
 )
-from tools import collecter_native_venues as native_module
 
 
 def test_native_venues_is_harvest_not_core() -> None:
@@ -142,9 +142,17 @@ def test_native_heartbeat_exposes_per_channel_counts() -> None:
     assert '"channel_counts": {' in text
 
 
-@pytest.mark.parametrize("reject_queue_event", [False, True])
+@pytest.mark.parametrize(
+    ("reject_queue_event", "received_timestamps"),
+    [
+        (False, (1_700_000_000_000,)),
+        (True, (1_700_000_000_000,)),
+        (False, (0,)),
+        (False, (1_700_000_000_000, 0)),
+    ],
+)
 def test_native_enqueue_records_each_envelope_once(
-    monkeypatch, tmp_path, capsys, reject_queue_event
+    monkeypatch, tmp_path, capsys, reject_queue_event, received_timestamps
 ) -> None:
     coordinator_instances = []
 
@@ -174,15 +182,16 @@ def test_native_enqueue_records_each_envelope_once(
                 if not self.emitted:
                     self.emitted = True
                     now_ms = 1_700_000_000_000
-                    self.on_snapshot(TickEnvelope(
-                        source_id="bybit_public_readonly",
-                        channel="orderbook_snapshot",
-                        instrument="BTCUSDT",
-                        event_kind="L2_SNAPSHOT",
-                        raw_payload='{"test":"real-shape"}',
-                        received_ts_ms=now_ms,
-                        exchange_ts_ms=now_ms,
-                    ))
+                    for received_ts_ms in received_timestamps:
+                        self.on_snapshot(TickEnvelope(
+                            source_id="bybit_public_readonly",
+                            channel="orderbook_snapshot",
+                            instrument="BTCUSDT",
+                            event_kind="L2_SNAPSHOT",
+                            raw_payload={"test": "real-shape"},
+                            received_ts_ms=received_ts_ms,
+                            exchange_ts_ms=now_ms,
+                        ))
                 await asyncio.sleep(0.01)
 
         async def run_clock_sync(self):
@@ -256,7 +265,9 @@ def test_native_enqueue_records_each_envelope_once(
         tmp_path,
         max_symbols=1,
         stale_after_ms=1_000,
-        duration_s=0.6,
+            # Keep the 50-cycle responsiveness assertion while giving Windows
+            # hosts sharing CPU with active collectors enough scheduling margin.
+            duration_s=0.9,
         universe_refresh_s=0,
         enabled_venues=("bybit",),
     ))
@@ -265,23 +276,36 @@ def test_native_enqueue_records_each_envelope_once(
     assert coordinator_instances[0].loop_ticks >= 50
     expected_states = ["RUNNING", "STOPPING", "STOPPED"]
     assert [row["state"] for row in heartbeats] == expected_states
-    assert heartbeats[0]["writer_batch_pending"] is (not reject_queue_event)
-    assert heartbeats[0]["writer_batch_records"] == (0 if reject_queue_event else 1)
-    assert len(writer.rows) == (0 if reject_queue_event else 1)
+    valid_count = sum(ts_ms > 0 for ts_ms in received_timestamps)
+    invalid_count = sum(ts_ms <= 0 for ts_ms in received_timestamps)
+    accepted_count = 0 if reject_queue_event else valid_count
+    assert heartbeats[0]["writer_batch_pending"] is bool(accepted_count)
+    assert heartbeats[0]["writer_batch_records"] == accepted_count
+    assert len(writer.rows) == accepted_count
+    if accepted_count:
+        assert writer.rows[0].raw_payload == '{"test":"real-shape"}'
     assert heartbeats
     final = heartbeats[-1]
-    assert final["required_venues_ready"] is (not reject_queue_event)
+    assert final["required_venues_ready"] is bool(accepted_count)
     assert final["channel_counts"]["bybit"].get("orderbook_snapshot", 0) == (
-        0 if reject_queue_event else 1
+        accepted_count
     )
     assert final["last_event_ms"]["bybit"] == (
-        0 if reject_queue_event else 1_700_000_000_000
+        max((ts for ts in received_timestamps if ts > 0), default=0)
+        if accepted_count
+        else 0
     )
     assert final["queue_drops_by_venue"] == (
-        {"bybit": 1} if reject_queue_event else {}
+        {"bybit": len(received_timestamps)} if reject_queue_event else {}
     )
     assert final["queue_drops_by_channel"].get("bybit", {}) == (
-        {"orderbook_snapshot": 1} if reject_queue_event else {}
+        {"orderbook_snapshot": len(received_timestamps)} if reject_queue_event else {}
+    )
+    assert final["invalid_receive_timestamp_count"] == (
+        0 if reject_queue_event else invalid_count
+    )
+    assert final["invalid_receive_timestamp_by_venue"] == (
+        {"bybit": invalid_count} if invalid_count and not reject_queue_event else {}
     )
     assert final["pid"] > 0
     assert final["collection_run_id"]
@@ -289,6 +313,27 @@ def test_native_enqueue_records_each_envelope_once(
     assert "partitions" not in final["dataset"]
     assert final["dataset"]["partition_details_included"] is False
     assert final["dataset"]["records_written"] == len(writer.rows)
+
+
+def test_queue_compacts_mapping_without_changing_persisted_record():
+    original = {"z": ["é", 2], "a": {"bid": "1.25"}}
+    envelope = TickEnvelope(
+        source_id="bybit_public_ws",
+        channel="l2Book",
+        instrument="BTCUSDT",
+        event_kind="UPDATE",
+        raw_payload=original,
+        received_ts_ms=1_700_000_000_000,
+        sequence=7,
+    )
+
+    expected = envelope.as_record(written_ts_ms=1_700_000_000_001)
+    queued = native_module._prepare_queue_envelope(envelope)
+
+    assert queued is not envelope
+    assert envelope.raw_payload is original
+    assert isinstance(queued.raw_payload, str)
+    assert queued.as_record(written_ts_ms=1_700_000_000_001) == expected
 
 
 async def _async_empty(*_args, **_kwargs):

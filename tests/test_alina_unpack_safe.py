@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 import pytest
+
 import tools.unpack_verified_safe as unpack_module
 from tools.restore_alina import _windows_io_path as canonical_windows_io_path
 from tools.unpack_verified_safe import SafeUnpackError, expand_safe_corpus
@@ -67,11 +68,17 @@ def test_sans_place_on_bascule_en_SCEAU_SEUL_au_lieu_de_refuser(tmp_path, monkey
     _disque_insuffisant(monkeypatch)
 
     rapport = _expand(tmp_path)
+    publie = json.loads((tmp_path / "UNPACK_REPORT.json").read_text(encoding="utf-8"))
 
     assert rapport["status"] == "SAFE_SEAL_CERTIFICATION_COMPLETE"
     assert rapport["mode"] == "SEAL_ONLY"
     assert rapport["physical_jsonl_available"] is False
     assert rapport["streamable_gzip_available"] is True
+    assert publie == rapport
+    from tools.sync_complete_clone import _unpack_report_contract
+    contrat = _unpack_report_contract(publie)
+    assert contrat["unpack_certified"] is True
+    assert contrat["unpack_complete"] is False
     assert "ALINA_UNPACK_SEAL_ONLY_FALLBACK" in capsys.readouterr().err
 
 
@@ -127,8 +134,14 @@ def _expand(root, *, catalog_sha256=None):
 def test_unpacked_safe_is_verified_and_resumable(tmp_path):
     fixture(tmp_path)
     report = _expand(tmp_path)
+    published = json.loads((tmp_path / "UNPACK_REPORT.json").read_text(encoding="utf-8"))
     target = tmp_path / "usable" / "unpacked" / "release-one" / "safe.jsonl"
     assert report["status"] == "SAFE_UNPACK_COMPLETE"
+    assert published == report
+    from tools.sync_complete_clone import _unpack_report_contract
+    contract = _unpack_report_contract(published)
+    assert contract["unpack_certified"] is True
+    assert contract["unpack_complete"] is True
     assert target.read_bytes() == b'{"px":100}\n'
     assert _expand(tmp_path)["reused_verified"] == 1
     seal = json.loads(target.with_suffix(".jsonl.alina.json").read_text())

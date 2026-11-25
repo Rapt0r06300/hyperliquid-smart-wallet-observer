@@ -352,6 +352,21 @@ def test_bitget_books15_frame_is_taped_as_l2() -> None:
     assert envelope.parsed_summary["depth_curve_replay_ready"] is True
 
 
+def test_bybit_frame_with_zero_receive_time_is_not_replayable_evidence() -> None:
+    payload = {
+        "topic": "publicTrade.BTCUSDT",
+        "type": "snapshot",
+        "ts": 2_000,
+        "data": [{
+            "T": 1_990, "s": "BTCUSDT", "S": "Buy", "v": "0.1",
+            "p": "100", "i": "trade-a", "seq": 10,
+        }],
+        "_alina_transport": {**_transport(), "receive_wall_ts_ms": 0},
+    }
+
+    assert native_tick_envelopes("bybit", payload) == []
+
+
 
 def test_okx_full_depth_snapshot_preserves_replay_reanchor_event_kind():
     envelope = native_tick_envelope("okx", {

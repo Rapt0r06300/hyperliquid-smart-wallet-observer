@@ -8,11 +8,11 @@ import sqlite3
 from pathlib import Path
 
 import pytest
+
 import tools.copy_vault_safe_bridge as bridge_module
 import tools.unpack_verified_safe as unpack_module
-from tools.restore_alina import _windows_io_path as canonical_windows_io_path
-
 from tools.copy_vault_safe_bridge import SafeBridgeError, build_safe_copy_workspace
+from tools.restore_alina import _windows_io_path as canonical_windows_io_path
 
 
 def _sha(data: bytes) -> str:
@@ -146,7 +146,12 @@ def _corpus(
     }), encoding="utf-8")
     (recovery / "UNPACK_REPORT.json").write_text(json.dumps({
         "status": "SAFE_UNPACK_COMPLETE",
+        "mode": "FULL_JSONL",
+        "physical_jsonl_available": True,
+        "streamable_gzip_available": True,
+        "replay_read_mode": "JSONL",
         "certified_shards": len(envelopes),
+        "unpacked_shards": len(envelopes),
         "catalog_index_sha256": catalog,
     }), encoding="utf-8")
     return recovery
@@ -227,6 +232,35 @@ def test_bridge_streams_seal_only_archives_without_claiming_physical_unpack(
         row["jsonl_bytes"] for row in proof["safe_input_shards"]
     )
     assert proof["source_read_mode_shards"] == {"GZIP_STREAM": 2}
+
+
+@pytest.mark.parametrize(
+    "missing_or_invalid",
+    [
+        {"mode": None},
+        {"physical_jsonl_available": None},
+        {"physical_jsonl_available": False},
+        {"streamable_gzip_available": None},
+        {"replay_read_mode": "GZIP_STREAM"},
+    ],
+)
+def test_bridge_rejects_full_jsonl_receipt_without_physical_proof(
+    tmp_path: Path, missing_or_invalid: dict[str, object],
+) -> None:
+    recovery = _corpus(
+        tmp_path, [_envelope("copy_vault_fills"), _envelope("copy_vault_l2")]
+    )
+    unpack_path = recovery / "UNPACK_REPORT.json"
+    unpack = json.loads(unpack_path.read_text(encoding="utf-8"))
+    for key, value in missing_or_invalid.items():
+        if value is None:
+            unpack.pop(key, None)
+        else:
+            unpack[key] = value
+    unpack_path.write_text(json.dumps(unpack), encoding="utf-8")
+
+    with pytest.raises(SafeBridgeError, match="restoration and extraction are not certified"):
+        build_safe_copy_workspace(tmp_path)
 
 
 def test_copy_vault_scope_keeps_only_active_registry_rows_in_memory(

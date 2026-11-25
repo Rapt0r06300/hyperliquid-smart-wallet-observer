@@ -230,6 +230,42 @@ def test_l_eta_lit_separement_alinasync_github_et_coffre(tmp_path):
     assert "ne deviennent des jours denses" in lignes
 
 
+def test_eta_ne_reparse_pas_le_gros_recu_restore_inchange_et_invalide_les_modifs(
+    tmp_path, monkeypatch
+):
+    _ecrire_restore_courant(tmp_path)
+    restore_path = tmp_path / "runtime" / "recovery" / "full" / "RESTORE_REPORT.json"
+    original_read_text = Path.read_text
+    restore_reads = 0
+
+    def compter_lecture(path, *args, **kwargs):
+        nonlocal restore_reads
+        if path == restore_path:
+            restore_reads += 1
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", compter_lecture)
+
+    premier = ETA.lire_sources_alinasync(tmp_path)
+    second = ETA.lire_sources_alinasync(tmp_path)
+    assert premier["restore_verified"] is True
+    assert second["safe_shards"] == 12
+    assert restore_reads == 1
+
+    report = json.loads(original_read_text(restore_path, encoding="utf-8"))
+    report["classification"]["expected_usable_shards"] = 5
+    report["classification"]["usable_shards"] = 5
+    report["catalog_verification"]["safe_catalog_shards"] = 5
+    restore_path.write_text(json.dumps(report), encoding="utf-8")
+    stat = restore_path.stat()
+    os.utime(restore_path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 2_000_000_000))
+
+    updated = ETA.lire_sources_alinasync(tmp_path)
+    assert restore_reads == 2
+    assert updated["restore_verified"] is True
+    assert updated["safe_shards"] == 5
+
+
 def test_un_rapport_seal_only_ne_compte_pas_comme_jsonl_deballe(tmp_path):
     catalog_sha, recovery = _ecrire_restore_courant(tmp_path)
     (recovery / "UNPACK_REPORT.json").write_text(json.dumps({
@@ -466,10 +502,13 @@ def test_le_resume_operateur_montre_vivant_progression_debit_et_eta(tmp_path):
     assert "EN DIRECT" in texte
     assert "50.0 %" in texte
     assert "12.5 lignes/min" in texte
-    assert "7/94 fichiers entre les deux relevés" in texte
+    assert "7/94 fichiers locaux suivis ont grandi entre les deux relevés" in texte
     assert "ni le nombre de collecteurs ni une limite à 10" in texte
     assert "7/94 ont grandi depuis le relevé précédent" in texte
-    assert "94 fichiers observés, pas 94 collecteurs" in texte
+    assert "94 fichiers ont grandi." not in texte
+    assert "DÉBIT FICHIERS SUIVIS" in texte
+    assert "archives et shards imbriqués sont hors de ce débit" in texte
+    assert "94 fichiers locaux surveillés" in texte
     assert "12/94 modifiés récemment" in texte
     assert "ETA moteur" in texte
     assert "demo [base]" in texte
@@ -533,8 +572,14 @@ def test_eta_signale_un_heartbeat_fige_puis_redevient_actif_sans_redemarrer_watc
     assert stale["code"] == "DEGRADE"
     assert stale["flux_figes"] == ["bbo-collector"]
     lignes = "\n".join(ETA._lignes_suivi_collecteurs(stale))
-    assert "FLUX DONNÉES" in lignes
-    assert "collecteur BBO — aucun signal depuis (10 min)" in lignes
+    assert "ÉTATS COLLECTEURS" in lignes
+    assert "ne garantit pas l'arrivée de nouvelles données" in lignes
+    assert "meilleurs prix achat/vente — état non actualisé depuis (10 min)" in lignes
+
+    os.utime(heartbeat, (now_ms / 1000 - 6_146, now_ms / 1000 - 6_146))
+    old = ETA.lire_suivi_collecteurs(tmp_path, maintenant_ms=now_ms)
+    lignes_anciennes = "\n".join(ETA._lignes_suivi_collecteurs(old))
+    assert "meilleurs prix achat/vente — état non actualisé depuis (1 h 42 min)" in lignes_anciennes
 
     os.utime(heartbeat, (now_ms / 1000 - 10, now_ms / 1000 - 10))
     fresh = ETA.lire_suivi_collecteurs(tmp_path, maintenant_ms=now_ms)
@@ -630,7 +675,8 @@ def test_dashboard_court_affiche_separement_processus_et_croissance_fichiers():
     )
 
     texte = "\n".join(lignes)
-    assert "7/94 fichiers de données grossissent" in texte
+    assert "7 fichiers ont grandi sur 94 suivis" in texte
+    assert "ce chiffre n’est pas plafonné à 10" in texte
     assert "COLLECTEURS" in texte and "20/20 actifs" in texte
     assert "écarts signalés: 1 184" in texte
     assert "+3 depuis lancement du suivi" in texte
@@ -742,8 +788,8 @@ def test_le_dashboard_par_defaut_est_court_et_garde_les_sources_reelles(tmp_path
     texte = "\n".join(lignes)
     assert len(lignes) <= 16
     assert "EN DIRECT" in texte
-    assert "2/7 fichiers de données grossissent" in texte
-    assert "pas 7 collecteurs" in texte
+    assert "2 fichiers ont grandi sur 7 suivis" in texte
+    assert "ce chiffre n’est pas plafonné à 10" in texte
     assert "12.5 lignes/min" in texte
     assert "collecter encore 12 j 00 h 00 min 00 s" in texte
     assert "2 JSONL physiques selon le reçu" in texte
