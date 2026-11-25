@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from tools import cmd_progress
+
 ROOT = Path(__file__).resolve().parents[1]
 MAIN_LAUNCHER = ROOT / "POUSSER-GITHUB.cmd"
 ALIASES = [ROOT / "tools/launchers/POUSSER_TOUT_LE_TRAVAIL.cmd", ROOT / "tools/launchers/REPARER_ET_POUSSER.cmd"]
@@ -45,6 +47,24 @@ def _helper_allowing_test_remote(tmp_path: Path, remote_url: str) -> Path:
     source = source.replace(original, replacement, 1)
     helper.write_text(source, encoding="utf-8")
     return helper
+
+
+def test_git_summary_reports_checkpoint_sha_when_reconciliation_fails(capsys) -> None:
+    """A NO_GO after checkpointing must show the current local SHA, not its start SHA."""
+    receipt = {
+        "status": "NO_GO",
+        "head_before": "a" * 40,
+        "checkpoint_sha": "b" * 40,
+        "remote_sha_observed": "c" * 40,
+        "progress_percent": 78,
+        "git_commands": [],
+        "error": "protected path conflict",
+    }
+
+    assert cmd_progress._summary(receipt, 2) == 1
+    output = capsys.readouterr().out
+    assert f"SHA local    : {'b' * 12}" in output
+    assert f"SHA local    : {'a' * 12}" not in output
 
 
 def _include_sync_engine(repo: Path) -> None:

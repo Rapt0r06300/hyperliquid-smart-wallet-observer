@@ -4982,6 +4982,22 @@ class Synchronizer:
             )
             result_code = 2
         finally:
+            # A NO_GO can occur after the local code checkpoint was created
+            # (for example, when replay would overwrite SAFE working-tree
+            # changes).  Record the actual final local ref so the launcher
+            # never reports the pre-run SHA as if it were still current.
+            try:
+                final_head = self.command(
+                    "rev-parse", "--verify", "HEAD", check=False, timeout=10,
+                )
+                if final_head.returncode == 0:
+                    self.report["head_after"] = (
+                        final_head.stdout.decode("ascii", errors="replace").strip()
+                    )
+            except (OSError, subprocess.TimeoutExpired, SyncBlocked):
+                # Preserve the honest absence of a final SHA if Git itself is
+                # unavailable; do not replace it with head_before here.
+                pass
             elapsed_ms = int((time.monotonic() - run_started) * 1000)
             self.report["duration_ms"] = elapsed_ms
             self.report["finished_at_utc"] = datetime.now(UTC).isoformat()

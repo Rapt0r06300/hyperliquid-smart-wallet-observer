@@ -1586,6 +1586,7 @@ def test_tracked_protected_collision_still_fails_closed(repos):
     rc, receipt = run_sync(local)
 
     assert rc == 2 and receipt["status"] == "NO_GO"
+    assert receipt["head_after"] == git(local, "rev-parse", "HEAD")
     assert any(marker in receipt["error"].casefold() for marker in (
         "protege", "overwritten by merge", "would be overwritten",
     ))

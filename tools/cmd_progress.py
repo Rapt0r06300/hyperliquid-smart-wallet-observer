@@ -106,7 +106,13 @@ def _summary(receipt: dict[str, object] | None, return_code: int) -> int:
         duration = "inconnue"
     commands = receipt.get("git_commands")
     command_list = commands if isinstance(commands, list) else []
-    local_sha = _clean(receipt.get("head_after") or receipt.get("head_before"), 64)
+    local_sha = _clean(
+        receipt.get("head_after")
+        or receipt.get("checkpoint_sha_after_reconcile")
+        or receipt.get("checkpoint_sha")
+        or receipt.get("head_before"),
+        64,
+    )
     remote_sha = _clean(receipt.get("remote_sha_observed"), 64)
     commit_message = _clean(
         receipt.get("commit_message") or receipt.get("proposed_commit_message")
