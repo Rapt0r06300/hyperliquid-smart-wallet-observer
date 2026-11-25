@@ -24,6 +24,7 @@ def test_ecrire_rapport_ecrit_les_fichiers(tmp_path):
     assert Path(res["latest"]).exists() and Path(res["json"]).exists() and Path(res["manifeste"]).exists()
     md = Path(res["latest"]).read_text(encoding="utf-8")
     assert "VERDICT" in md and "NON MESURABLE" in md and "feed_adapter" in md and res["verdict"] == "NON MESURABLE"
+    assert "aucun endpoint d’exécution" in md
 
 
 def test_manifeste_porte_les_hashes(tmp_path):

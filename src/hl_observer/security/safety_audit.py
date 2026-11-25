@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import os
 import re
 import subprocess
@@ -21,10 +22,12 @@ class SafetyAuditResult:
 TEXT_SUFFIXES = {
     ".py", ".toml", ".yaml", ".yml", ".env", ".example", ".txt",
     ".cmd", ".bat", ".ps1", ".sh", ".js", ".mjs", ".cjs", ".ts",
+    ".html", ".htm", ".jsx", ".tsx", ".vue", ".psm1",
 }
 OPERATIONAL_SUFFIXES = {
     ".py", ".cmd", ".bat", ".ps1", ".sh", ".js", ".mjs", ".cjs", ".ts",
     ".yaml", ".yml",
+    ".html", ".htm", ".jsx", ".tsx", ".vue", ".psm1",
 }
 EXCLUDED_DIRS = {
     ".git",
@@ -54,18 +57,129 @@ EXCLUDED_RELATIVE_PREFIXES = {
     # le manifeste portable. Ses sources de dependances ne sont pas notre code.
     ("tools", "python"),
 }
-NON_OPERATIONAL_POLICY_FILES = {
-    "audit_report.py",
-    "cloturer_291.py",
-    "etat_112_145.py",
-    "mainnet_guard.py",
-    "safety_audit.py",
-    "securite_18h.py",
-    "trier_h46_h89.py",
-    "trier_h90_h180.py",
-    "valider_chaine_bout_en_bout.py",
-    "validation_portable.py",
+# These files intentionally mention prohibited endpoints/methods while testing
+# or enforcing their refusal. Keep exceptions path-scoped: a same-named
+# operational file elsewhere must still be checked. Every file remains in the
+# bounded read and secret scan.
+POLICY_SCAN_EXEMPTIONS: dict[str, frozenset[str]] = {
+    "src/hl_observer/security/safety_audit.py": frozenset({"exchange_endpoint"}),
+    "src/hl_observer/agent_tools/manifest.py": frozenset({"exchange_endpoint"}),
+    "src/hl_observer/perf/hot_path_guard.py": frozenset({"exchange_endpoint"}),
+    "src/hl_observer/ui/simulation_log_export.py": frozenset({"exchange_endpoint"}),
+    "src/hl_observer/ops/validation_portable.py": frozenset({"exchange_endpoint"}),
+    "hyper_smart_observer/audit/source_scanner.py": frozenset({"exchange_endpoint"}),
+    "hyper_smart_observer/hyperliquid_client/info_client.py": frozenset({"exchange_endpoint"}),
+    "hyper_smart_observer/app/safety.py": frozenset({"exchange_endpoint"}),
+    "hyper_smart_observer/simulation/diagnostic_log.py": frozenset({"exchange_endpoint"}),
+    "tools/audit_report.py": frozenset({"exchange_endpoint", "mainnet_order_method"}),
+    "tools/securite_18h.py": frozenset({"exchange_endpoint"}),
+    "tools/valider_chaine_bout_en_bout.py": frozenset({"exchange_endpoint"}),
 }
+
+
+def _policy_scan_exemptions(project_root: Path, path: Path) -> frozenset[str]:
+    """Return narrowly scoped checks skipped for a known refusal/audit file."""
+    try:
+        relative = path.resolve().relative_to(project_root.resolve()).as_posix()
+    except ValueError:
+        return frozenset()
+    return POLICY_SCAN_EXEMPTIONS.get(relative, frozenset())
+
+
+_SIMPLE_STRING_LITERAL = r"(?:\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*')"
+_STRING_CONCATENATION = re.compile(
+    rf"(?:{_SIMPLE_STRING_LITERAL}\s*\+\s*)+{_SIMPLE_STRING_LITERAL}"
+)
+_QUOTED_VALUE = re.compile(r"\"([^\"\\]*)\"|'([^'\\]*)'")
+_EXCHANGE_ENDPOINT = re.compile(
+    r"^(?:https?://[^/\s?#]+)?(?:/[^/\s?#]+)*/exchange(?=$|[/?#\s])",
+    re.IGNORECASE,
+)
+_UNQUOTED_EXCHANGE_ENDPOINT = re.compile(
+    r"(?<![A-Za-z0-9_/])/(?:[^/?#\s\"'`]+/)*exchange(?=$|[^A-Za-z0-9_])",
+    re.IGNORECASE,
+)
+
+
+def _is_exchange_path(value: str) -> bool:
+    """Match a path or URL, not prose mentioning it or another venue's endpoint."""
+    return _EXCHANGE_ENDPOINT.match(value.strip()) is not None
+
+
+def _contains_python_exchange_endpoint(text: str) -> bool:
+    """Inspect executable Python string values, excluding comments/docstrings."""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        # Invalid operational Python is unsafe to certify; fail closed.
+        return True
+
+    docstring_ids: set[int] = set()
+    for node in ast.walk(tree):
+        body = getattr(node, "body", None)
+        if (
+            isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+            and isinstance(body, list)
+            and body
+            and isinstance(body[0], ast.Expr)
+            and isinstance(body[0].value, ast.Constant)
+            and isinstance(body[0].value.value, str)
+        ):
+            docstring_ids.add(id(body[0].value))
+
+    def constant_string(node: ast.AST) -> str | None:
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return node.value
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            left = constant_string(node.left)
+            right = constant_string(node.right)
+            if left is not None and right is not None:
+                return left + right
+        if isinstance(node, ast.JoinedStr):
+            # Conservative: a dynamic field between constant fragments may
+            # still construct the forbidden route at runtime.
+            return "".join(
+                part.value
+                for part in node.values
+                if isinstance(part, ast.Constant) and isinstance(part.value, str)
+            )
+        return None
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if id(node) not in docstring_ids and _is_exchange_path(node.value):
+                return True
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            combined = constant_string(node)
+            if combined is not None and _is_exchange_path(combined):
+                return True
+        if isinstance(node, ast.JoinedStr):
+            combined = constant_string(node)
+            if combined is not None and _is_exchange_path(combined):
+                return True
+    return False
+
+
+def _contains_exchange_endpoint(text: str, suffix: str = ".py") -> bool:
+    """Catch executable endpoint paths, ignoring comments and path substrings."""
+    if suffix.lower() == ".py":
+        return _contains_python_exchange_endpoint(text)
+    if suffix.lower() in {".cmd", ".bat"}:
+        text = re.sub(r"(?im)^\s*(?:rem\b|::).*?$", "", text)
+    if _UNQUOTED_EXCHANGE_ENDPOINT.search(text):
+        return True
+    for quoted in _QUOTED_VALUE.finditer(text):
+        value = quoted.group(1) if quoted.group(1) is not None else quoted.group(2)
+        if _is_exchange_path(value):
+            return True
+    for match in _STRING_CONCATENATION.finditer(text):
+        parts = [
+            quoted.group(1) if quoted.group(1) is not None else quoted.group(2)
+            for quoted in _QUOTED_VALUE.finditer(match.group(0))
+        ]
+        if _is_exchange_path("".join(parts)):
+            return True
+    return False
 
 
 def _is_excluded_project_path(root: Path, path: Path) -> bool:
@@ -100,7 +214,7 @@ def _iter_scannable_files(root: Path) -> list[Path]:
         ]
         for name in filenames:
             path = current / name
-            if path.suffix in TEXT_SUFFIXES or path.name == ".env.example":
+            if path.suffix.lower() in TEXT_SUFFIXES or path.name == ".env.example":
                 files.append(path)
     return files
 
@@ -183,11 +297,7 @@ def run_safety_audit(root: str | Path = ".") -> SafetyAuditResult:
     checks: dict[str, bool] = {}
     findings: list[str] = []
 
-    source_files = [
-        path
-        for path in _iter_operational_files(project_root)
-        if path.name not in NON_OPERATIONAL_POLICY_FILES
-    ]
+    source_files = list(_iter_operational_files(project_root))
     source_file_set = set(source_files)
     source_files_seen: set[Path] = set()
     source_read_errors: list[Path] = []
@@ -211,12 +321,13 @@ def run_safety_audit(root: str | Path = ".") -> SafetyAuditResult:
                 continue
             source_files_seen.add(path)
             finding = scan_text_for_secret(path, text)
-            if path.name not in NON_OPERATIONAL_POLICY_FILES:
+            exemptions = _policy_scan_exemptions(project_root, path)
+            if "mainnet_order_method" not in exemptions:
                 no_forbidden_method = no_forbidden_method and forbidden_method not in text
+            if "exchange_endpoint" not in exemptions:
                 no_exchange_endpoint = (
                     no_exchange_endpoint
-                    and f'"{forbidden_exchange_path}"' not in text
-                    and f"'{forbidden_exchange_path}'" not in text
+                    and not _contains_exchange_endpoint(text, path.suffix)
                 )
         else:
             finding = scan_file_for_secret(path)

@@ -689,7 +689,7 @@ def test_lfs_filters_disabled_in_attributes():
 
 
 
-def test_windows_checkout_preserves_byte_exact_replay_catalog():
+def test_windows_checkout_preserves_byte_exact_replay_catalog(tmp_path):
     # Git core.autocrlf=true adds a CR byte per JSON partition on Windows
     # unless checkout attributes explicitly preserve its canonical LF bytes.
     attributes = (ROOT / ".gitattributes").read_text(encoding="utf-8")
@@ -706,52 +706,63 @@ def test_windows_checkout_preserves_byte_exact_replay_catalog():
         "pyproject.toml text eol=lf",
         "requirements*.txt text eol=lf",
     }.issubset(active)
-    # These inputs feed byte-exact catalog, provenance, or reproducibility
-    # digests. A Windows checkout must not leave Git-expanded CRLF bytes here.
-    campaign_manifests = sorted((ROOT / "catalog" / "campaigns").glob("*.json"))
-    if not campaign_manifests:
-        # Hypersmart's six lightweight CI shards deliberately omit the
-        # multi-million-file catalog/campaigns tree. Verify this is a sparse
-        # checkout, not silent data loss in a real/full clone. The separate
-        # recovery-contract checkout includes campaign manifests and runs
-        # the byte-exact Git comparison below.
-        import subprocess
-        sparse = subprocess.run(
-            ["git", "config", "--bool", "core.sparseCheckout"],
-            cwd=ROOT, capture_output=True, check=False,
-        )
-        assert sparse.returncode == 0 and sparse.stdout.strip() == b"true", (
-            "campaign manifests are missing from a non-sparse checkout"
-        )
-        pytest.skip("campaign byte-parity verified in recovery-contract/full checkout")
-    # Historical campaign manifests can contain CRLF in their original Git
-    # blobs. Blindly rewriting those bytes would invalidate provenance and
-    # violate the lossless clone contract. Compare every checked-out file
-    # against the exact tracked Git blob, rather than rejecting a valid CR.
+    # Exercise Git's actual Windows checkout conversion in an isolated fixture.
+    # The real catalog is concurrently updated by collectors and may contain
+    # staged/unstaged SAFE receipts; tests must never compare those live bytes
+    # with the repository index or modify them.
     import subprocess
 
-    listing = subprocess.run(
-        ["git", "ls-files", "--stage", "-z", "--", "catalog/campaigns"],
-        cwd=ROOT, capture_output=True, check=True,
-    ).stdout
-    tracked = {}
-    for entry in listing.split(b"\0"):
-        if not entry:
-            continue
-        metadata, relative = entry.split(b"\t", 1)
-        mode, blob_sha, stage = metadata.split()
-        assert stage == b"0" and mode in (b"100644", b"100755")
-        tracked[relative.decode("utf-8")] = blob_sha.decode("ascii")
-    for path in campaign_manifests:
-        relative = path.relative_to(ROOT).as_posix()
-        raw = path.read_bytes()
-        # Git default SHA-1 object format; compare exact bytes, not decoded JSON.
-        blob = b"blob " + str(len(raw)).encode("ascii") + b"\0" + raw
-        assert hashlib.sha1(blob).hexdigest() == tracked.get(relative), relative
-    dependency_files = [ROOT / "pyproject.toml", *ROOT.glob("requirements*.txt")]
-    for path in dependency_files:
-        assert path.is_file()
-        assert b"\r" not in path.read_bytes(), path.relative_to(ROOT)
+    checkout = tmp_path / "autocrlf-catalog-checkout"
+    checkout.mkdir()
+    (checkout / ".gitattributes").write_bytes((ROOT / ".gitattributes").read_bytes())
+    fixtures = {
+        "catalog/DATA_INDEX.json": b'{"fixture":"index"}\r\n',
+        "catalog/DATA_METRICS.json": b'{"fixture":"metrics"}\r\n',
+        "catalog/data-index-parts/part-0001.json": b'{"fixture":"partition"}\r\n',
+        # Historical campaign blobs may intentionally preserve CRLF because
+        # this pattern is -text; exact bytes must survive checkout as-is.
+        "catalog/campaigns/market-e8-fixture-v7.json": b'{"fixture":"campaign"}\r\n',
+        "docs/PRE_RUN_775_SOURCE_LOSS_CLOSURE.md": b"fixture\r\n",
+        "pyproject.toml": b"[tool.fixture]\r\nvalue = true\r\n",
+        "requirements-fixture.txt": b"fixture==1.0\r\n",
+    }
+    for relative, payload in fixtures.items():
+        target = checkout / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(payload)
+
+    def git(*args: str) -> bytes:
+        return subprocess.run(
+            ["git", *args], cwd=checkout, capture_output=True, check=True,
+        ).stdout
+
+    git("init", "--quiet")
+    git("config", "core.autocrlf", "true")
+    git("config", "user.name", "Alina line-ending fixture")
+    git("config", "user.email", "alina-line-ending@example.invalid")
+    git("add", "--", ".gitattributes", *fixtures)
+    git("commit", "--quiet", "-m", "byte-exact checkout fixture")
+
+    expected = {
+        relative: git("cat-file", "blob", f"HEAD:{relative}")
+        for relative in fixtures
+    }
+    for relative in fixtures:
+        (checkout / relative).unlink()
+    git("checkout-index", "--force", "--", *fixtures)
+
+    for relative, canonical_blob in expected.items():
+        assert (checkout / relative).read_bytes() == canonical_blob, relative
+    for relative in (
+        "catalog/DATA_INDEX.json",
+        "catalog/DATA_METRICS.json",
+        "catalog/data-index-parts/part-0001.json",
+        "docs/PRE_RUN_775_SOURCE_LOSS_CLOSURE.md",
+        "pyproject.toml",
+        "requirements-fixture.txt",
+    ):
+        assert b"\r" not in expected[relative], relative
+    assert b"\r\n" in expected["catalog/campaigns/market-e8-fixture-v7.json"]
 
 
 def test_git_checkout_autocrlf_true_preserves_manifest_bound_source_bytes(tmp_path):

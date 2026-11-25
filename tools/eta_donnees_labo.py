@@ -9,11 +9,11 @@ d'octets : c'est **le nombre de JOURNEES UTC distinctes et DENSES** de signaux e
 * requis = `diagnostic_signal.MINIMUM_SIGNAL_UTC_DAYS` journees denses DANS UNE tranche
   (`_bounds`, plancher absolu 3).
 
-POURQUOI L'ETA N'EST PAS UNE DATE FIXE. Une journee UTC ne s'acquiert qu'une fois par jour
-calendaire, et **seulement si le debit suffit a la rendre dense**. L'ETA depend donc de deux
-choses qui bougent : les journees deja acquises, et le debit observe a l'instant. Si le debit
-tombe, la journee en cours cesse de compter et l'ETA RECULE -- c'est le comportement voulu,
-pas un defaut.
+LE DÉBIT GLOBAL DES FICHIERS N'EST PAS UN DÉBIT DE SIGNAUX. La jauge de collecte mesure
+les écritures de tous les fichiers locaux, mais elle ne prouve pas combien de signaux ont
+un carnet L2 causal. Sans compteur frais de ces signaux évaluables, l'ETA moteur reste
+INCONNU. La date des études reste une estimation distincte, calculée à partir des jours
+indépendants encore requis par la dernière étude.
 
 TROIS REFUS PLUTOT QU'UN CHIFFRE RASSURANT :
 
@@ -21,9 +21,9 @@ TROIS REFUS PLUTOT QU'UN CHIFFRE RASSURANT :
 * corpus illisible -> `INCONNU` avec le motif, jamais zero ;
 * journees deja suffisantes -> `ATTEINT`, et on le dit au lieu de proposer d'attendre.
 
-LECTURE SEULE. Aucun reseau, aucun ordre, aucune ecriture dans les rubans. Le calcul lourd
-(journees denses) est refait a intervalle long ; le debit, lui, se mesure a chaque
-rafraichissement sur la CROISSANCE du ruban -- une operation en temps constant.
+LECTURE SEULE. Aucun reseau, aucun ordre, aucune ecriture dans les rubans. Le débit global
+des fichiers est mesuré à chaque rafraîchissement sur leur croissance; le compte des jours
+denses provient de la dernière sonde et son âge est affiché.
 """
 from __future__ import annotations
 
@@ -340,7 +340,7 @@ def calculer_eta(
     Le raisonnement, dans l'ordre :
 
     1. si les journees denses suffisent deja -> `ATTEINT` ;
-    2. si le debit est nul ou inconnu -> `INFINI` / `INCONNU`, jamais une duree ;
+    2. si le debit de signaux evaluables est nul ou inconnu -> `INFINI` / `INCONNU` ;
     3. sinon : il faut d'abord rendre la journee EN COURS dense (ce qui depend du debit),
        puis attendre une journee calendaire par journee manquante. Le plancher calendaire
        domine : aucun debit ne fait apparaitre deux journees UTC le meme jour.
@@ -351,7 +351,10 @@ def calculer_eta(
                 "motif": "les journees denses requises sont deja acquises"}
     if debit_par_heure is None:
         return {"statut": "INCONNU", "heures": None, "manquantes": manquantes,
-                "motif": "debit non mesurable (ruban illisible ou mesure perimee)"}
+                "motif": (
+                    "débit de signaux évaluables non mesuré; le débit global des fichiers "
+                    "ne permet pas de le déduire"
+                )}
     if debit_par_heure <= 0:
         return {"statut": "INFINI", "heures": None, "manquantes": manquantes,
                 "motif": "debit nul : la collecte est eteinte ou ne produit rien"}
@@ -430,6 +433,24 @@ def barre_progression(pourcent: float | None, *, largeur: int = 24) -> str:
         return "?" * max(1, int(largeur))
     remplie = round(max(0.0, min(100.0, pourcent)) * max(1, int(largeur)) / 100.0)
     return "#" * remplie + "." * (max(1, int(largeur)) - remplie)
+
+
+def _eta_moteur_affiche(eta: dict, age_sonde_h: float | None) -> str:
+    """N'affiche une durée que si le calcul possède une mesure admissible et fraîche."""
+    if age_sonde_h is None:
+        return "INCONNU — aucune sonde de densité"
+    if age_sonde_h > AGE_MAX_SONDE_H:
+        return f"INCONNU — sonde périmée depuis {age_sonde_h:.1f} h"
+    statut = eta.get("statut")
+    if statut == "ATTEINT":
+        return "ATTEINT"
+    if statut in {"EN_COURS", "JOURNEE_EN_COURS_PERDUE"} and isinstance(
+        eta.get("heures"), (int, float)
+    ):
+        return duree_lisible(float(eta["heures"]))
+    if statut == "INFINI":
+        return "INFINI — débit causal nul"
+    return "INCONNU — pas de débit de signaux évaluables"
 
 
 def etat_flux(ruban: Path | None, mesure: dict, *, maintenant: float | None = None) -> dict:
@@ -814,6 +835,23 @@ def _description_deballage_courte(sources: dict) -> str:
     return "INCONNU (preuve incomplète)"
 
 
+def _statut_deballage_affiche(sources: dict) -> str:
+    """Affiche le contrat prouvé, pas le statut historique potentiellement trompeur."""
+    if sources.get("unpack_verified"):
+        return "JSONL PHYSIQUES VÉRIFIÉS"
+    if sources.get("unpack_certified"):
+        return "CERTIFIÉ EN FLUX GZIP"
+    issue = sources.get("unpack_issue")
+    if issue == "REPORT_ABSENT":
+        return "REÇU ABSENT"
+    if issue == "CATALOG_SHA_MISMATCH":
+        return "REÇU D'UN AUTRE CATALOGUE"
+    status = str(sources.get("unpack_status") or "INCONNU")
+    if status == "INCONNU":
+        return "INCONNU"
+    return f"REÇU NON VÉRIFIÉ (déclaré {status})"
+
+
 def lignes_sources_live(sources: dict | None) -> list[str]:
     """Explique ce qui vient des collecteurs et ce qui vient d'AlinaSync."""
     if not isinstance(sources, dict):
@@ -824,6 +862,7 @@ def lignes_sources_live(sources: dict | None) -> list[str]:
         if sources.get("restore_verified") else "INCONNU (restauration non certifiée)"
     )
     unpack = _description_deballage(sources)
+    unpack_status = _statut_deballage_affiche(sources)
     github = (
         f"preuve locale liée à {sources['repository']} / {sources['release_assets']:,} assets"
         if sources.get("github_release_bound") else "INCONNU (aucune preuve Release complète)"
@@ -843,7 +882,7 @@ def lignes_sources_live(sources: dict | None) -> list[str]:
     )
     return [
         f"| ALINASYNC RESTORE   : {restore} | SAFE utilisable : {safe}",
-        f"| ALINASYNC DÉBALLAGE : {sources.get('unpack_status', 'INCONNU')} | {unpack}",
+        f"| ALINASYNC DÉBALLAGE : {unpack_status} | {unpack}",
         f"| ALINASYNC JOURNAL   : {sources.get('sync_status', 'INCONNU')}"
         f" (dernier journal, non prioritaire sur RESTORE_REPORT)",
         f"| GITHUB / RELEASE     : {github}",
@@ -866,6 +905,7 @@ def lignes_dashboard_simple(
     sources: dict | None,
     intervalle_s: float,
     suivi_collecteurs: dict | None = None,
+    source_denses: str | None = None,
 ) -> list[str]:
     """Vue opérateur courte : une personne doit comprendre l'essentiel en 5 secondes."""
     etude = progression_etude(besoins)
@@ -884,14 +924,7 @@ def lignes_dashboard_simple(
         if mesure.get("lignes_par_minute") is not None
         else f"INCONNU ({mesure.get('motif') or 'première mesure'})"
     )
-    if age_sonde_h is None:
-        moteur = "INCONNU — aucune sonde"
-    elif age_sonde_h > AGE_MAX_SONDE_H:
-        moteur = f"INCONNU — sonde périmée depuis {age_sonde_h:.1f} h"
-    elif eta.get("statut") == "ATTEINT":
-        moteur = "ATTEINT"
-    else:
-        moteur = duree_lisible(eta.get("heures"))
+    moteur = _eta_moteur_affiche(eta, age_sonde_h)
     eta_secondes = etude.get("eta_live_secondes")
     if isinstance(eta_secondes, (int, float)) and eta_secondes > 0:
         prochaine = (
@@ -950,12 +983,14 @@ def lignes_dashboard_simple(
         )
     else:
         coffre = f"INCONNU | {age_coffre}"
+    sonde_age = "inconnue" if age_sonde_h is None else f"{age_sonde_h:.1f} h"
+    sonde_source = Path(source_denses).name if source_denses else "INCONNUE"
     return [
         "+" + "=" * 76 + "+",
         f"| COPY-VAULT — SUIVI EN DIRECT | cycle {tours} | {time.strftime('%H:%M:%S')} |",
         "+" + "-" * 76 + "+",
         f"| ÉTAT              : {clair}",
-        f"| DÉBIT             : {debit} | actualisation toutes les {max(0.5, float(intervalle_s)):.1f} s",
+        f"| DÉBIT FICHIERS    : {debit} (tous observés) | mise à jour {max(0.5, float(intervalle_s)):.1f} s",
         f"| PROCHAINE ÉTAPE   : {prochaine}",
         f"| TEMPS MINIMUM     : {eta_etude} (si chaque journée reste dense)",
         f"| ETA MOTEUR        : {moteur} | ancienne mesure: {denses_acquis}/{requis} jours",
@@ -964,8 +999,8 @@ def lignes_dashboard_simple(
         f"| GITHUB            : {release}",
         f"| COFFRE            : {coffre}",
         *_lignes_suivi_collecteurs(suivi_collecteurs),
-        "| À SAVOIR          : un fichier téléchargé ne devient pas une journée dense avant replay.",
-        "| q = quitter       | --detail = afficher le diagnostic complet",
+        f"| SONDE DENSITÉ    : âge {sonde_age} | rapport {sonde_source} | écran {max(0.5, float(intervalle_s)):.1f} s",
+        "| AIDE              : un fichier téléchargé ne compte pas avant replay; q=quitter; --detail=diag",
         "+" + "=" * 76 + "+",
     ]
 
@@ -984,6 +1019,7 @@ def lignes_resume(
     sources: dict | None = None,
     intervalle_s: float = 5.0,
     suivi_collecteurs: dict | None = None,
+    source_denses: str | None = None,
 ) -> list[str]:
     """Bloc opérateur court placé avant le détail scientifique historique."""
     sonde_fiable = age_sonde_h is not None and age_sonde_h <= AGE_MAX_SONDE_H
@@ -1003,20 +1039,9 @@ def lignes_resume(
         if mesure.get("lignes_par_minute") is not None
         else f"INCONNU ({mesure.get('motif') or 'mesure en cours'})"
     )
-    eta_txt = (
-        ("ATTEINT" if eta.get("statut") == "ATTEINT" else duree_lisible(eta.get("heures")))
-        if sonde_fiable
-        else "INCONNU (sonde périmée)"
-    )
+    eta_txt = _eta_moteur_affiche(eta, age_sonde_h)
     sonde_txt = "inconnue" if age_sonde_h is None else f"{age_sonde_h:.1f} h"
-    if mesure.get("source_count"):
-        ruban_txt = (
-            f"{mesure['source_count']} fichiers de données observés"
-            + (f" | actifs: {', '.join(mesure.get('active_source_paths', [])[:3])}"
-               if mesure.get("active_source_paths") else "")
-        )
-    else:
-        ruban_txt = str(ruban) if ruban is not None else "aucun ruban trouvé"
+    sonde_source = Path(source_denses).name if source_denses else "INCONNUE"
     progression_txt = (
         f"{moteur_pct:.1f} %"
         if moteur_pct is not None
@@ -1032,14 +1057,14 @@ def lignes_resume(
         f"| ETA MINIMUM ACTUEL  : {etude['eta_live']} (si chaque journée reste dense)",
         *besoins_live(besoins),
         *lignes_sources_live(sources),
-        f"| DÉBIT MESURÉ        : {debit} | ETA moteur : {eta_txt}",
+        f"| DÉBIT FICHIERS      : {debit} (tous les fichiers) | ETA moteur : {eta_txt}",
         f"| ACTIVITÉ FICHIERS   : {mesure.get('active_sources', 0)}/{mesure.get('source_count', 0)} actifs | "
         f"{mesure.get('recent_sources', 0)}/{mesure.get('source_count', 0)} récents",
         *_lignes_suivi_collecteurs(suivi_collecteurs),
         *_lignes_detail_suivi_collecteurs(suivi_collecteurs),
         f"| À SAVOIR            : {mesure.get('source_count', 0)} fichiers observés, pas {mesure.get('source_count', 0)} collecteurs",
         f"| ÉTAT DU RUBAN       : {etat['detail']} | dernière écriture : {etat.get('age_s', '?')} s",
-        f"| SONDE DENSITÉ       : âge {sonde_txt} | source : {ruban_txt} | refresh {max(0.5, float(intervalle_s)):.1f} s",
+        f"| SONDE DENSITÉ       : âge {sonde_txt} | rapport : {sonde_source} | écran {max(0.5, float(intervalle_s)):.1f} s",
         "+" + "=" * 72 + "+",
         "  Lecture seule : le résumé indique des observations, il ne démarre ni n'arrête rien.",
         "",
@@ -1415,7 +1440,10 @@ def main(argv: list[str] | None = None) -> int:
         eta = calculer_eta(
             denses_acquis=denses_acquis, requis=int(args.requis),
             signaux_aujourdhui=0, seuil_par_jour=MIN_SIGNALS_PER_DAY,
-            debit_par_heure=mesure["debit_par_heure"],
+            # ``MesureMultiFlux`` mesure la croissance cumulée des fichiers
+            # (fills, L2, chandelles, snapshots, etc.), pas des signaux causaux
+            # exécutables. Ne jamais convertir ce débit général en ETA de densité.
+            debit_par_heure=None,
             aujourdhui_deja_dense=False,
             secondes_restantes_dans_la_journee=secondes_restantes)
         etat = etat_flux_global(mesure)
@@ -1454,6 +1482,7 @@ def main(argv: list[str] | None = None) -> int:
                 sources=sources,
                 intervalle_s=args.intervalle,
                 suivi_collecteurs=suivi_collecteurs,
+                source_denses=source_denses,
             ) + [
                 "=" * 68,
                 "  DETAIL ETA DONNEES LABO — pourquoi cette estimation ?",
@@ -1513,6 +1542,7 @@ def main(argv: list[str] | None = None) -> int:
                 sources=sources,
                 intervalle_s=args.intervalle,
                 suivi_collecteurs=suivi_collecteurs,
+                source_denses=source_denses,
             )
         if os.name == "nt" and getattr(sys.stdout, "isatty", lambda: False)():
             os.system("cls")      # noqa: S605 S607 - rafraichissement d'ecran, pas d'entree externe

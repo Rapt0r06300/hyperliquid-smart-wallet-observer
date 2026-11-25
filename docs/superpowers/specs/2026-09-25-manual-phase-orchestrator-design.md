@@ -150,6 +150,15 @@ JSONL digest; it never claims that JSONL files exist on disk. Consumers must
 use `unpack_certified` for either admissible proof and `unpack_complete` only
 for physical JSONL availability.
 
+The Copy-Vault SAFE bridge must bind its provenance to the read path actually
+used for each shard, not infer it from the older unpack receipt. Its aggregate
+`source_read_mode` is `JSONL`, `GZIP_STREAM` or `MIXED`; the per-shard mode is
+recorded in `safe_input_shards`. `verified_unpacked_bytes` and
+`verified_streamed_bytes` are mutually exclusive totals of JSONL bytes whose
+hashes were checked while consuming that shard. A shard is counted in exactly
+one total. A checksum or source-identity mismatch fails the bridge before its
+workspace is published.
+
 The read-only `ETA_COLLECTE` dashboard must hash the current canonical
 `catalog/DATA_INDEX.json` on its slow receipt refresh and bind both restore and
 unpack receipts to that exact digest. It may show an older or incomplete
@@ -1104,7 +1113,22 @@ This exemption is narrow and fail-closed. An archive shard may become replay-com
 
 Archive replay compatibility proves historical event replay only. It does **not** invent local receive ordering, transport latency, same-runner clock evidence, or microstructure evidence that the archive does not contain. A latency-sensitive Lead-Lag proof still requires the live/synchronized timing evidence defined elsewhere in this spec.
 
-The published `TOTAL_TRADES_REPLAYABLE` metric is a qualification total derived from replay-compatible trade shards. A trade counted outside that total is not automatically proven unusable: reports must distinguish a genuinely invalid asset from an asset whose replay proof is still missing. Replay-compatibility diagnostics therefore expose both shard counts and exact trade-weighted blocker counts so remediation prioritizes the largest recoverable populations first.
+`DATA_METRICS.totals.TOTAL_TRADES_REPLAYABLE` and
+`COLLECTION_METRICS.indexed_dataset.trades_replayable` count the exact-trade
+intersection whose rows are both `quality_status == SAFE` and
+`replay_compatible == true`. This is the replay-admissible total. By contrast,
+`REPLAY_COMPATIBILITY_REASONS.replayable_trade_count_exact` is diagnostic: it
+counts all exact-trade rows marked replay-compatible, including rows whose
+quality status is not SAFE. A non-SAFE row in that broader count is never
+admissible for an economic replay. These totals can therefore differ without
+indicating a stale index, but every consumer must preserve their distinct
+meaning and verify the shared `source_index_sha256` before comparing them.
+
+A trade counted outside the replay-admissible total is not automatically proven
+unusable: reports must distinguish a genuinely invalid asset from an asset
+whose replay proof is still missing. Replay-compatibility diagnostics therefore
+expose both shard counts and exact trade-weighted blocker counts so remediation
+prioritizes the largest recoverable populations first.
 
 The derived `catalog/REPLAY_COMPATIBILITY_REASONS.json` receipt must remain a
 compact SHA-index-bound **aggregate**, not a second per-shard copy of the full

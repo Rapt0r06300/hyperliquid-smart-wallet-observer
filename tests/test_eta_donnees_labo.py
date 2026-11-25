@@ -385,7 +385,8 @@ def test_dashboard_court_separe_safe_extraction_et_github_sans_ligne_trop_longue
     assert any("GITHUB" in ligne and "21,400" in ligne for ligne in lignes)
     assert any("COFFRE" in ligne and "31,601 fichiers" in ligne for ligne in lignes)
     assert max(map(len, lignes)) <= 100
-    assert "ne devient pas une journée dense avant replay" in texte
+    assert "fichier téléchargé ne compte pas avant replay" in texte
+    assert "q=quitter" in texte and "--detail=diag" in texte
 
 
 def test_un_ancien_recu_incomplet_montre_son_compte_sans_le_certifier(tmp_path):
@@ -409,6 +410,8 @@ def test_un_ancien_recu_incomplet_montre_son_compte_sans_le_certifier(tmp_path):
     assert sources["unpacked_shards"] is None
     assert sources["reported_unpacked_shards"] == 15_456
     assert "15,456 annoncés par le reçu, non vérifiés et non comptés" in texte
+    assert "REÇU NON VÉRIFIÉ (déclaré SAFE_UNPACK_COMPLETE)" in texte
+    assert "| ALINASYNC DÉBALLAGE : SAFE_UNPACK_COMPLETE |" not in texte
     assert "1,792,577 shards / 133.1 Go" in texte
 
 
@@ -596,6 +599,32 @@ def test_dashboard_court_affiche_separement_processus_et_croissance_fichiers():
     assert "COLLECTEURS" in texte and "20/20 actifs" in texte
     assert "écarts signalés: 1 184" in texte
     assert "+3 depuis lancement du suivi" in texte
+
+
+def test_dashboard_affiche_le_rapport_sonde_reel_et_non_le_nombre_de_fichiers():
+    lignes = ETA.lignes_dashboard_simple(
+        tours=2,
+        mesure={
+            "motif": "PREMIERE_MESURE",
+            "active_sources": 7,
+            "source_count": 94,
+            "recent_sources": 54,
+        },
+        etat={"code": "ACTIF"},
+        denses_acquis=2,
+        requis=6,
+        age_sonde_h=7.6,
+        eta={"statut": "INCONNU", "heures": None},
+        besoins=[],
+        sources=None,
+        intervalle_s=2.0,
+        source_denses="runtime/reports/sonde_horloges_20261124.json",
+    )
+
+    ligne_sonde = next(ligne for ligne in lignes if "SONDE DENSITÉ" in ligne)
+    assert "sonde_horloges_20261124.json" in ligne_sonde
+    assert "94 fichiers" not in ligne_sonde
+    assert "écran 2.0 s" in ligne_sonde
 
 
 def test_resume_detaille_explique_la_composition_des_ecarts_de_preuve():
@@ -874,3 +903,39 @@ def test_l_ecran_ne_dit_plus_ATTEINT_quand_les_etudes_attendent_des_jours(tmp_pa
 def test_le_debit_se_mesure_d_abord_sur_le_ruban_du_poll():
     """24/11/2026 : le ruban WS ne bougeait presque pas (0,0 ligne/min) ; la collecte passe par le poll REST."""
     assert ETA.RUBANS_FILLS[0] == "runtime/data/vault_fills_poll.jsonl"
+
+
+def test_main_ne_projette_pas_un_eta_dense_depuis_le_debit_global_des_fichiers(
+    tmp_path, monkeypatch, capsys
+):
+    sonde = tmp_path / "runtime" / "reports" / "sonde_horloges_live.json"
+    sonde.parent.mkdir(parents=True)
+    sonde.write_text(json.dumps({"appariement": {"jours_DENSES": 2}}), encoding="utf-8")
+
+    class MesureGlobale:
+        def __init__(self, _racine):
+            pass
+
+        def lire(self):
+            return {
+                "debit_par_heure": 60_000.0,
+                "lignes_par_minute": 1_000.0,
+                "octets_par_minute": 50_000.0,
+                "taille_octets": 1_000_000,
+                "age_s": 2.0,
+                "motif": None,
+                "source_count": 94,
+                "active_sources": 7,
+                "recent_sources": 12,
+            }
+
+    monkeypatch.setattr(ETA, "MesureMultiFlux", MesureGlobale)
+    monkeypatch.setattr(ETA.os, "system", lambda _commande: 0)
+
+    assert ETA.main(["--racine", str(tmp_path), "--une-fois"]) == 0
+
+    sortie = capsys.readouterr().out
+    ligne_eta = next(ligne for ligne in sortie.splitlines() if "ETA moteur" in ligne)
+    assert "INCONNU" in ligne_eta
+    assert "DÉBIT FICHIERS" in sortie
+    assert "pas de débit de signaux évaluables" in sortie

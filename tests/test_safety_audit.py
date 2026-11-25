@@ -1,7 +1,11 @@
 from pathlib import Path
 
 from hl_observer.security.fake_data_scanner import scan_for_fake_data
-from hl_observer.security.safety_audit import _iter_scannable_files, run_safety_audit
+from hl_observer.security.safety_audit import (
+    _contains_exchange_endpoint,
+    _iter_scannable_files,
+    run_safety_audit,
+)
 from hl_observer.security.secrets import contains_secret_pattern, scan_file_for_secret
 
 
@@ -94,6 +98,68 @@ def test_safety_audit_tolerates_refusal_guard_but_detects_runtime_exchange(tmp_p
     assert operational.checks["no_exchange_endpoint_in_runtime_source"] is False
 
 
+def test_safety_audit_does_not_exempt_same_named_operational_file(tmp_path, monkeypatch):
+    src = tmp_path / "src" / "hl_observer" / "execution"
+    tools = tmp_path / "tools"
+    tests = tmp_path / "tests"
+    src.mkdir(parents=True)
+    tools.mkdir()
+    tests.mkdir()
+    (src / "live_executor_disabled.py").write_text("LOCKED = True\n", encoding="utf-8")
+    (tools / "mainnet_guard.py").write_text("URL = '/exchange'\n", encoding="utf-8")
+    (tmp_path / ".env.example").write_text(
+        "HL_ENABLE_MAINNET_EXECUTION=false\n", encoding="utf-8"
+    )
+    for name in ("test_no_mainnet_execution.py", "test_safety_audit.py", "test_testnet_locked.py"):
+        (tests / name).write_text("# presence proof\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "hl_observer.security.safety_audit.auditer_l_environnement",
+        lambda: type("Audit", (), {"ok": True, "alerte": ""})(),
+    )
+
+    result = run_safety_audit(tmp_path)
+
+    assert result.checks["no_exchange_endpoint_in_runtime_source"] is False
+
+
+def test_safety_audit_detects_exchange_path_built_from_string_parts(tmp_path, monkeypatch):
+    src = tmp_path / "src" / "hl_observer"
+    tests = tmp_path / "tests"
+    (src / "execution").mkdir(parents=True)
+    tests.mkdir()
+    (tmp_path / ".env.example").write_text(
+        "HL_ENABLE_MAINNET_EXECUTION=false\n", encoding="utf-8"
+    )
+    (src / "execution" / "live_executor_disabled.py").write_text(
+        "LOCKED = True\n", encoding="utf-8"
+    )
+    for name in ("test_no_mainnet_execution.py", "test_safety_audit.py", "test_testnet_locked.py"):
+        (tests / name).write_text("# presence proof\n", encoding="utf-8")
+    (src / "client.py").write_text(
+        "EXCHANGE_PATH = '/' + 'exchange'\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        "hl_observer.security.safety_audit.auditer_l_environnement",
+        lambda: type("Audit", (), {"ok": True, "alerte": ""})(),
+    )
+
+    result = run_safety_audit(tmp_path)
+
+    assert result.checks["no_exchange_endpoint_in_runtime_source"] is False
+
+
+def test_exchange_endpoint_scan_ignores_comments_and_other_venue_paths():
+    assert not _contains_exchange_endpoint(
+        '"""No /exchange calls are allowed."""\n# never call /exchange\n'
+        'URL = "https://fapi.binance.com/fapi/v1/exchangeInfo"\n',
+        ".py",
+    )
+    assert not _contains_exchange_endpoint(
+        "@echo off\nREM Never call /exchange\necho safe\n", ".cmd"
+    )
+    assert _contains_exchange_endpoint("URL = '/' + 'exchange'\n", ".py")
+
+
 def test_safety_audit_covers_legacy_tools_scripts_and_workflows(tmp_path, monkeypatch):
     for directory in ("src/hl_observer", "hyper_smart_observer", "tools"):
         (tmp_path / directory).mkdir(parents=True)
@@ -160,6 +226,34 @@ def test_safety_audit_includes_root_launchers_and_workflow_commands(tmp_path, mo
     assert workflow in operational_files
 
     result = run_safety_audit(tmp_path)
+    assert result.checks["no_exchange_endpoint_in_runtime_source"] is False
+
+
+def test_safety_audit_scans_inline_scripts_in_dashboard_html(tmp_path, monkeypatch):
+    src = tmp_path / "src" / "hl_observer"
+    tests = tmp_path / "tests"
+    (src / "execution").mkdir(parents=True)
+    (src / "ui").mkdir()
+    tests.mkdir()
+    (tmp_path / ".env.example").write_text(
+        "HL_ENABLE_MAINNET_EXECUTION=false\n", encoding="utf-8"
+    )
+    (src / "execution" / "live_executor_disabled.py").write_text(
+        "LOCKED = True\n", encoding="utf-8"
+    )
+    for name in ("test_no_mainnet_execution.py", "test_safety_audit.py", "test_testnet_locked.py"):
+        (tests / name).write_text("# presence proof\n", encoding="utf-8")
+    dashboard = src / "ui" / "index.html"
+    dashboard.write_text(
+        "<script>fetch('/exchange')</script>\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        "hl_observer.security.safety_audit.auditer_l_environnement",
+        lambda: type("Audit", (), {"ok": True, "alerte": ""})(),
+    )
+
+    result = run_safety_audit(tmp_path)
+
     assert result.checks["no_exchange_endpoint_in_runtime_source"] is False
 
 

@@ -127,7 +127,7 @@ def construire_markdown(*, horodatage: str, source: str, periode: Any, inv: dict
     lignes += _section_audit(audit)
     lignes += _section_recherche(rech)
     lignes += _section_hierarchie_preuve(rech)
-    lignes += ["## Sécurité", "", "Paper strict : 0 ordre réel, 0 clé privée, 0 signature, aucun appel /exchange.",
+    lignes += ["## Sécurité", "", "Paper strict : aucun ordre, aucune clé privée ni signature ; aucun endpoint d’exécution.",
                ""]
     return "\n".join(lignes)
 

@@ -10,6 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+import hl_observer.backtesting.copy_vault_tier_local as tier_local  # noqa: E402
 from hl_observer.backtesting.copy_vault_tier_local import _charger_tier_local  # noqa: E402
 
 
@@ -30,7 +31,18 @@ def _write_shard(root: Path, family: str, name: str, rows: list[dict]) -> dict:
     }
 
 
-def test_context_family_is_read_after_replay_cap(tmp_path: Path) -> None:
+def test_context_family_is_read_after_replay_cap(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        tier_local._FENETRE,
+        "patienter_sous_pression",
+        lambda **_kwargs: {
+            "continuer": True,
+            "attendu_s": 0.0,
+            "incident": False,
+            "coupable": None,
+            "detail": None,
+        },
+    )
     fill = {
         "ts_ms": 1_000,
         "vault": "0x0000000000000000000000000000000000000001",

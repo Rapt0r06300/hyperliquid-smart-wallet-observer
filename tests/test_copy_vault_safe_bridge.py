@@ -187,6 +187,12 @@ def test_bridge_uses_real_safe_envelopes_and_reports_provenance(tmp_path: Path) 
     ).read_text())
     assert proof["economic_proof"] is False
     assert proof["selected_files"] == 2
+    assert proof["source_read_mode"] == "JSONL"
+    assert proof["verified_unpacked_bytes"] == sum(
+        row["jsonl_bytes"] for row in proof["safe_input_shards"]
+    )
+    assert proof["verified_streamed_bytes"] == 0
+    assert proof["source_read_mode_shards"] == {"JSONL": 2}
     assert build_safe_copy_workspace(tmp_path)["workspace"] == str(workspace)
 
 
@@ -211,6 +217,40 @@ def test_bridge_streams_seal_only_archives_without_claiming_physical_unpack(
 
     assert result["status"] == "SAFE_COPY_WORKSPACE_READY"
     assert result["source_read_mode"] == "GZIP_STREAM"
+    proof = json.loads((
+        Path(result["workspace"])
+        / "runtime/reports/datasets/SELECTION_PROVENANCE.json"
+    ).read_text())
+    assert proof["verified_unpacked_bytes"] == 0
+    assert proof["verified_streamed_bytes"] == sum(
+        row["jsonl_bytes"] for row in proof["safe_input_shards"]
+    )
+    assert proof["source_read_mode_shards"] == {"GZIP_STREAM": 2}
+
+
+def test_bridge_reports_mixed_physical_and_stream_reads_accurately(tmp_path: Path) -> None:
+    recovery = _corpus(
+        tmp_path, [_envelope("copy_vault_fills"), _envelope("copy_vault_l2")]
+    )
+    plain = recovery / "usable" / "unpacked" / "test-release" / "safe-1.jsonl"
+    plain.unlink()
+
+    result = build_safe_copy_workspace(tmp_path)
+
+    assert result["status"] == "SAFE_COPY_WORKSPACE_READY"
+    assert result["source_read_mode"] == "MIXED"
+    assert result["reported_read_mode"] == "JSONL"
+    proof = json.loads((
+        Path(result["workspace"])
+        / "runtime/reports/datasets/SELECTION_PROVENANCE.json"
+    ).read_text())
+    sizes_by_mode = {
+        row["relative_path"].rsplit("/", 1)[-1]: row["jsonl_bytes"]
+        for row in proof["safe_input_shards"]
+    }
+    assert proof["verified_unpacked_bytes"] == sizes_by_mode["safe-0.jsonl.gz"]
+    assert proof["verified_streamed_bytes"] == sizes_by_mode["safe-1.jsonl.gz"]
+    assert proof["source_read_mode_shards"] == {"GZIP_STREAM": 1, "JSONL": 1}
 
 
 def test_bridge_can_bind_an_explicit_current_recovery_and_catalog(

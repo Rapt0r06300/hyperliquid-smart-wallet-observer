@@ -562,6 +562,12 @@ def build() -> dict[str, Any]:
             "trades_indexed_exact": (
                 "exact trade count from DATA_INDEX-backed Dataset V2 metrics"
             ),
+            "trades_replayable": (
+                "exact count for SAFE shards that are replay-compatible; non-SAFE "
+                "rows remain excluded even if structurally replayable. For the "
+                "all-status replayable total, use "
+                "REPLAY_COMPATIBILITY_REASONS.replayable_trade_count_exact"
+            ),
             "global_unique_trades": (
                 "only populated after deterministic cross-shard identity deduplication"
             ),

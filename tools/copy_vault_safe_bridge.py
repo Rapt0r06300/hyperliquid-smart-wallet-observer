@@ -13,6 +13,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import shutil
 import sqlite3
 from contextlib import closing
@@ -85,7 +86,7 @@ def _read_json(path: Path) -> dict[str, Any]:
     return result
 
 
-def _jsonl_ouvert(archive, plain):
+def _jsonl_ouvert(archive, plain, *, mode: str):
     """Le JSONL du shard : depuis l extraction si elle existe, sinon EN FLUX depuis l archive.
 
     POURQUOI (20/11/2026). L extraction complete du corpus SAFE reclame **2,31 To** quand la
@@ -96,22 +97,13 @@ def _jsonl_ouvert(archive, plain):
     les memes preuves, sans ecrire un seul octet. La certification n est pas affaiblie : elle est
     calculee sur le flux au lieu d un fichier.
     """
-    if plain.is_file():
+    if mode == "JSONL":
+        if not plain.is_file():
+            raise SafeBridgeError(f"verified extracted JSONL disappeared: {plain}")
         return plain.open("rb")
-    return gzip.open(archive, "rb")
-
-
-def _jsonl_empreinte(archive, plain) -> tuple[str, int]:
-    """(sha256, octets) du JSONL, sans jamais l ecrire sur disque."""
-    if plain.is_file():
-        return _digest(plain), plain.stat().st_size
-    condense = hashlib.sha256()
-    total = 0
-    with gzip.open(archive, "rb") as flux:
-        for morceau in iter(lambda: flux.read(1 << 20), b""):
-            condense.update(morceau)
-            total += len(morceau)
-    return condense.hexdigest(), total
+    if mode == "GZIP_STREAM":
+        return gzip.open(archive, "rb")
+    raise SafeBridgeError(f"unsupported SAFE source read mode: {mode}")
 
 
 def _safe_paths(recovery: Path, relative: str) -> tuple[Path, Path, Path]:
@@ -487,14 +479,14 @@ def build_safe_copy_workspace(
         if catalog_path is not None
         else root / "catalog" / "DATA_INDEX.json"
     )
-    catalog, registry, source_read_mode = _safe_registry_rows(
+    catalog, registry, reported_read_mode = _safe_registry_rows(
         recovery, active_catalog_path
     )
     parent = root / "runtime" / "research_lab" / "copy_vault_safe"
     if parent.is_symlink():
         raise SafeBridgeError("unsafe Copy-Vault workspace parent")
     parent.mkdir(parents=True, exist_ok=True)
-    bridge_schema = "hypersmart.dataset_selection_provenance.v4"
+    bridge_schema = "hypersmart.dataset_selection_provenance.v5"
     selection = hashlib.sha256()
     selection.update(bridge_schema.encode("ascii") + b"\0" + catalog.encode("ascii"))
     # A schema change gets a new immutable artifact directory instead of
@@ -520,6 +512,9 @@ def build_safe_copy_workspace(
     inputs: list[dict[str, Any]] = []
     decision_reasons: Counter[str] = Counter()
     decision_totals = {"rows": 0, "quarantined": 0, "scope_excluded": 0}
+    source_read_modes: Counter[str] = Counter()
+    verified_unpacked_bytes = 0
+    verified_streamed_bytes = 0
     total = len(registry)
     processed_shards = 0
     try:
@@ -565,32 +560,50 @@ def build_safe_copy_workspace(
                     or stat.st_size != size
                 ):
                     raise SafeBridgeError(f"registered SAFE shard was modified: {relative}")
-                with _jsonl_ouvert(archive, plain) as handle:
-                    first = handle.readline()
-                if not first:
-                    raise SafeBridgeError(f"empty SAFE shard: {relative}")
-                peek = _source_record(first)
-                channel = peek.get("channel")
+                # The report says what the previous unpack selected. This run records
+                # what it actually reads, pinned once per shard so appearance or
+                # removal of a JSONL cannot silently change the provenance mid-run.
+                shard_read_mode = "JSONL" if plain.is_file() else "GZIP_STREAM"
                 seal = _read_json(seal_path)
                 if (
                     seal.get("schema") != "alina.safe_jsonl_proof.v1"
                     or seal.get("compressed_sha256") != sha
                     or _digest(archive) != sha
-                    or (seal.get("jsonl_sha256"), seal.get("jsonl_bytes"))
-                    != _jsonl_empreinte(archive, plain)
+                    or not isinstance(seal.get("jsonl_sha256"), str)
+                    or re.fullmatch(r"[0-9a-f]{64}", seal["jsonl_sha256"]) is None
+                    or type(seal.get("jsonl_bytes")) is not int
+                    or seal["jsonl_bytes"] <= 0
                 ):
-                    raise SafeBridgeError(f"SAFE shard byte proof mismatch: {relative}")
+                    raise SafeBridgeError(f"SAFE archive proof mismatch: {relative}")
+                plain_stat = plain.stat() if shard_read_mode == "JSONL" else None
                 for identity in (relative, sha, str(seal["jsonl_sha256"])):
                     selection.update(identity.encode("utf-8") + b"\0")
                 rows = admitted_frames = quarantined_frames = 0
                 scope_excluded_frames = admitted_raw_bytes = 0
-                with _jsonl_ouvert(archive, plain) as stream:
+                jsonl_digest = hashlib.sha256()
+                jsonl_bytes = 0
+                channel = None
+                deferred_source_error = None
+                with _jsonl_ouvert(archive, plain, mode=shard_read_mode) as stream:
                     for line_number, line in enumerate(stream, 1):
                         rows += 1
-                        record = _source_record(line)
+                        jsonl_digest.update(line)
+                        jsonl_bytes += len(line)
+                        if deferred_source_error is not None:
+                            continue
+                        try:
+                            record = _source_record(line)
+                        except SafeBridgeError as exc:
+                            deferred_source_error = exc
+                            continue
                         record_channel = record.get("channel")
+                        if rows == 1:
+                            channel = record_channel
                         if record_channel != channel:
-                            raise SafeBridgeError(f"mixed channel in SAFE shard: {relative}")
+                            deferred_source_error = SafeBridgeError(
+                                f"mixed channel in SAFE shard: {relative}"
+                            )
+                            continue
                         if record_channel not in paths:
                             record_decision(
                                 decision="SCOPE_EXCLUDED",
@@ -656,15 +669,46 @@ def build_safe_copy_workspace(
                             counts[record_channel] += 1
                         admitted_frames += 1
                         admitted_raw_bytes += len(line)
+                if not rows:
+                    raise SafeBridgeError(f"empty SAFE shard: {relative}")
+                if (jsonl_digest.hexdigest(), jsonl_bytes) != (
+                    seal.get("jsonl_sha256"), seal.get("jsonl_bytes")
+                ):
+                    raise SafeBridgeError(f"SAFE shard byte proof mismatch: {relative}")
+                if deferred_source_error is not None:
+                    raise deferred_source_error
+                archive_after = archive.stat()
+                if (
+                    (archive_after.st_dev, archive_after.st_ino,
+                     archive_after.st_mtime_ns, archive_after.st_ctime_ns) != stat_identity
+                    or archive_after.st_size != size
+                ):
+                    raise SafeBridgeError(f"registered SAFE shard changed during read: {relative}")
+                if plain_stat is not None:
+                    plain_after = plain.stat()
+                    if (
+                        (plain_after.st_dev, plain_after.st_ino,
+                         plain_after.st_mtime_ns, plain_after.st_ctime_ns)
+                        != (plain_stat.st_dev, plain_stat.st_ino,
+                            plain_stat.st_mtime_ns, plain_stat.st_ctime_ns)
+                        or plain_after.st_size != jsonl_bytes
+                    ):
+                        raise SafeBridgeError(f"verified extracted JSONL changed during read: {plain}")
                 inputs.append({
                     "relative_path": relative, "sha256": sha,
-                    "jsonl_sha256": seal["jsonl_sha256"], "jsonl_bytes": seal["jsonl_bytes"],
+                    "jsonl_sha256": jsonl_digest.hexdigest(), "jsonl_bytes": jsonl_bytes,
+                    "read_mode": shard_read_mode,
                     "channel": channel, "frames": rows,
                     "admitted_frames": admitted_frames,
                     "quarantined_frames": quarantined_frames,
                     "scope_excluded_frames": scope_excluded_frames,
                     "admitted_jsonl_bytes": admitted_raw_bytes,
                 })
+                source_read_modes[shard_read_mode] += 1
+                if shard_read_mode == "JSONL":
+                    verified_unpacked_bytes += jsonl_bytes
+                else:
+                    verified_streamed_bytes += jsonl_bytes
                 if i % 100 == 0 or i == total:
                     print(
                         f"ALINA_COPY_SAFE_PROGRESS={i}/{total} "
@@ -686,6 +730,11 @@ def build_safe_copy_workspace(
                 + f"scope_excluded={decision_totals['scope_excluded']})"
             )
         digest = selection.hexdigest()
+        source_read_mode = (
+            next(iter(source_read_modes))
+            if len(source_read_modes) == 1
+            else "MIXED" if source_read_modes else "UNKNOWN"
+        )
         outputs = {
             name: {"path": "runtime/data/" + path.name,
                    "sha256": _digest(path), "bytes": path.stat().st_size}
@@ -708,16 +757,20 @@ def build_safe_copy_workspace(
                 "alina-sync-safe-unpacked"
                 if source_read_mode == "JSONL"
                 else "alina-sync-safe-seals"
+                if source_read_mode == "GZIP_STREAM"
+                else "alina-sync-safe-mixed"
             ),
             "source_read_mode": source_read_mode,
+            "reported_read_mode": reported_read_mode,
             "source_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
             "catalog_sha256": catalog,
             "selection_digest": digest,
             "selected_files": len(admitted_inputs),
             "verified_safe_input_shards": len(inputs),
             "selected_raw_bytes": sum(row["admitted_jsonl_bytes"] for row in admitted_inputs),
-            "verified_unpacked_bytes": sum(int(row["jsonl_bytes"]) for row in inputs),
-            "verified_streamed_bytes": sum(int(row["jsonl_bytes"]) for row in inputs),
+            "verified_unpacked_bytes": verified_unpacked_bytes,
+            "verified_streamed_bytes": verified_streamed_bytes,
+            "source_read_mode_shards": dict(sorted(source_read_modes.items())),
             "safe_input_shards": inputs,
             "input_decisions": decisions,
             "outputs": outputs,
@@ -751,6 +804,10 @@ def build_safe_copy_workspace(
             "catalog_sha256": catalog, "selected_shards": len(admitted_inputs),
             "counts": counts, "outputs": outputs, "input_decisions": decisions,
             "source_read_mode": source_read_mode,
+            "reported_read_mode": reported_read_mode,
+            "verified_unpacked_bytes": verified_unpacked_bytes,
+            "verified_streamed_bytes": verified_streamed_bytes,
+            "source_read_mode_shards": dict(sorted(source_read_modes.items())),
             "economic_proof": False,
         }
     except Exception as exc:

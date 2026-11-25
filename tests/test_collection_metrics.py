@@ -38,6 +38,8 @@ def test_collection_metrics_binds_index_and_rejects_stale_derived_view(
 
     assert out["source_index_sha256"] == hashlib.sha256(index.read_bytes()).hexdigest()
     assert out["indexed_dataset"]["indexed_shards"] == 2
+    assert "SAFE" in out["semantics"]["trades_replayable"]
+    assert "REPLAY_COMPATIBILITY_REASONS" in out["semantics"]["trades_replayable"]
 
     index.write_text(json.dumps({"shard_count": 3}), encoding="utf-8")
     try:
