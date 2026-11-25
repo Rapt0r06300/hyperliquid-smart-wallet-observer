@@ -7,11 +7,11 @@ freshness-gated store.  No order/exchange endpoint lives here.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
-from itertools import combinations
 import math
 import time
-from typing import Iterable
+from collections.abc import Iterable
+from dataclasses import dataclass, replace
+from itertools import combinations
 
 from hl_observer.arbitrage.cross_source_comparator import CrossSourcePrice
 
@@ -129,7 +129,7 @@ class NativeMarketSnapshot:
         duplicate_count: int = 0,
         regression_count: int = 0,
         reason: str = "",
-    ) -> "NativeMarketSnapshot":
+    ) -> NativeMarketSnapshot:
         now = (
             int(time.time() * 1000)
             if now_ms is None
@@ -209,7 +209,7 @@ class NativeMarketSnapshot:
         )
         return max(0, now - self.receive_ts_ms)
 
-    def with_freshness(self, *, now_ms: int, stale_after_ms: int) -> "NativeMarketSnapshot":
+    def with_freshness(self, *, now_ms: int, stale_after_ms: int) -> NativeMarketSnapshot:
         _require_non_negative_int(now_ms, field_name="now_ms")
         _require_non_negative_int(stale_after_ms, field_name="stale_after_ms")
         if self.quality in {DESYNC, UNMEASURABLE}:
