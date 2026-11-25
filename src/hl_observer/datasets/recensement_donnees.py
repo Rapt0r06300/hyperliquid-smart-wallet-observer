@@ -316,7 +316,10 @@ def recenser(root: Path, *, verifier_sha: bool = False, max_listes: int = 200) -
                 raise
             except OSError as exc:
                 noter_erreur_parcours(self.rel, "iterer_dossier", exc)
-                self.it.close()
+                try:
+                    self.it.close()
+                except OSError as fermeture:
+                    noter_erreur_parcours(self.rel, "fermer_dossier", fermeture)
                 self.it = None
                 raise StopIteration from exc
 

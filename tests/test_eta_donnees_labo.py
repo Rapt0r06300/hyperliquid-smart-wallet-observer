@@ -230,6 +230,38 @@ def test_l_eta_lit_separement_alinasync_github_et_coffre(tmp_path):
     assert "ne deviennent des jours denses" in lignes
 
 
+def test_coffre_scan_incomplet_est_affiche_explicitement(tmp_path):
+    coffre = tmp_path / "runtime" / "coffre_certifie"
+    coffre.mkdir(parents=True)
+    (coffre / "COUVERTURE_PROJET.json").write_text(json.dumps({
+        "genere_ms": 123_456,
+        "complet": False, "cent_pour_cent": False,
+        "couverture_pct": None, "fichiers_de_donnees": 40,
+    }), encoding="utf-8")
+
+    sources = ETA.lire_sources_alinasync(tmp_path)
+
+    assert sources["coffre_status"] == "SCAN INCOMPLET"
+    assert sources["coffre_scan_complete"] is False
+    assert sources["coffre_couverture_pct"] is None
+    assert "SCAN INCOMPLET" in "\n".join(ETA.lignes_sources_live(sources))
+
+
+def test_coffre_refuse_un_recu_de_couverture_contradictoire(tmp_path):
+    coffre = tmp_path / "runtime" / "coffre_certifie"
+    coffre.mkdir(parents=True)
+    (coffre / "COUVERTURE_PROJET.json").write_text(json.dumps({
+        "genere_ms": 123_456,
+        "complet": True, "cent_pour_cent": True,
+        "couverture_pct": 92.5, "fichiers_de_donnees": 40,
+    }), encoding="utf-8")
+
+    sources = ETA.lire_sources_alinasync(tmp_path)
+
+    assert sources["coffre_status"] == "REÇU INCOHÉRENT"
+    assert sources["coffre_couverture_pct"] is None
+
+
 def test_eta_ne_reparse_pas_le_gros_recu_restore_inchange_et_invalide_les_modifs(
     tmp_path, monkeypatch
 ):

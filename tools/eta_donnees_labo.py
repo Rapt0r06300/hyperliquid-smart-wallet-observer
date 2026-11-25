@@ -701,6 +701,7 @@ def lire_sources_alinasync(racine: Path) -> dict:
         "sync_status": "INCONNU",
         "sync_report_status": None,
         "coffre_status": "INCONNU",
+        "coffre_scan_complete": None,
         "coffre_couverture_pct": None,
         "coffre_fichiers": None,
         "coffre_genere_ms": None,
@@ -935,17 +936,44 @@ def lire_sources_alinasync(racine: Path) -> dict:
                 pct = couverture.get("couverture_pct")
                 fichiers = couverture.get("fichiers_de_donnees")
                 genere_ms = couverture.get("genere_ms")
-                if isinstance(pct, (int, float)) and math.isfinite(float(pct)):
-                    resultat["coffre_couverture_pct"] = float(pct)
-                if type(fichiers) is int and fichiers >= 0:
+                scan_complet = couverture.get("complet")
+                cent_pour_cent = couverture.get("cent_pour_cent")
+                pct_valide = (
+                    type(pct) in (int, float)
+                    and math.isfinite(float(pct))
+                    and 0.0 <= float(pct) <= 100.0
+                )
+                fichiers_valides = type(fichiers) is int and fichiers >= 0
+                resultat["coffre_scan_complete"] = (
+                    scan_complet if type(scan_complet) is bool else None
+                )
+                if fichiers_valides:
                     resultat["coffre_fichiers"] = fichiers
                 if type(genere_ms) is int and genere_ms > 0:
                     resultat["coffre_genere_ms"] = genere_ms
-                resultat["coffre_status"] = (
-                    "CERTIFIÉ 100 %"
-                    if couverture.get("cent_pour_cent") is True
-                    else "PARTIEL / À COMPLÉTER"
-                )
+                if (
+                    type(scan_complet) is not bool
+                    or type(cent_pour_cent) is not bool
+                    or not fichiers_valides
+                ):
+                    resultat["coffre_status"] = "REÇU INCOHÉRENT"
+                elif not scan_complet:
+                    # Un inventaire interrompu n'a pas de dénominateur complet :
+                    # son pourcentage ne doit pas ressembler à une couverture mesurée.
+                    resultat["coffre_status"] = (
+                        "REÇU INCOHÉRENT" if cent_pour_cent else "SCAN INCOMPLET"
+                    )
+                elif not pct_valide:
+                    resultat["coffre_status"] = "REÇU INCOHÉRENT"
+                elif cent_pour_cent:
+                    if fichiers > 0 and float(pct) == 100.0:
+                        resultat["coffre_couverture_pct"] = float(pct)
+                        resultat["coffre_status"] = "CERTIFIÉ 100 %"
+                    else:
+                        resultat["coffre_status"] = "REÇU INCOHÉRENT"
+                else:
+                    resultat["coffre_couverture_pct"] = float(pct)
+                    resultat["coffre_status"] = "PARTIEL / À COMPLÉTER"
     except (OSError, ValueError, UnicodeDecodeError):
         resultat["coffre_status"] = "INCONNU"
 
@@ -1203,7 +1231,7 @@ def lignes_dashboard_simple(
             f"{sources.get('coffre_status', 'INCONNU')} | {age_coffre}"
         )
     else:
-        coffre = f"INCONNU | {age_coffre}"
+        coffre = f"{sources.get('coffre_status', 'INCONNU') if sources else 'INCONNU'} | {age_coffre}"
     moteur_pct, progression_txt = _progression_densite_affiche(
         denses_acquis, requis, age_sonde_h
     )
