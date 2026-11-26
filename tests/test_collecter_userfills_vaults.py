@@ -782,12 +782,58 @@ def test_l2_rejection_heartbeat_is_bounded_and_deterministic(monkeypatch):
 
     assert metrics == {
         "l2_reject_reasons": {
+            "L2_REASON_25": 25,
             "L2_REASON_24": 24,
             "L2_REASON_23": 23,
-            "L2_REASON_22": 22,
         },
         "l2_reject_reason_codes_omitted": 22,
         "l2_reject_reason_counts_omitted": sum(range(1, 23)),
+    }
+
+
+def test_live_heartbeat_exports_l2_rejection_reasons(tmp_path, monkeypatch):
+    emitted = {}
+    monkeypatch.setattr(C.VI, "heartbeat", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        C,
+        "_heartbeat_userfills_state",
+        lambda _previous: {
+            "n_ecrites": 0,
+            "souscription_ack": True,
+            "persisted_total": 0,
+            "metriques": {
+                "subscription_ack_count": 1,
+                "subscription_required_count": 1,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        C,
+        "_HEARTBEAT_WS",
+        {
+            "messages": 0,
+            "fills": 0,
+            "dernier_exchange_ts": None,
+            "drops": 0,
+            "tape_drops": 0,
+            "l2_validation_rejections": 2,
+            "l2_reject_reasons": {"L2_TIMESTAMP_INVALID": 1, "L2_BBO_INVALID": 1},
+            "reconnects": 0,
+        },
+    )
+
+    def capture_heartbeat(*_args, **kwargs):
+        emitted.update(kwargs)
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(C.HB, "battre", capture_heartbeat)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(C._heartbeat(tmp_path, {}))
+
+    assert emitted["metriques"]["l2_validation_rejections"] == 2
+    assert emitted["metriques"]["l2_reject_reasons"] == {
+        "L2_BBO_INVALID": 1,
+        "L2_TIMESTAMP_INVALID": 1,
     }
 
 
