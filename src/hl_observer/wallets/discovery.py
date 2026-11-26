@@ -267,7 +267,9 @@ def _score_and_select(
             external_volume_usdc=candidate.external_volume_usdc,
             external_position_usdc=candidate.external_position_usdc,
             external_win_rate=candidate.external_win_rate,
-            activity_evidence_verified=candidate.activity_evidence_verified,
+            activity_evidence_verified=(
+                candidate.source_name == "public_trades_ws" and candidate.activity_evidence_verified
+            ),
             activity_trade_count=candidate.activity_trade_count,
             activity_window_start_ms=candidate.activity_window_start_ms,
             activity_window_end_ms=candidate.activity_window_end_ms,
