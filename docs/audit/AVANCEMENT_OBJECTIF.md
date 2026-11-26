@@ -3139,3 +3139,11 @@ fournis. Sans collecte, le labo n a toujours pas d episode complet de l entree a
   - BBO : 0 ligne manquante. Ruban poll (`vault_fills_poll.jsonl.avant-fusion.bak`, 3,9 Go) : pas encore mesuré par identité ; sa règle de filtre est volontaire et testée.
   - Suite ciblée après tous ces changements : 649 tests passent sur les 39 fichiers touchés. Seul rouge : `test_pas_de_nouveau_fichier_geant`, avec 8 fichiers en cours de Codex et aucun des miens.
 - Reste sur disque : `runtime/data/explorer_tx_tape.jsonl.fusion.tmp` (1,19 Go), copie triée laissée par la fusion échouée de 04:13. Rien n'y est unique, mais rien n'a été supprimé : c'est à Florent de décider.
+
+- **Vérification finale d'AlinaSync (26/11, 17:39 → 18:33, double-clic, Codex ouvert, Certificateur manuel en parallèle)** :
+  - **EXIT SUCCESS rc=0**, synchronisation principale réussie (30 min) et **0 lane en échec** : la lane explorer, en échec le matin, réussit en 35 s.
+  - Pont SAFE réussi, `SYNC_REPORT` = `REPLAY_READY_COMPLETE`.
+  - Aucune nouvelle copie `.tmp`/`.bak` : les fusions en ajout seul ne renomment plus rien. 34 processus de collecte toujours en marche.
+  - Le local est ancêtre de `origin/main` (14 « claims » de campagne du cloud en avance, aucune divergence).
+- **3 campagnes absentes du disque** (`catalog/campaigns/market-e8-{7,8,9}-2026112417-v7.json`, état `MD`) : présentes sur GitHub. AlinaSync ne les réécrivait pas, car il n'adopte le catalogue que quand `main` avance. Réécrites depuis HEAD (= GitHub, empreintes identiques), disque seulement. L'index local reste en retard sur 66 fichiers du catalogue : c'est la limite connue « le local retarde, rien ne le réconcilie », non traitée.
+- **Certificateur manuel de 17:01** (`--tout --recensement --compresser`, 1 011 fichiers) : il scelle d'anciennes rotations `bbo_shards_archive` (octobre) jamais scellées, environ 250 000 lignes par fichier. Contrôle : sur le dernier shard déposé (162 361 lignes), aucun shard plus ancien ne couvre la période, donc 0 doublon ; ce sont de vraies données sauvées. Mais il recharge environ 500 000 identités du coffre par fichier, soit environ 1 min par fichier. Son estimation « reste ~14 min » est calculée en octets et sous-estime la durée. Piste : garder ce préchargement d'un fichier au suivant sur la même période.
