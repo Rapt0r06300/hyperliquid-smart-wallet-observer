@@ -3,8 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from hl_observer.backtesting.recherche_adaptative_stricte import (
-    cribler_train_only,
+    _measured_split_sum,
     chercher_copy_strict,
+    cribler_train_only,
     write_strict_report,
 )
 from hl_observer.backtesting.recherche_scenario import DonneesReplay
@@ -66,6 +67,27 @@ def test_crible_peut_eliminer_un_perdant_train_sans_consulter_validation() -> No
     assert audit["validation_rows_seen"] == 0
 
 
+def test_crible_garde_un_candidat_si_le_net_train_est_non_mesurable() -> None:
+    candidates = [_candidate(float(i * 1_000)) for i in range(100)]
+    data = DonneesReplay(candidats=candidates, marks=[])
+    cfg = {"sl": 40.0, "tp": 80.0, "horizon_min": 1.0, "filtres": {}}
+
+    def missing_funding_screen(_candidates, _marks, *, base_config, horizon_min, cost_bps):
+        return {"arm_a": {"net_total_usd": None}}
+
+    kept, audit = cribler_train_only(data, [cfg], screen=missing_funding_screen, cap_candidats=1_000)
+
+    assert kept == [cfg]
+    assert audit["screen_unmeasurable_open"] == 1
+    assert audit["validation_rows_seen"] == 0
+
+
+def test_raffinage_ne_classe_pas_les_moitie_manquantes_comme_zero():
+    assert _measured_split_sum({"nets": {"moitie_1": 2.0, "moitie_2": -1.0}}) == 1.0
+    assert _measured_split_sum({"nets": {"moitie_1": None, "moitie_2": 100.0}}) is None
+    assert _measured_split_sum({"nets": {"moitie_1": "NaN", "moitie_2": 100.0}}) is None
+
+
 def test_trop_peu_de_train_laisse_passer_au_lieu_dinventer_un_verdict() -> None:
     data = DonneesReplay(candidats=[_candidate(float(i * 1_000)) for i in range(20)], marks=[])
     cfg = {"sl": 40.0, "tp": 80.0, "horizon_min": 1.0, "filtres": {}}
@@ -78,10 +100,7 @@ def test_trop_peu_de_train_laisse_passer_au_lieu_dinventer_un_verdict() -> None:
 
 def _fake_full_ab(candidates, marks, *, base_config, horizon_min, cost_bps):
     # Le candidat n'est intéressant que pour vérifier le parcours, pas pour fabriquer un PnL.
-    if cost_bps > 15:
-        net = 1.0
-    else:
-        net = 2.0
+    net = 1.0 if cost_bps > 15 else 2.0
     return {"arm_a": {"net_total_usd": net, "trades": 60, "profit_factor": 1.5}}
 
 

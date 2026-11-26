@@ -147,6 +147,8 @@ from hl_observer.wallets.delta_utils import (
     copy_delta_direction,
     delta_event_time_ms,
 )
+from hl_observer.wallets.leaderboard_models import candidate_from_persisted_row
+from hl_observer.wallets.leaderboard_queries import latest_leaderboard_candidate_rows
 
 
 def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRouter:
@@ -2007,6 +2009,9 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                         continue
                 except Exception as exc:
                     event["session_memory_error"] = f"{exc.__class__.__name__}: {exc}"
+                    event["reason"] = "SESSION_MEMORY_FAILED_CLOSED"
+                    ledger_events.append(event)
+                    continue
                 session_guard = evaluate_session_pnl_guard(
                     session_pnl_usdc=simulated_equity_so_far() - starting_equity_usdt,
                     starting_equity_usdt=starting_equity_usdt,
@@ -2066,6 +2071,9 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     desired_notional = adaptive_size.final_margin_usdt
                 except Exception as exc:
                     event["adaptive_sizing_error"] = f"{exc.__class__.__name__}: {exc}"
+                    event["reason"] = "ADAPTIVE_SIZING_FAILED_CLOSED"
+                    ledger_events.append(event)
+                    continue
                 entry_cost_guard = evaluate_entry_cost_guard(
                     coin=str(row.coin or ""),
                     wallet=str(row.wallet_address or ""),
@@ -4200,9 +4208,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         with session_factory() as session:
             leader_sample_limit = top_wallet_sample_limit()
             leader_rows = session.scalars(select(TopWallet).order_by(TopWallet.score.desc()).limit(leader_sample_limit)).all()
-            leaderboard_candidate_rows = session.scalars(
-                select(LeaderboardWalletCandidate).order_by(LeaderboardWalletCandidate.leaderboard_score.desc()).limit(500)
-            ).all()
+            leaderboard_candidate_rows = latest_leaderboard_candidate_rows(session, limit=500)
             max_signal_age_ms = simulation_max_signal_age_ms()
             entry_analysis_cutoff_ms = max(simulation_started_at_ms, current_time_ms - max_signal_age_ms)
             exit_analysis_cutoff_ms = max(simulation_started_at_ms, current_time_ms - max_signal_age_ms * 10)
@@ -4284,6 +4290,11 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             positions_count = fast_table_count(session, Position)
             open_orders_count = fast_table_count(session, OpenOrder)
         leaders = unique_top_wallets(leader_rows, limit=settings.copy_trading.top_leaders)
+        leaderboard_candidates = sorted(
+            (candidate_from_persisted_row(row) for row in leaderboard_candidate_rows),
+            key=lambda candidate: candidate.leaderboard_score,
+            reverse=True,
+        )
         leader_cards = [
             {
                 "wallet_address": row.wallet_address,
@@ -4296,17 +4307,17 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             for row in leaders
         ]
         seen_leader_addresses = {row["wallet_address"].lower() for row in leader_cards}
-        for row in leaderboard_candidate_rows:
+        for candidate in leaderboard_candidates:
             if len(leader_cards) >= settings.copy_trading.top_leaders:
                 break
-            wallet_address = row.wallet_address.lower()
+            wallet_address = candidate.wallet_address.lower()
             if wallet_address in seen_leader_addresses:
                 continue
             leader_cards.append(
                 {
-                    "wallet_address": row.wallet_address,
-                    "rank": row.rank,
-                    "score": row.leaderboard_score,
+                    "wallet_address": candidate.wallet_address,
+                    "rank": candidate.rank,
+                    "score": candidate.leaderboard_score,
                     "source": "leaderboard_candidate",
                     "status": "selected_for_simulation_watch",
                     "notes": "complete_address_candidate;not_yet_promoted_to_top_wallet",
@@ -5339,22 +5350,26 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
     @router.get("/api/leaderboard/candidates")
     async def leaderboard_candidates(limit: int = 100) -> list[dict[str, Any]]:
         with session_factory() as session:
-            rows = session.scalars(
-                select(LeaderboardWalletCandidate).order_by(LeaderboardWalletCandidate.leaderboard_score.desc()).limit(limit)
-            ).all()
+            rows = latest_leaderboard_candidate_rows(session, limit=limit)
+        candidates = sorted(
+            (candidate_from_persisted_row(row) for row in rows),
+            key=lambda candidate: candidate.leaderboard_score,
+            reverse=True,
+        )
         return [
             {
-                "wallet_address": row.wallet_address,
-                "rank": row.rank,
-                "period": row.period,
-                "account_value_usdc": row.account_value_usdc,
-                "pnl_usdc": row.pnl_usdc,
-                "roi_pct": row.roi_pct,
-                "volume_usdc": row.volume_usdc,
-                "leaderboard_score": row.leaderboard_score,
-                "selected_for_backfill": row.selected_for_backfill,
+                "wallet_address": candidate.wallet_address,
+                "rank": candidate.rank,
+                "period": candidate.period,
+                "account_value_usdc": candidate.account_value_usdc,
+                "pnl_usdc": candidate.pnl_usdc,
+                "roi_pct": candidate.roi_pct,
+                "volume_usdc": candidate.volume_usdc,
+                "leaderboard_score": candidate.leaderboard_score,
+                "score_kind": "PUBLIC_DISCOVERY_TRIAGE_ONLY",
+                "selected_for_backfill": candidate.selected_for_backfill,
             }
-            for row in rows
+            for candidate in candidates
         ]
 
     @router.get("/api/leaderboard/rejected")

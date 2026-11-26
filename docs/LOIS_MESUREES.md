@@ -69,7 +69,7 @@
 - **le chiffre** : réplication 350 USD, prix observés, 105 comptes sur 5 jours : le meilleur leader du tableau affiche **+18,85 USD/jour**, mais le meilleur leader SOUS PLACEBO (le même portefeuille confronté au chemin de prix d'un autre jour, 6 décalages) fait en moyenne **+19,16** et jusqu'à **+34,63** (p95). Écart au p95 du hasard : **−15,78 USD/jour** pour une marge de bruit de 1,06. Net d'ensemble −0,19 USD/jour, IC 95 % [−1,31 ; +0,81]. Le sommet du tableau est du bruit de sélection
 - **mesuré le** : 2026-11-17
 - **pour rouvrir** : un leader désigné EX ANTE (sur des jours antérieurs à ceux où on le mesure) dont le net dépasse le p95 du placebo plus la marge de bruit, sur ≥ 20 jours indépendants
-- **où vérifier** : `tools/etude_copiabilite.py --replication-350 (borne_du_hasard_replication) + backtesting/overfit_selection.py`
+- **où vérifier** : `tools/etude_copiabilite.py --replication-paper (alias historique --replication-350; borne_du_hasard_replication) + backtesting/overfit_selection.py`
 
 ### Utiliser la famille `overshoot` du coffre comme entrée de décision — `famille_overshoot_comme_entree`
 

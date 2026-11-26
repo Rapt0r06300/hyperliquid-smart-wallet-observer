@@ -457,6 +457,41 @@ def test_reconciliation_index_writer_requires_explicit_activation(tmp_path, monk
     assert read_index(path) == legacy  # No unsafe downgrade to legacy.
 
 
+def test_canonical_index_writer_rejects_a_stale_source_snapshot(tmp_path, monkeypatch):
+    from tools import index_run_manifest as indexer
+
+    logical = _index()
+    path = _stage(tmp_path, logical, {})
+    source_sha256 = index_file_sha256(path)
+    concurrent_root = json.loads(path.read_bytes())
+    concurrent_root["collection_epoch"] = 5
+    path.write_text(json.dumps(concurrent_root), encoding="utf-8")
+    current_bytes = path.read_bytes()
+    monkeypatch.delenv("ALINA_CATALOG_PARTITION_ACTIVATE", raising=False)
+
+    with pytest.raises(ValueError, match="CANONICAL_INDEX_SOURCE_CHANGED_BEFORE_PUBLISH"):
+        indexer._publish_canonical_index(
+            path,
+            logical,
+            expected_source_sha256=source_sha256,
+        )
+
+    assert path.read_bytes() == current_bytes
+
+
+def test_partition_save_requires_the_captured_source_sha(tmp_path):
+    from tools.partitioned_data_index import save_index
+
+    logical = _index()
+    path = _stage(tmp_path, logical, {})
+    before = path.read_bytes()
+
+    with pytest.raises(ValueError, match="PARTITION_PARITY_SOURCE_ROOT_CHANGED"):
+        save_index(path, logical, expected_source_sha256="0" * 64)
+
+    assert path.read_bytes() == before
+
+
 def test_save_index_refuses_unknown_existing_layout_without_mutation(tmp_path):
     from tools.partitioned_data_index import save_index
 

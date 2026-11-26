@@ -141,3 +141,30 @@ def test_la_somme_des_fenetres_rend_les_memes_fills_que_sans_fenetre(tmp_path):
         morceaux.extend(part)
     assert _instants(morceaux) == _instants(entiers)
     assert len(morceaux) == len(entiers), "aucun fill compté deux fois"
+
+
+def test_fenetre_sans_fill_ne_retombe_pas_sur_les_episodes_historiques_hors_fenetre(
+    tmp_path, monkeypatch
+):
+    """Une recherche vide dans la fenêtre ne doit pas relire le corpus legacy complet."""
+    monkeypatch.setattr(
+        PR,
+        "_fills_canoniques",
+        lambda root, *, fenetre: ([], {
+            "merged_fill_rows": 0,
+            "cross_source_or_internal_duplicates_rejected": 0,
+            "fenetre_fills": list(fenetre),
+            "decoupe_sure": True,
+        }),
+    )
+    monkeypatch.setattr(
+        PR,
+        "_charger_jsonl",
+        lambda path: pytest.fail("la fenêtre ne doit pas charger les épisodes legacy non bornés"),
+    )
+
+    episodes, audit = PR._reconstruire_episodes_canoniques(tmp_path, fenetre=(10_000, 19_999))
+
+    assert episodes == []
+    assert audit["episode_source"] == "no_canonical_fills_in_window"
+    assert audit["fenetre_fills"] == [10_000, 19_999]

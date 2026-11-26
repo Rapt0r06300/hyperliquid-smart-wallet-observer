@@ -173,7 +173,11 @@ def test_attribution_sans_avance_le_copieur_ne_porte_rien_avant_d_observer():
     # à l'observation le copieur passe de 0 à 9 BTC : rotation 9 x 105 USD, coût (4,5 + 1) bps
     assert leader["turnover_k1_usd"] == pytest.approx(9 * 105.0)
     assert leader["cost_k1_usd"] == pytest.approx(9 * 105.0 * 5.5e-4)
-    assert leader["net_k1_usd"] == pytest.approx(-9 * 105.0 * 5.5e-4)
+    assert leader["net_k1_usd"] is None
+    assert leader["funding_coverage_k1"] == pytest.approx(0.0)
+    assert leader["partial_net_excluding_unmeasured_funding_k1_usd"] == pytest.approx(
+        -9 * 105.0 * 5.5e-4
+    )
 
 
 def test_attribution_execution_separee_de_l_inventaire_et_cout_inconnu_exclu():
@@ -236,8 +240,32 @@ def _attribution(net_by_unit_day, exposure=10_000.0):
         "daily": {
             "inventory_k60_usd": net, "cost_k60_usd": zeros, "turnover_k60_usd": zeros + 1.0,
             "unmeasured_turnover_k60_usd": zeros, "exposure_usd_hours": zeros + exposure * 24.0,
+            "funding_k60_usd": zeros,
+            "funding_measured_k60_usd_hours": zeros + exposure * 24.0,
+            "funding_unmeasured_k60_usd_hours": zeros,
         },
     }
+
+
+def test_agregat_univers_publie_le_net_seulement_si_coverage_funding_suffisante():
+    cfg = cop.CopiabilityConfig(rebalance_minutes=(60,))
+    attribution = {
+        "market_hours": 1.0,
+        "daily": {
+            "inventory_k60_usd": np.array([[10.0]]),
+            "cost_k60_usd": np.array([[2.0]]),
+            "funding_k60_usd": np.array([[-1.0]]),
+            "funding_measured_k60_usd_hours": np.array([[95.0]]),
+            "funding_unmeasured_k60_usd_hours": np.array([[5.0]]),
+            "static_k60_usd": np.array([[3.0]]),
+        },
+    }
+
+    summary = cop._aggregate_universe_attribution(attribution, cfg)
+
+    assert summary["funding_coverage_k60"] == pytest.approx(0.95)
+    assert summary["net_k60_usd"] == pytest.approx(7.0)
+    assert summary["partial_net_excluding_unmeasured_funding_k60_usd"] == pytest.approx(7.0)
 
 
 def test_persistance_refuse_de_conclure_sans_jours_independants():
@@ -287,6 +315,12 @@ def test_etude_complete_deterministe_serialisable_et_strictement_paper():
     assert json.dumps(first, sort_keys=True, default=str) == json.dumps(second, sort_keys=True, default=str)
     assert first["paper_read_only"] is True and first["real_execution"] is False
     assert first["economically_proven"] is False
+    assert all(first["universe_attribution"][f"net_k{k}_usd"] is None for k in cfg.rebalance_minutes)
+    assert all(
+        first["universe_attribution"][f"funding_coverage_k{k}"] is None
+        or first["universe_attribution"][f"funding_coverage_k{k}"] == pytest.approx(0.0)
+        for k in cfg.rebalance_minutes
+    )
     assert {v["hypothesis"] for v in first["verdicts"]} == {
         cop.H_NAIVE_MIRROR, cop.H_FAST_FOLLOW, cop.H_SLOW_REPLICATION,
     }
@@ -541,10 +575,15 @@ def test_funding_compte_dans_le_net_la_ou_il_est_connu_et_trace_ailleurs():
     connu_h = 130.0 / 60.0                                         # 120 min observées + 10 min de fraîcheur
     assert leader["funding_k1_usd"] == pytest.approx(-10 * 100.0 * 1e-4 * connu_h, rel=0.02)
     assert leader["funding_unmeasured_k1_usd_hours"] == pytest.approx(1000.0 * (4.0 - connu_h), rel=0.02)
-    assert leader["net_k1_usd"] == pytest.approx(leader["inventory_k1_usd"] - leader["cost_k1_usd"] + leader["funding_k1_usd"])
+    expected_partial = leader["inventory_k1_usd"] - leader["cost_k1_usd"] + leader["funding_k1_usd"]
+    assert leader["funding_coverage_k1"] == pytest.approx(connu_h / 4.0, rel=0.02)
+    assert leader["net_k1_usd"] is None
+    assert leader["partial_net_excluding_unmeasured_funding_k1_usd"] == pytest.approx(expected_partial)
     sans = cop.attribute_pnl(fills, panel, {"BTC": 1.0}, {}, cfg)["leaders"][0]
     assert sans["funding_k1_usd"] == 0.0                           # non mesuré...
     assert sans["funding_unmeasured_k1_usd_hours"] == pytest.approx(1000.0 * 4.0, rel=0.02)   # ...et tracé comme tel
+    assert sans["funding_coverage_k1"] == pytest.approx(0.0)
+    assert sans["net_k1_usd"] is None
     short = [_fill("0xS", "BTC", 0, "A", 100.0, 10.0, 0.0, "Open Short", tid=2, lag_s=0.0)]
     recu = cop.attribute_pnl(_prepared(short)[0], panel, {"BTC": 1.0}, {}, cfg, funding_rates=rates)["leaders"][0]
     assert recu["funding_k1_usd"] == pytest.approx(-leader["funding_k1_usd"])   # un short REÇOIT un taux positif

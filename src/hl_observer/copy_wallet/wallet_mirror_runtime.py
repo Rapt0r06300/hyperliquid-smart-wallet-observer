@@ -20,7 +20,7 @@ from hl_observer.copy_wallet.wallet_journal import WalletJournalRecord, append_w
 from hl_observer.copy_wallet.wallet_rank_decay import RankDecayResult, apply_wallet_rank_decay
 from hl_observer.copy_wallet.wallet_tier import WalletTier, tier_for_wallet_score
 from hl_observer.edge.edge_net_v12 import EdgeNetV12Estimate, EdgeNetV12Inputs, estimate_edge_net_v12
-from hl_observer.edge.edge_source import edge_brut          # Q1 : la porte unique de l'edge brut
+from hl_observer.edge.edge_source import edge_brut  # Q1 : la porte unique de l'edge brut
 from hl_observer.risk.risk_engine_v3 import (
     EntryCostGuardConfig,
     EntryCostGuardDecision,
@@ -108,6 +108,7 @@ def run_wallet_mirror_pipeline(
     fee_bps: float,
     slippage_bps: float,
     latency_penalty_bps: float = 0.0,
+    funding_estimate_bps: float | None = None,
     logs_dir: Path | None = None,
     risk_config: V19RiskConfig | None = None,
     session_risk_context: SessionEntryRiskContext | None = None,
@@ -197,7 +198,7 @@ def run_wallet_mirror_pipeline(
             fee_bps=fee_bps,
             latency_penalty_bps=latency_penalty_bps,
             copy_degradation_bps=copy_degradation,
-            funding_estimate_bps=0.0,
+            funding_estimate_bps=funding_estimate_bps,
             min_edge_bps=18.0,
             max_copy_degradation_bps=40.0,
         )

@@ -7,8 +7,8 @@ visible, and a missing market fact becomes NO_TRADE rather than a guessed value.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import math
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,6 +104,7 @@ def estimate_edge_net_v12(inputs: EdgeNetV12Inputs) -> EdgeNetV12Estimate:
         missing.append("funding_estimate_bps")
         reasons.append("EDGE_UNMEASURABLE")
     elif inputs.funding_estimate_bps is None:
+        missing.append("funding_estimate_bps")
         reasons.append("FUNDING_UNKNOWN")
 
     if missing:

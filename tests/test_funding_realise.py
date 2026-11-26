@@ -19,6 +19,8 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+import pytest
+
 from hl_observer.backtesting import copy_vault_funding_realise as fr
 
 #: Trois règlements horaires, taux positif constant.
@@ -107,6 +109,34 @@ def test_les_champs_illisibles_se_disent_un_par_un() -> None:
         assert fr.funding_du_trade(trade, TAUX, couverture_ms=COUVERTURE)["reason"] == attendu
 
 
+@pytest.mark.parametrize("notionnel", [0.0, -1.0, float("nan"), float("inf")])
+def test_un_notionnel_non_positif_ou_non_fini_ne_peut_pas_etre_mesure(notionnel) -> None:
+    recu = fr.funding_du_trade(
+        _trade(3_000_000, 8_000_000, notionnel=notionnel), TAUX, couverture_ms=COUVERTURE
+    )
+    assert recu["status"] == "UNMEASURABLE"
+    assert recu["reason"] == "FUNDING_NOTIONAL_UNMEASURABLE"
+    assert recu["carry_pnl_usd"] is None
+
+
+@pytest.mark.parametrize("taux", [Decimal("NaN"), Decimal("Infinity"), Decimal("-Infinity")])
+def test_un_taux_non_fini_ne_peut_pas_etre_certifie_mesure(taux) -> None:
+    recu = fr.funding_du_trade(
+        _trade(3_000_000, 8_000_000), {"BTC": [(3_600_000, taux)]}, couverture_ms=COUVERTURE
+    )
+    assert recu["status"] == "UNMEASURABLE"
+    assert recu["reason"] == "FUNDING_RATE_SERIES_UNMEASURABLE"
+    assert recu["carry_pnl_usd"] is None
+
+
+def test_une_serie_de_taux_non_triee_est_refusee_avant_bisect() -> None:
+    serie = [(7_200_000, Decimal("0.0001")), (3_600_000, Decimal("0.0001"))]
+    recu = fr.funding_du_trade(_trade(3_000_000, 8_000_000), {"BTC": serie}, couverture_ms=COUVERTURE)
+    assert recu["status"] == "UNMEASURABLE"
+    assert recu["reason"] == "FUNDING_RATE_SERIES_UNMEASURABLE"
+    assert recu["carry_pnl_usd"] is None
+
+
 def test_une_seule_inconnue_emporte_le_total() -> None:
     """Un total calculé sur les seuls épisodes lisibles est d'autant plus flatteur qu'il en manque."""
     lisible = _trade(3_000_000, 8_000_000)
@@ -159,6 +189,63 @@ def test_un_intervalle_inattendu_est_refuse_et_compte(tmp_path, monkeypatch) -> 
     assert audit["ecartes_intervalle_inattendu"] == 1
     assert audit["ecartes_taux_illisible"] == 1
     assert [instant for instant, _ in taux["BTC"]] == [3_600_000]
+
+
+def test_le_coffre_refuse_taux_non_finis_et_timestamps_non_finis(tmp_path, monkeypatch) -> None:
+    import json
+
+    from hl_observer.backtesting import coffre_tranches
+
+    (tmp_path / "runtime/coffre_certifie").mkdir(parents=True)
+    (tmp_path / "runtime/coffre_certifie/LOCAL_INDEX.json").write_text(
+        json.dumps({"shards": [{"famille": "funding_history", "shard": "s1",
+                                "ts_min_ms": 0, "ts_max_ms": 99_000_000}]}), encoding="utf-8")
+    lignes = [
+        {"coin": "BTC", "ts_ms": 3_600_000, "funding": "0.0001", "interval": "1h"},
+        {"coin": "BTC", "ts_ms": 7_200_000, "funding": "NaN", "interval": "1h"},
+        {"coin": "BTC", "ts_ms": 10_800_000, "funding": "Infinity", "interval": "1h"},
+        {"coin": "BTC", "ts_ms": float("nan"), "funding": "0.0001", "interval": "1h"},
+        {"coin": "BTC", "ts_ms": float("inf"), "funding": "0.0001", "interval": "1h"},
+    ]
+    monkeypatch.setattr(coffre_tranches, "selectionner",
+                        lambda *a, **k: {"shards": [{"shard": "s1"}]})
+    monkeypatch.setattr(coffre_tranches, "flux", lambda *a, **k: iter(lignes))
+
+    taux, audit = fr.taux_du_coffre(tmp_path, coins=["BTC"], debut_ms=0, fin_ms=99_000_000)
+    assert audit["reglements_gardes"] == 1
+    assert audit["ecartes_taux_illisible"] == 4
+    assert [instant for instant, _ in taux["BTC"]] == [3_600_000]
+
+
+def test_le_coffre_verifie_les_hashes_et_refuse_une_serie_partielle(tmp_path, monkeypatch) -> None:
+    """Un shard rejeté ne doit jamais faire sous-estimer le funding d'un trade."""
+    import json
+
+    from hl_observer.backtesting import coffre_tranches
+
+    coffre = tmp_path / "runtime/coffre_certifie"
+    coffre.mkdir(parents=True)
+    (coffre / "LOCAL_INDEX.json").write_text(
+        json.dumps({"shards": [{"famille": "funding_history", "shard": "s1"}]}),
+        encoding="utf-8",
+    )
+    lignes = [{"coin": "BTC", "ts_ms": 3_600_000, "funding": "0.0001", "interval": "1h"}]
+
+    monkeypatch.setattr(coffre_tranches, "selectionner", lambda *a, **k: {"shards": [{"shard": "s1"}]})
+
+    def flux_incomplet(*args, compteurs=None, **kwargs):
+        assert kwargs["verifier_sha"] is True
+        compteurs["shards_lus"] = 0
+        compteurs["shards_refuses"] = [{"shard": "s1", "motif": "SHA_DIVERGENT"}]
+        return iter(lignes)
+
+    monkeypatch.setattr(coffre_tranches, "flux", flux_incomplet)
+
+    taux, audit = fr.taux_du_coffre(tmp_path, coins=["BTC"], debut_ms=0, fin_ms=99_000_000)
+
+    assert taux == {}
+    assert audit["status"] == "SHARDS_REFUSES"
+    assert audit["shards_refuses"] == [{"shard": "s1", "motif": "SHA_DIVERGENT"}]
 
 
 def test_le_coffre_absent_se_dit(tmp_path) -> None:

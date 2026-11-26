@@ -1,9 +1,10 @@
 from pathlib import Path
-import pytest
 
+import pytest
 from fastapi.testclient import TestClient
 
 from hl_observer.config.loader import load_settings
+from hl_observer.contrat_paper import PAPER_EQUITY_USD
 from hl_observer.storage.database import init_db
 from hl_observer.storage.models import MarketSnapshot, OrderbookSnapshot, PositionDeltaModel, TopWallet
 from hl_observer.ui.app import create_ui_app
@@ -15,7 +16,6 @@ from hl_observer.ui.persistent_state import (
 )
 from hl_observer.ui.state import UiState
 from hl_observer.utils.time import now_ms
-from hl_observer.contrat_paper import PAPER_EQUITY_USD
 
 
 @pytest.fixture(autouse=True)
@@ -244,6 +244,104 @@ def test_ui_simulation_uses_live_userfills_detection_time_for_freshness(tmp_path
     assert first_event["leader_exchange_ts"] == old_exchange_ts
     assert first_event["leader_detected_ts"] == base_ms
     assert first_event["signal_age_ms"] < 60_000
+
+
+@pytest.mark.parametrize(
+    ("failed_guard", "expected_reason"),
+    [
+        ("adaptive_sizing", "ADAPTIVE_SIZING_FAILED_CLOSED"),
+        ("session_memory", "SESSION_MEMORY_FAILED_CLOSED"),
+    ],
+)
+def test_ui_simulation_fails_closed_when_risk_guard_raises(
+    tmp_path: Path, monkeypatch, failed_guard: str, expected_reason: str,
+):
+    monkeypatch.setenv(
+        "HYPERSMART_ADAPTIVE_PAPER_SIZING",
+        "1" if failed_guard == "adaptive_sizing" else "0",
+    )
+
+    def sizing_unavailable(**_kwargs):
+        raise RuntimeError("paper sizing unavailable")
+
+    if failed_guard == "adaptive_sizing":
+        from hl_observer.simulation import adaptive_paper_sizing
+
+        monkeypatch.setattr(adaptive_paper_sizing, "adaptive_paper_margin", sizing_unavailable)
+    else:
+        from hl_observer.simulation import session_memory
+
+        monkeypatch.setattr(
+            session_memory,
+            "evaluate_coin_side_session_memory",
+            sizing_unavailable,
+        )
+    settings = load_settings()
+    settings.database_url = f"sqlite:///{tmp_path / 'data' / 'ui_sizing_failure.sqlite3'}"
+    init_db(settings.database_url)
+    state = UiState()
+    base_ms = now_ms() + 1_000
+    state.simulation_started_at_ms = base_ms - 2_000
+    client = TestClient(create_ui_app(settings, state))
+
+    from hl_observer.storage.database import create_session_factory, create_sqlite_engine
+
+    engine = create_sqlite_engine(settings.database_url)
+    factory = create_session_factory(engine)
+    wallets = ["0x" + "1" * 40, "0x" + "2" * 40]
+    with factory() as session:
+        for index, wallet in enumerate(wallets, start=1):
+            session.add(TopWallet(
+                wallet_address=wallet,
+                rank=index,
+                source="public_trades_ws",
+                score=95,
+                selected_at_ms=base_ms,
+                status="selected",
+            ))
+            session.add(PositionDeltaModel(
+                wallet_address=wallet,
+                coin="ETH",
+                previous_side="FLAT",
+                new_side="LONG",
+                previous_size=0.0,
+                current_size=2.0,
+                new_size=2.0,
+                delta_size=2.0,
+                delta_notional_usdc=6_000.0,
+                action="OPEN",
+                exchange_ts=base_ms - 1_000,
+                detected_at_ms=base_ms,
+                source="hyperliquid_ws:userFills",
+                side="B",
+                price=3_000.0,
+                fill_size=2.0,
+                delta_type="open_long",
+                confidence_score=0.95,
+                is_paper_eligible=True,
+                delta_hash=f"sizing-failure-open-{index}",
+                raw_json={"coin": "ETH", "dir": "Open Long"},
+            ))
+        session.add(MarketSnapshot(
+            source="allMids",
+            exchange_ts=base_ms,
+            raw_json={"ETH": "3000"},
+        ))
+        session.commit()
+
+    payload = client.get("/api/simulation/overview?limit=10").json()
+
+    assert payload["counts"]["reproduced_entries"] == 0
+    assert payload["counts"]["open_virtual_positions"] == 0
+    error_field = (
+        "adaptive_sizing_error"
+        if failed_guard == "adaptive_sizing" else "session_memory_error"
+    )
+    refusal = next(
+        row for row in payload["bot_simulation"]["events"]
+        if row.get(error_field)
+    )
+    assert refusal["reason"] == expected_reason
 
 
 def test_ui_simulation_groups_same_coin_side_leaders_into_one_consensus_position(tmp_path: Path):

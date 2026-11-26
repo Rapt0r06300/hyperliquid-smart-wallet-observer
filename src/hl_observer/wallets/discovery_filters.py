@@ -9,6 +9,7 @@ def dedupe_candidates(
     candidates: list[WalletDiscoveryCandidate],
 ) -> tuple[list[WalletDiscoveryCandidate], dict[str, WalletDiscoveryDecision]]:
     seen: set[str] = set()
+    by_address: dict[str, WalletDiscoveryCandidate] = {}
     rejected: dict[str, WalletDiscoveryDecision] = {}
     unique: list[WalletDiscoveryCandidate] = []
     for candidate in candidates:
@@ -23,8 +24,21 @@ def dedupe_candidates(
             rejected[candidate.address] = WalletDiscoveryDecision.REJECT_INVALID_ADDRESS
             continue
         if normalized in seen:
+            existing = by_address[normalized]
+            if (
+                candidate.source_name == "public_trades_ws"
+                and candidate.activity_evidence_verified
+                and not existing.activity_evidence_verified
+            ):
+                existing.activity_evidence_verified = True
+                existing.activity_trade_count = candidate.activity_trade_count
+                existing.activity_window_start_ms = candidate.activity_window_start_ms
+                existing.activity_window_end_ms = candidate.activity_window_end_ms
+                existing.last_trade_event_ms = candidate.last_trade_event_ms
+                existing.raw_payload.setdefault("public_trade_activity", candidate.raw_payload)
             rejected[candidate.address] = WalletDiscoveryDecision.REJECT_DUPLICATE
             continue
         seen.add(normalized)
+        by_address[normalized] = candidate
         unique.append(candidate)
     return unique, rejected

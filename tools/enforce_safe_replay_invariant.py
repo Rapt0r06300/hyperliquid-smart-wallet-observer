@@ -7,8 +7,9 @@ import hashlib
 import json
 import os
 import re
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 try:
     from tools.index_run_manifest import _publish_canonical_index
@@ -40,7 +41,10 @@ def _write(path: Path, value: Mapping[str,Any]) -> None:
 
 
 def migrate(*, dry_run: bool = False) -> dict[str,int]:
+    source_index_sha256=index_file_sha256(INDEX)
     index=read_index(INDEX)
+    if index_file_sha256(INDEX) != source_index_sha256:
+        raise ValueError("CANONICAL_INDEX_SOURCE_CHANGED_DURING_READ")
     rows=index.get("shards")
     if not isinstance(rows,list):
         raise ValueError("invalid DATA_INDEX shards")
@@ -123,19 +127,21 @@ def migrate(*, dry_run: bool = False) -> dict[str,int]:
         }
     archived: dict[Path, str] = {}
     # Validate all targets before touching the index or original receipts.
-    for source,target,updated in pending:
+    for _source,target,updated in pending:
         if target.exists():
             current=_load(target)
             if current != updated:
                 raise ValueError("REPLAY_MIGRATION_QUARANTINE_DESTINATION_CONFLICT")
+    if index_file_sha256(INDEX) != source_index_sha256:
+        raise ValueError("CANONICAL_INDEX_SOURCE_CHANGED_BEFORE_MANIFEST_UPDATE")
     for source,target,updated in pending:
         _,digest=_archive_prior_manifest(ROOT,source)
         archived[source]=digest
-        if source.resolve()!=target.resolve() and not target.exists():
+        if source.resolve()!=target.resolve() and not target.exists() or source.resolve()==target.resolve():
             _write(target,updated)
-        elif source.resolve()==target.resolve():
-            _write(target,updated)
-    _publish_canonical_index(INDEX,index)
+    _publish_canonical_index(
+        INDEX, index, expected_source_sha256=source_index_sha256
+    )
 
     safe=sum(1 for r in rows if isinstance(r,dict) and r.get("quality_status")=="SAFE")
     partial=sum(1 for r in rows if isinstance(r,dict) and r.get("quality_status")=="PARTIAL")

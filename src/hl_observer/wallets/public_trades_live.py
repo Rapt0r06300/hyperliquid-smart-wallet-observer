@@ -58,6 +58,8 @@ class PublicTradeScanResult:
     warnings: list[str] = field(default_factory=list)
     wallet_stats: dict[str, PublicTradeWalletStats] = field(default_factory=dict)
     raw_trade_samples: list[dict[str, Any]] = field(default_factory=list)
+    scan_started_at_ms: int = field(default_factory=now_ms)
+    scan_finished_at_ms: int | None = None
 
 
 def normalize_coin_list(coins: str | Iterable[str] | None) -> list[str]:
@@ -85,11 +87,7 @@ def normalize_coin_list(coins: str | Iterable[str] | None) -> list[str]:
 def trade_payloads_from_message(message: str | bytes | dict[str, Any]) -> list[dict[str, Any]]:
     if isinstance(message, bytes):
         message = message.decode("utf-8", errors="replace")
-    payload: Any
-    if isinstance(message, str):
-        payload = json.loads(message)
-    else:
-        payload = message
+    payload: Any = json.loads(message) if isinstance(message, str) else message
     if not isinstance(payload, dict):
         return []
     if payload.get("channel") != "trades":
@@ -131,6 +129,7 @@ def ingest_public_trade_messages(
             if len(result.raw_trade_samples) < sample_limit:
                 result.raw_trade_samples.append(trade)
     result.wallets_seen = len(result.wallet_stats)
+    result.scan_finished_at_ms = now_ms()
     return result
 
 
@@ -155,6 +154,7 @@ async def scan_public_trades_ws(
     if not network_read:
         result.stopped_reason = "NETWORK_READ_DISABLED"
         result.warnings.append("Network read disabled: public trades WebSocket not opened.")
+        result.scan_finished_at_ms = now_ms()
         return result
 
     if websocket_connect is None:
@@ -181,6 +181,7 @@ async def scan_public_trades_ws(
         result.stopped_reason = "SOURCE_UNAVAILABLE"
         result.warnings.append(f"Public trades WebSocket unavailable: {exc}")
     result.wallets_seen = len(result.wallet_stats)
+    result.scan_finished_at_ms = now_ms()
     return result
 
 
@@ -205,13 +206,17 @@ def _ingest_trade(
     max_wallets: int,
     min_notional_usdc: float,
 ) -> None:
+    trade_time = _safe_int(trade.get("time"))
+    if trade_time is None or trade_time <= 0:
+        if "trade_event_timestamp_missing_or_invalid" not in result.warnings:
+            result.warnings.append("trade_event_timestamp_missing_or_invalid")
+        return
     coin = str(trade.get("coin") or "").upper()
     price = _safe_float(trade.get("px"))
     size = _safe_float(trade.get("sz"))
     notional = abs((price or 0.0) * (size or 0.0))
     if notional < max(0.0, min_notional_usdc):
         return
-    trade_time = _safe_int(trade.get("time")) or now_ms()
     users = trade.get("users")
     if not isinstance(users, list):
         return
@@ -255,8 +260,8 @@ def store_public_trade_scan(
     )
 
     run = WalletDiscoveryRun(
-        started_at_ms=now_ms(),
-        finished_at_ms=now_ms(),
+        started_at_ms=result.scan_started_at_ms,
+        finished_at_ms=result.scan_finished_at_ms or now_ms(),
         status="COMPLETED" if result.stopped_reason != "SOURCE_UNAVAILABLE" else "PARTIAL",
         sources_attempted=1,
         candidates_found=len(result.wallet_stats),
@@ -276,8 +281,8 @@ def store_public_trade_scan(
                 continue
             coin = str(trade.get("coin") or "").upper()
             price = _safe_float(trade.get("px"))
-            trade_time = _safe_int(trade.get("time")) or now_ms()
-            if not coin or price is None or price <= 0:
+            trade_time = _safe_int(trade.get("time"))
+            if not coin or price is None or price <= 0 or trade_time is None or trade_time <= 0:
                 continue
             if trade_time >= latest_trade_time_by_coin.get(coin, 0):
                 latest_prices_by_coin[coin] = price
@@ -325,7 +330,27 @@ def store_public_trade_scan(
             )
 
     ranked = sorted(result.wallet_stats.values(), key=lambda item: item.score, reverse=True)
+    scan_window_ms = (
+        result.scan_finished_at_ms - result.scan_started_at_ms
+        if result.scan_finished_at_ms is not None
+        else 0
+    )
+    scan_bounds_verified = (
+        result.network_read is True
+        and isinstance(result.duration_seconds, int)
+        and not isinstance(result.duration_seconds, bool)
+        and 0 < result.duration_seconds <= 300
+        and 0 < scan_window_ms <= result.duration_seconds * 1000 + 5_000
+    )
     for index, stats in enumerate(ranked, start=1):
+        timestamps_verified = (
+            scan_bounds_verified
+            and stats.first_seen_ms is not None
+            and stats.last_seen_ms is not None
+            and result.scan_started_at_ms - 60_000
+            <= stats.last_seen_ms
+            <= (result.scan_finished_at_ms or 0) + 60_000
+        )
         confidence = min(95.0, 35.0 + stats.score)
         session.add(
             WalletCandidateModel(
@@ -342,12 +367,16 @@ def store_public_trade_scan(
                 external_position_usdc=None,
                 external_unrealized_pnl=None,
                 external_funding_fee=None,
-                first_seen_ms=stats.first_seen_ms or now_ms(),
-                last_seen_ms=stats.last_seen_ms or now_ms(),
+                first_seen_ms=stats.first_seen_ms or 0,
+                last_seen_ms=stats.last_seen_ms or 0,
                 raw_payload_json={
                     "trades_count": stats.trades_count,
                     "coins": sorted(stats.coins),
                     "sample_trades": stats.sample_trades,
+                    "activity_window_start_ms": result.scan_started_at_ms,
+                    "activity_window_end_ms": result.scan_finished_at_ms,
+                    "last_trade_event_ms": stats.last_seen_ms,
+                    "activity_timestamps_verified": timestamps_verified,
                     "research_only": True,
                     "warning": "public trades identify active wallets but do not prove open/close direction",
                 },

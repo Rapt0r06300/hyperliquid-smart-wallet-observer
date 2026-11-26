@@ -4,6 +4,9 @@ import gzip
 import hashlib
 import json
 
+import pytest
+
+from tools import backfill_exact_trade_counts as exact
 from tools.backfill_exact_trade_counts import (
     IDENTITY_VERSION,
     _candidate,
@@ -167,3 +170,121 @@ def test_non_bybit_sha_matched_exact_patch_is_not_needlessly_rescanned():
         }
     }
     assert _candidate(row, counts) is False
+
+
+@pytest.mark.parametrize("result_sha, should_update", [("a" * 64, True), ("b" * 64, False)])
+def test_exact_count_manifest_update_requires_matching_asset_sha(
+    tmp_path, monkeypatch, result_sha, should_update,
+):
+    monkeypatch.setattr(exact, "ROOT", tmp_path)
+    manifest_path = tmp_path / "datasets" / "manifest.json"
+    manifest_path.parent.mkdir()
+    original = {"dataset_id": "dataset-a", "sha256": "a" * 64, "quality_status": "SAFE"}
+    manifest_path.write_text(json.dumps(original), encoding="utf-8")
+
+    exact._persist_manifest_counts(
+        {
+            "dataset_id": "dataset-a",
+            "manifest_path": "datasets/manifest.json",
+            "sha256": "a" * 64,
+        },
+        {
+            "asset_sha256": result_sha,
+            "trade_count": 5,
+            "trade_count_exact": True,
+        },
+    )
+
+    observed = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if should_update:
+        assert observed["trade_count"] == 5
+        assert observed["trade_count_exact"] is True
+    else:
+        assert observed == original
+
+
+def test_exact_count_manifest_update_preserves_concurrent_collector_change(
+    tmp_path, monkeypatch,
+):
+    from pathlib import Path
+
+    monkeypatch.setattr(exact, "ROOT", tmp_path)
+    manifest_path = tmp_path / "datasets" / "manifest.json"
+    manifest_path.parent.mkdir()
+    original = {"dataset_id": "dataset-a", "sha256": "a" * 64, "quality_status": "SAFE"}
+    concurrent = {**original, "quality_status": "UPDATED_BY_COLLECTOR"}
+    original_bytes = json.dumps(original).encode("utf-8")
+    concurrent_bytes = json.dumps(concurrent).encode("utf-8")
+    manifest_path.write_bytes(original_bytes)
+    real_read_bytes = Path.read_bytes
+    read_count = 0
+
+    def update_before_atomic_replace(path):
+        nonlocal read_count
+        if path == manifest_path:
+            read_count += 1
+            if read_count == 2:
+                path.write_bytes(concurrent_bytes)
+                return concurrent_bytes
+        return real_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", update_before_atomic_replace)
+    exact._persist_manifest_counts(
+        {
+            "dataset_id": "dataset-a",
+            "manifest_path": "datasets/manifest.json",
+            "sha256": "a" * 64,
+        },
+        {
+            "asset_sha256": "a" * 64,
+            "trade_count": 5,
+            "trade_count_exact": True,
+        },
+    )
+
+    assert real_read_bytes(manifest_path) == concurrent_bytes
+
+
+def test_exact_count_backfill_refuses_catalog_change_during_asset_scan(tmp_path, monkeypatch):
+    index_path = tmp_path / "catalog" / "DATA_INDEX.json"
+    index_path.parent.mkdir()
+    row = {
+        "dataset_id": "dataset-a",
+        "family": "trades",
+        "venue": "binance",
+        "sha256": "a" * 64,
+        "bytes": 10,
+        "release_repository": "owner/repo",
+        "release_tag": "release-a",
+        "release_asset": "asset-a.gz",
+        "trade_count_exact": False,
+    }
+    original = {"schema": "alina.data_index.v1", "shards": [row]}
+    index_path.write_text(json.dumps(original), encoding="utf-8")
+    monkeypatch.setattr(exact, "INDEX_PATH", index_path)
+    monkeypatch.setattr(exact, "PATCH_PATH", tmp_path / "catalog" / "TRADE_COUNT_PATCH.json")
+    monkeypatch.setattr(exact, "ROOT", tmp_path)
+    monkeypatch.setattr(exact, "_download", lambda *_args, **_kwargs: tmp_path / "verified.gz")
+
+    def scan_and_simulate_collection_update(_path, _row):
+        concurrent = {**original, "collection_epoch": 9}
+        index_path.write_text(json.dumps(concurrent), encoding="utf-8")
+        return {
+            "asset_sha256": "a" * 64,
+            "trade_count": 2,
+            "trade_count_exact": True,
+            "unique_trade_count": 2,
+            "unique_trade_count_exact": True,
+            "unique_identity_method": exact.IDENTITY_VERSION,
+        }
+
+    monkeypatch.setattr(exact, "inspect_asset", scan_and_simulate_collection_update)
+    before_scan = index_path.read_bytes()
+    with pytest.raises(ValueError, match="CANONICAL_INDEX_SOURCE_CHANGED_BEFORE_PUBLISH"):
+        exact.backfill(1)
+
+    current = json.loads(index_path.read_text(encoding="utf-8"))
+    assert current["collection_epoch"] == 9
+    assert current["shards"] == original["shards"]
+    assert current["shards"][0].get("trade_count_exact") is False
+    assert index_path.read_bytes() != before_scan

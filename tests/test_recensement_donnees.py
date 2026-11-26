@@ -186,3 +186,21 @@ def test_le_certificateur_scelle_la_donnee_oubliee_et_la_couverture_atteint_100(
     assert rapport["avant_ce_passage"]["totaux"]["A_SCELLER"]["fichiers"] == 1
     index = json.loads((tmp_path / "runtime/coffre_certifie/LOCAL_INDEX.json").read_text(encoding="utf-8"))
     assert sum(s["deposes"] for s in index["shards"]) == 20
+
+def test_les_caches_du_labo_sont_des_derives_jamais_a_sceller():
+    """26/11/2026 : 4 294 caches du labo (demi-écarts, mids, funding, fills par SHA de shard) sortaient en INCONNU
+    (couverture 87,4 %). Ce sont des dérivés recalculables depuis le coffre : jamais à sceller, jamais inconnus."""
+    for rel in ("runtime/research_lab/data/copiabilite_cache/panneau_mids.npz",
+                "runtime/research_lab/data/copiabilite_cache/mids/mids-par-shard-v1-" + "a" * 64 + ".npz",
+                "runtime/research_lab/data/copiabilite_cache/funding/funding-v1-" + "b" * 64 + ".npz",
+                "runtime/research_lab/data/copiabilite_cache/demi_spreads/demi-spreads-v1-s5-" + "c" * 64 + ".npz"):
+        assert R.zone_de(rel).genre == "DERIVE", rel
+    assert R.zone_de("runtime/research_lab/data/micro_bbo.jsonl").genre == "COLLECTE"      # le ruban reste a sceller
+
+def test_les_rubans_cross_venue_sont_hors_perimetre_et_jamais_inconnus():
+    """26/11/2026 : paires Hyperliquid + Binance de collecter_bbo.py, en INCONNU. Famille Cross-Venue (hors CopyVault),
+    source externe à validation séparée : écartés PAR CONCEPTION, avec leur motif, jamais scellés au coffre."""
+    from hl_observer.datasets.coffre_registre_fichiers import motif_non_certifie
+    for nom in ("bbo_synchro.jsonl", "cross_venue_atomic_bbo.jsonl", "cross_venue_atomic_bbo.jsonl.gz"):
+        assert motif_non_certifie(nom)[0] == "HORS_PERIMETRE", nom
+    assert motif_non_certifie("bbo_tape.jsonl") is None                 # la BBO Hyperliquid reste certifiee

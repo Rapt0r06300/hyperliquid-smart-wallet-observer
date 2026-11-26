@@ -43,6 +43,7 @@ def test_wallet_copy_e2e_builds_paper_intent_and_journal(tmp_path: Path) -> None
         fee_bps=2.0,
         slippage_bps=1.5,
         latency_penalty_bps=0.5,
+        funding_estimate_bps=0.0,  # explicit deterministic fixture, not live funding evidence
         logs_dir=tmp_path,
         leader_expected_edge_bps=80.0,
     )
@@ -70,6 +71,7 @@ def test_wallet_copy_e2e_rejects_when_edge_after_cost_is_too_low(tmp_path: Path)
         fee_bps=5.0,
         slippage_bps=8.0,
         latency_penalty_bps=2.0,
+        funding_estimate_bps=0.0,
         logs_dir=tmp_path,
         leader_expected_edge_bps=20.0,
     )
@@ -93,6 +95,7 @@ def test_wallet_copy_e2e_blocks_entry_when_session_fee_drag_is_bad(tmp_path: Pat
         fee_bps=2.0,
         slippage_bps=1.0,
         latency_penalty_bps=0.5,
+        funding_estimate_bps=0.0,
         logs_dir=tmp_path,
         leader_expected_edge_bps=45.0,
         session_risk_context=SessionEntryRiskContext(

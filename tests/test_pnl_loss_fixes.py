@@ -6,9 +6,9 @@ from __future__ import annotations
 
 import json
 
-from hl_observer.ml.ledger_extract import _salvage_events, _read_snapshot_events, rows_outcomes_from_events
+from hl_observer.ml.ledger_extract import _read_snapshot_events, rows_outcomes_from_events
 from hl_observer.ml.train_cli import run as train_cli_run
-from hl_observer.paper_trading.sl_tp import SLTPConfig, evaluate_sl_tp, STOP_LOSS, HOLD
+from hl_observer.paper_trading.sl_tp import HOLD, STOP_LOSS, SLTPConfig, evaluate_sl_tp
 from hl_observer.paper_trading.sltp_runtime import apply_sltp_exits
 from hl_observer.simulation.adaptive_paper_sizing import adaptive_paper_margin, realized_exit_pnls
 
@@ -130,6 +130,31 @@ def test_adaptive_paper_sizing_blocks_marginal_edge_after_three_losses():
 
     assert sizing.final_margin_usdt == 0.0
     assert sizing.reason == "ADAPTIVE_SIZE_BLOCKED_AFTER_LOSS_STREAK"
+
+
+def test_adaptive_paper_sizing_blocks_when_recent_exit_pnl_is_unmeasurable():
+    recent_events = [
+        {"status": "LOCAL_REPLAY", "bot_replay_action": "PAPER_CLOSE_REPLAYED",
+         "estimated_net_pnl_usdc": -0.5},
+        {"status": "LOCAL_REPLAY", "bot_replay_action": "PAPER_CLOSE_REPLAYED",
+         "estimated_net_pnl_usdc": None},
+        {"status": "LOCAL_REPLAY", "bot_replay_action": "PAPER_CLOSE_REPLAYED",
+         "estimated_net_pnl_usdc": float("nan")},
+    ]
+
+    assert realized_exit_pnls(recent_events) == [-0.5, None, None]
+    sizing = adaptive_paper_margin(
+        requested_margin_usdt=50.0,
+        equity_usdt=998.0,
+        recent_events=recent_events,
+        edge_remaining_bps=100.0,
+        liquidity_score=1.0,
+        consensus_wallets=4,
+    )
+
+    assert sizing.final_margin_usdt == 0.0
+    assert sizing.reason == "ADAPTIVE_SIZE_BLOCKED_UNMEASURABLE_EXIT_PNL"
+    assert sizing.session_pnl_usdt is None
 
 
 def test_sltp_stop_loss_waits_for_min_hold_unless_catastrophic(monkeypatch):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -47,7 +48,10 @@ class LeaderboardCandidate(BaseModel):
     pnl_usdc: float | None = None
     roi_pct: float | None = None
     volume_usdc: float | None = None
-    leaderboard_score: float = 0.0
+    leaderboard_score: float = Field(
+        default=0.0,
+        description="Public-stat discovery triage only; not risk-adjusted follower profitability or an edge proof.",
+    )
     selected_for_revalidation: bool = True
     selected_for_backfill: bool = False
     source_confidence: float = 0.0
@@ -80,7 +84,7 @@ class LeaderboardResult(BaseModel):
         method: str = "auto",
         status: LeaderboardSourceStatus | None = None,
         notes: list[str] | None = None,
-    ) -> "LeaderboardResult":
+    ) -> LeaderboardResult:
         candidates: list[LeaderboardCandidate] = []
         rejected: list[dict] = []
         full = 0
@@ -122,18 +126,25 @@ class LeaderboardResult(BaseModel):
 
 
 def score_leaderboard_row(row: LeaderboardRowRecord) -> float:
+    """Score a public leaderboard row for research intake, not expected copy PnL.
+
+    The score uses only the row's aggregate public statistics and source confidence;
+    it has no path to claim risk-adjusted, follower-realizable performance.
+    """
     pnl_score = 50.0 if row.pnl_usdc is None else clamp(50.0 + row.pnl_usdc / 100_000.0 * 50.0, 0.0, 100.0)
     roi_score = 50.0 if row.roi_pct is None else clamp(50.0 + row.roi_pct, 0.0, 100.0)
     account_value_score = 50.0 if row.account_value_usdc is None else clamp(row.account_value_usdc / 1_000_000.0 * 100.0, 0.0, 100.0)
     volume_score = 50.0 if row.volume_usdc is None else clamp(row.volume_usdc / 10_000_000.0 * 100.0, 0.0, 100.0)
-    rank_score = 50.0 if row.rank is None else clamp(100.0 - max(0, row.rank - 1) / 500.0 * 100.0, 0.0, 100.0)
+    # Public rank is retained as provenance/metadata, not used as a proxy for future edge.
+    # Normalize the pre-existing evidence weights after removing the rank component.
     return clamp(
-        0.36 * pnl_score
-        + 0.28 * roi_score
-        + 0.16 * account_value_score
-        + 0.05 * volume_score
-        + 0.05 * rank_score
-        + 0.10 * row.source_confidence_score,
+        (
+            0.36 * pnl_score
+            + 0.28 * roi_score
+            + 0.16 * account_value_score
+            + 0.05 * volume_score
+            + 0.10 * row.source_confidence_score
+        ) / 0.95,
         0.0,
         100.0,
     )
@@ -156,4 +167,33 @@ def row_to_candidate(row: LeaderboardRowRecord) -> LeaderboardCandidate | None:
         selected_for_backfill=score >= 50.0,
         source_confidence=row.source_confidence_score,
         notes="leaderboard_full_address",
+    )
+
+
+def candidate_from_persisted_row(row: Any) -> LeaderboardCandidate:
+    """Rebuild a candidate score from its evidence, never from a legacy stored score."""
+    confidence = float(getattr(row, "source_confidence", 0.0) or 0.0)
+    record = LeaderboardRowRecord(
+        rank=getattr(row, "rank", None),
+        account_value_usdc=getattr(row, "account_value_usdc", None),
+        pnl_usdc=getattr(row, "pnl_usdc", None),
+        roi_pct=getattr(row, "roi_pct", None),
+        volume_usdc=getattr(row, "volume_usdc", None),
+        period=str(getattr(row, "period", "30D") or "30D"),
+        source_confidence_score=confidence,
+    )
+    score = score_leaderboard_row(record)
+    return LeaderboardCandidate(
+        wallet_address=str(row.wallet_address),
+        rank=record.rank,
+        period=record.period,
+        account_value_usdc=record.account_value_usdc,
+        pnl_usdc=record.pnl_usdc,
+        roi_pct=record.roi_pct,
+        volume_usdc=record.volume_usdc,
+        leaderboard_score=score,
+        selected_for_revalidation=bool(getattr(row, "selected_for_revalidation", True)),
+        selected_for_backfill=score >= 50.0,
+        source_confidence=confidence,
+        notes=getattr(row, "notes", None) or "score_recalculated_from_persisted_evidence",
     )

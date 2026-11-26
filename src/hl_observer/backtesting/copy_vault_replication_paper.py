@@ -105,6 +105,10 @@ def _cible(portfolio: Portefeuille, instants: np.ndarray, t: int, config: Replic
     return float(nav), positions
 
 
+#: Prix du pas lus a l'indice deja calcule pour la grille (voir ``run_replication``) ; False = ancienne voie.
+INDICES_DE_GRILLE = True
+
+
 def run_replication(
     portfolio: Portefeuille, panel: Any, half_spread_bps: Mapping[str, float],
     config: ReplicationConfig | None = None, *, funding_rates: Mapping[str, np.ndarray] | None = None,
@@ -136,12 +140,24 @@ def run_replication(
 
     colonnes_prix: dict[str, int | None] = {}
     at_one = getattr(panel, "at_one", None)
-    def prix_a(coin: str, t: int) -> float:
+    # 25/11/2026 -- L'INDICE DU PAS EST DEJA CONNU. Profil : 1,26 M appels a ``at_one`` = la moitie du temps de la
+    # replication ; chacun refaisait ``searchsorted`` pour l'instant du pas, toujours ``grille[k]``, dont l'indice est
+    # ``funding_indices[k]``. Meme indice, meme controle de fraicheur (``t - ts[i] > stale_ms`` -> NaN), meme
+    # ``float(px[i, colonne])`` : valeurs identiques. L'ancienne voie reste derriere ``INDICES_DE_GRILLE``.
+    par_pas = None
+    if INDICES_DE_GRILLE and callable(at_one) and hasattr(panel, "px") and hasattr(panel, "stale_ms"):
+        bornes = np.clip(funding_indices, 0, len(panel.ts) - 1)
+        par_pas = (funding_indices.tolist(),
+                   ((funding_indices >= 0) & ((grille_np - panel.ts[bornes]) <= int(panel.stale_ms))).tolist())
+
+    def prix_a(coin: str, t: int, k: int | None = None) -> float:
         if coin not in colonnes_prix:
             colonnes_prix[coin] = panel.column(coin)
         colonne = colonnes_prix[coin]
         if colonne is None:
             return float("nan")
+        if par_pas is not None and k is not None:
+            return float(panel.px[par_pas[0][k], colonne]) if par_pas[1][k] else float("nan")
         if callable(at_one):
             return float(at_one(t, colonne))
         return float(panel.at(np.asarray([t], dtype=np.int64), colonne)[0])
@@ -161,23 +177,34 @@ def run_replication(
     expositions: list[float] = []
     heures = config.rebalance_ms / 3_600_000.0
 
+    # 25/11/2026 -- ``x != x`` au lieu de ``np.isnan(x)`` : x est ici toujours un ``float`` Python, et les deux ne
+    # sont vrais QUE pour NaN (IEEE 754). Meme reponse, sans l'appel de ufunc (~2 M par etude de replication).
     for k, t in enumerate(grille):
         sur = True
         for coin, quantite in compte.positions.items():
-            px = prix_a(coin, t)
+            px = prix_a(coin, t, k)
             if k > 0 and config.apply_funding:
                 serie = funding_rates.get(coin)
                 funding_index = int(funding_indices[k - 1])
-                taux = float("nan") if serie is None or funding_index < 0 else float(serie[funding_index])
+                try:
+                    taux = (
+                        float(serie[funding_index])
+                        if serie is not None and 0 <= funding_index < len(serie)
+                        else float("nan")
+                    )
+                except (IndexError, TypeError, ValueError, OverflowError):
+                    taux = float("nan")
                 notionnel = abs(quantite) * prix[coin]
-                if np.isnan(taux):
+                if not np.isfinite(taux):
                     n["funding_inconnu"] += notionnel * heures          # jamais supposé nul : compté à part
+                    if notionnel > 0.0:
+                        sur = False                                     # coût manquant = pas de PnL net mesuré
                 else:
                     cout = quantite * prix[coin] * taux * heures         # un long paie un taux positif
                     compte.liquidites -= cout
                     cumul["funding"] += cout
                     n["funding_connu"] += notionnel * heures
-            if np.isnan(px):
+            if px != px:
                 sur = False                                              # prix périmé : valorisation inconnue
             else:
                 prix[coin] = px
@@ -199,8 +226,8 @@ def run_replication(
         nav, tailles = cible
         poids: dict[str, float] = {}
         for coin, taille in tailles.items():
-            px = prix_a(coin, t)
-            if np.isnan(px):
+            px = prix_a(coin, t, k)
+            if px != px:
                 non_negociables[coin] = "PRIX_INCONNU"
             elif config.apply_spread and coin not in half_spread_bps:
                 non_negociables[coin] = "ECART_INCONNU"                  # coût non mesurable : pas d'ordre
@@ -214,7 +241,7 @@ def run_replication(
             if coin not in poids and coin in tailles:
                 continue                                                 # coin non négociable : on ne force rien
             px = prix.get(coin, float("nan"))
-            if np.isnan(px):
+            if px != px:
                 continue
             actuel = compte.positions.get(coin, 0.0) * px
             voulu = poids.get(coin, 0.0) * echelle * valeur
@@ -261,12 +288,20 @@ def _bilan(points: list[tuple[int, float, bool]], expositions: list[float], cumu
     serie = np.array([valeur for _, valeur, _ in points], dtype=float)
     duree_jours = max(1e-9, (points[-1][0] - points[0][0]) / DAY_MS)
     funding_total = n["funding_connu"] + n["funding_inconnu"]
+    funding_inconnu = float(n["funding_inconnu"]) > 0.0
+    valeur_partielle = float(serie[-1])
+    net_partiel = valeur_partielle - config.capital_usd
     return {
-        "status": "OK", "config": config.as_dict(),
+        "status": "UNMEASURABLE_FUNDING" if funding_inconnu else "OK",
+        "reason_codes": ["FUNDING_UNKNOWN"] if funding_inconnu else [],
+        "config": config.as_dict(),
         "complete_days": len(quotidiens),
         "daily_net_usd": [round(x, 6) for x in quotidiens], "days_utc": jours_comptes,
         "net_usd_per_day": float(np.mean(quotidiens)) if quotidiens else None,
-        "final_equity_usd": float(serie[-1]), "net_total_usd": float(serie[-1] - config.capital_usd),
+        "final_equity_usd": None if funding_inconnu else valeur_partielle,
+        "net_total_usd": None if funding_inconnu else net_partiel,
+        "partial_equity_excluding_unmeasured_funding_usd": valeur_partielle if funding_inconnu else None,
+        "partial_net_excluding_unmeasured_funding_usd": net_partiel if funding_inconnu else None,
         "max_drawdown_usd": float((np.maximum.accumulate(serie) - serie).max()),
         "fees_usd": float(cumul["frais"]), "spread_cost_usd": float(cumul["ecart"]),
         "funding_usd": float(cumul["funding"]),

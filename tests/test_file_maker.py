@@ -144,3 +144,29 @@ def test_le_taker_reste_rempli_immediatement() -> None:
 def test_cote_invalide_refuse() -> None:
     assert F.taille_devant(CARNET, prix=100.0, cote="PEUT_ETRE") is None
     assert F.volume_traverse([_t(100.0, 1.0, F.VENTE)], prix=100.0, cote="PEUT_ETRE") is None
+
+
+def test_une_transaction_d_un_shard_non_verifie_n_est_pas_expose(tmp_path, monkeypatch) -> None:
+    import json
+
+    from hl_observer.backtesting import coffre_tranches
+
+    index = tmp_path / "runtime/coffre_certifie/LOCAL_INDEX.json"
+    index.parent.mkdir(parents=True)
+    index.write_text(json.dumps({"shards": [{"famille": F.FAMILLE_TRANSACTIONS, "shard": "s1"}]}),
+                     encoding="utf-8")
+    monkeypatch.setattr(coffre_tranches, "selectionner",
+                        lambda *a, **k: {"shards": [{"shard": "s1"}]})
+
+    def flux_non_verifie(*args, compteurs=None, **kwargs):
+        assert kwargs["verifier_sha"] is True
+        compteurs["shards_lus"] = 0
+        compteurs["shards_refuses"] = [{"shard": "s1", "motif": "SHA_DIVERGENT"}]
+        return iter([{"exchange_ts_ms": 1_000, "price": 100, "size": 1}])
+
+    monkeypatch.setattr(coffre_tranches, "flux", flux_non_verifie)
+    transactions, audit = F.transactions_du_coffre(tmp_path, debut_ms=0, fin_ms=2_000)
+
+    assert transactions == []
+    assert audit["status"] == "SHARDS_REFUSES"
+    assert audit["shards_refuses"] == [{"shard": "s1", "motif": "SHA_DIVERGENT"}]

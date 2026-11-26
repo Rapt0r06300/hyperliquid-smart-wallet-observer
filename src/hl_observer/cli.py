@@ -288,7 +288,11 @@ from hl_observer.wallets.leaderboard_import import (
     format_leaderboard_report,
     import_leaderboard_file,
 )
-from hl_observer.wallets.leaderboard_models import LeaderboardCandidate
+from hl_observer.wallets.leaderboard_models import (
+    LeaderboardCandidate,
+    candidate_from_persisted_row,
+)
+from hl_observer.wallets.leaderboard_queries import latest_leaderboard_candidate_rows
 from hl_observer.wallets.leaderboard_source import scrape_leaderboard
 from hl_observer.wallets.public_trades_live import (
     format_public_trade_scan_report,
@@ -412,20 +416,7 @@ def _record_local_snapshots(settings: Settings, wallets: list[str], *, run_id: i
 
 
 def _leaderboard_model_to_candidate(row: LeaderboardWalletCandidate) -> LeaderboardCandidate:
-    return LeaderboardCandidate(
-        wallet_address=row.wallet_address,
-        rank=row.rank,
-        period=row.period,
-        account_value_usdc=row.account_value_usdc,
-        pnl_usdc=row.pnl_usdc,
-        roi_pct=row.roi_pct,
-        volume_usdc=row.volume_usdc,
-        leaderboard_score=row.leaderboard_score,
-        selected_for_revalidation=row.selected_for_revalidation,
-        selected_for_backfill=row.selected_for_backfill,
-        source_confidence=row.source_confidence,
-        notes=row.notes,
-    )
+    return candidate_from_persisted_row(row)
 
 
 def _unique_top_wallet_rows(rows: list[TopWallet], *, limit: int, offset: int = 0) -> list[TopWallet]:
@@ -496,9 +487,11 @@ def _resolve_public_trade_scan_coins(settings: Settings, raw_coins: str, *, max_
 
 
 def _apply_leader_quality_gate(session, rows, *, limit):
-    """V9 — ne copie QUE les leaders dont la qualite REALISEE est prouvee.
-    Warmup-safe: tant qu'aucun leader n'est qualifie, ne gele pas la shortlist.
-    Pilotable par HYPERSMART_LEADER_QUALITY_GATE (defaut actif). Jamais d'exception bloquante."""
+    """Rank read-only fill-stream subscriptions using realized leader history.
+
+    Warm-up and lookup-error fallbacks intentionally keep observations flowing so
+    the history can be built. The returned rows are not a copy-eligibility proof.
+    """
     if not rows:
         return rows
     if os.environ.get("HYPERSMART_LEADER_QUALITY_GATE", "1") != "1":
@@ -2721,17 +2714,26 @@ def leaderboard_candidates_command(
     settings = _settings()
     session_factory = _session_factory(settings)
     with session_factory() as session:
-        query = session.query(LeaderboardWalletCandidate).filter(LeaderboardWalletCandidate.period == period)
-        if min_pnl is not None:
-            query = query.filter(LeaderboardWalletCandidate.pnl_usdc >= min_pnl)
-        if min_roi is not None:
-            query = query.filter(LeaderboardWalletCandidate.roi_pct >= min_roi)
-        rows = query.order_by(LeaderboardWalletCandidate.leaderboard_score.desc()).limit(100).all()
+        rows = latest_leaderboard_candidate_rows(
+            session,
+            limit=settings.wallet_bootstrap.max_candidates_total,
+            period=period,
+            min_pnl=min_pnl,
+            min_roi=min_roi,
+        )
+    candidates = sorted(
+        (_leaderboard_model_to_candidate(row) for row in rows),
+        key=lambda candidate: candidate.leaderboard_score,
+        reverse=True,
+    )[:100]
     typer.echo("leaderboard candidates report")
     typer.echo(f"periode: {period}")
-    typer.echo(f"candidats complets: {len(rows)}")
-    for row in rows[:10]:
-        typer.echo(f"- {row.wallet_address} rank={row.rank} pnl={row.pnl_usdc} roi={row.roi_pct} score={row.leaderboard_score:.1f}")
+    typer.echo(f"candidats uniques récents: {len(rows)}")
+    for candidate in candidates[:10]:
+        typer.echo(
+            f"- {candidate.wallet_address} rank={candidate.rank} pnl={candidate.pnl_usdc} "
+            f"roi={candidate.roi_pct} score_découverte={candidate.leaderboard_score:.1f}"
+        )
 
 
 @app.command("probe-explorer")
@@ -3174,11 +3176,11 @@ def copy_run_command(
     with session_factory() as session:
         leaders = max(1, min(leaders, settings.copy_trading.top_leaders))
         leader_offset = max(0, leader_offset)
-        leaderboard_rows = (
-            session.query(LeaderboardWalletCandidate)
-            .order_by(LeaderboardWalletCandidate.leaderboard_score.desc())
-            .limit(settings.wallet_bootstrap.max_candidates_total)
-            .all()
+        # Bound the candidate pool by recent imports; recalculate their scores below instead
+        # of letting stale persisted leaderboard scores decide which rows enter the pool.
+        leaderboard_rows = latest_leaderboard_candidate_rows(
+            session,
+            limit=settings.wallet_bootstrap.max_candidates_total,
         )
         leaderboard_candidates = [
             _leaderboard_model_to_candidate(row)
@@ -3530,6 +3532,9 @@ def paper_run() -> None:
             spread_cost_bps=2,
             estimated_slippage_bps=3,
             latency_decay_bps=2,
+            adverse_selection_bps=0.0,
+            # Synthetic smoke path only; not an economic result or forecast.
+            funding_expected_cost_bps=0.0,
         ),
         min_edge_required_bps=settings.risk.min_edge_required_bps,
     )
@@ -3543,7 +3548,10 @@ def paper_run() -> None:
         signal_age_ms=100,
     )
     decision = RiskEngine(settings).evaluate(context)
-    typer.echo(f"paper-run smoke decision={decision.decision.value} allowed={decision.allowed}")
+    typer.echo(
+        f"paper-run smoke decision={decision.decision.value} allowed={decision.allowed} "
+        "funding=synthetic-zero-smoke-only economic_evidence=false no_orders=true"
+    )
 
 
 @app.command("paper-report")

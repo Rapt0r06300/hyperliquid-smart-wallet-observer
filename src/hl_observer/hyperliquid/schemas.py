@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+from typing import Literal
+
 try:
     from enum import StrEnum
 except ImportError:
     from enum import Enum
-    class StrEnum(str, Enum): pass
-from typing import Literal
+
+    class StrEnum(str, Enum):
+        pass
+
+from pydantic import BaseModel, Field, field_validator
 
 from hl_observer.instrument_identity import preserve_native_instrument_symbol
-from pydantic import BaseModel, Field, field_validator
 
 
 class SignalDecision(StrEnum):
@@ -164,16 +168,22 @@ class SignalScore(BaseModel):
 
 
 class EdgeRemainingInputs(BaseModel):
-    leader_expected_move_bps: float = 0.0
-    cluster_confirmation_bps: float = 0.0
-    orderbook_confirmation_bps: float = 0.0
-    regime_bonus_bps: float = 0.0
-    taker_fee_bps: float = 0.0
-    spread_cost_bps: float = 0.0
-    estimated_slippage_bps: float = 0.0
-    latency_decay_bps: float = 0.0
-    adverse_selection_bps: float = 0.0
-    funding_expected_cost_bps: float = 0.0
+    leader_expected_move_bps: float = Field(0.0, allow_inf_nan=False)
+    cluster_confirmation_bps: float = Field(0.0, allow_inf_nan=False)
+    orderbook_confirmation_bps: float = Field(0.0, allow_inf_nan=False)
+    regime_bonus_bps: float = Field(0.0, allow_inf_nan=False)
+    # Costs must be explicit; missing values must never become free execution.
+    # Per execution leg; the edge calculator charges the entry and exit.
+    taker_fee_bps: float = Field(..., ge=0, allow_inf_nan=False)
+    # Full spread crossing cost for the completed round trip.
+    spread_cost_bps: float = Field(..., ge=0, allow_inf_nan=False)
+    # Per execution leg; the edge calculator charges the entry and exit.
+    estimated_slippage_bps: float = Field(..., ge=0, allow_inf_nan=False)
+    # Aggregate costs over the forecast holding horizon.
+    latency_decay_bps: float = Field(..., ge=0, allow_inf_nan=False)
+    adverse_selection_bps: float = Field(..., ge=0, allow_inf_nan=False)
+    # Required: missing funding evidence must never be silently priced at zero.
+    funding_expected_cost_bps: float = Field(..., ge=0, allow_inf_nan=False)
 
 
 class EdgeRemaining(BaseModel):

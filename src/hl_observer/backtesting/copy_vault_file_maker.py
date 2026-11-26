@@ -28,7 +28,8 @@ pas », ce que l'appelant doit traiter comme un refus, jamais comme un remplissa
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Any
 
 #: Familles du coffre dont ce module a besoin, et leur rôle.
 FAMILLE_CARNET = "book_l2"
@@ -115,9 +116,9 @@ def volume_traverse(
         if prix_t is None or taille_t is None or taille_t <= 0 or agresseur not in (ACHAT, VENTE):
             continue
         lisibles += 1
-        if cote == ACHAT and agresseur == VENTE and prix_t <= p:
-            total += taille_t
-        elif cote == VENTE and agresseur == ACHAT and prix_t >= p:
+        if (cote == ACHAT and agresseur == VENTE and prix_t <= p) or (
+            cote == VENTE and agresseur == ACHAT and prix_t >= p
+        ):
             total += taille_t
     return total if lisibles else None
 
@@ -174,12 +175,23 @@ def transactions_du_coffre(
     shards = choix.get("shards") or choix.get("retenus") or []
     if not shards:
         return [], {"status": "AUCUN_SHARD", "shards": 0}
+    compteurs_flux: dict[str, Any] = {}
     lignes = [
         ligne for ligne in coffre_tranches.flux(
             racine, shards, famille=FAMILLE_TRANSACTIONS,
             coins=list(coins) if coins else None,
-            debut_ms=int(debut_ms), fin_ms=int(fin_ms), verifier_sha=False)
+            debut_ms=int(debut_ms), fin_ms=int(fin_ms), verifier_sha=True,
+            compteurs=compteurs_flux)
     ]
+    shards_refuses = list(compteurs_flux.get("shards_refuses") or [])
+    if shards_refuses:
+        return [], {
+            "status": "SHARDS_REFUSES",
+            "shards": len(shards),
+            "shards_lus": compteurs_flux.get("shards_lus", 0),
+            "lignes_lues": len(lignes),
+            "shards_refuses": shards_refuses,
+        }
     return lignes, {
         "status": "LU_DEPUIS_LE_COFFRE", "shards": len(shards), "lignes_lues": len(lignes),
     }

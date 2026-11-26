@@ -93,17 +93,20 @@ def assembler_fills(observes: pd.DataFrame, reconstruits: pd.DataFrame, *, assum
     Pour tous les autres — backfill, ou fill relevé longtemps après (collecteurs arrêtés) — l'instant
     d'observation est remplacé par ``fill + assumed_lag_ms`` : une HYPOTHÈSE, déclarée comme telle.
     Un fill présent des deux côtés est gardé une fois, dans sa version observée en direct."""
-    observes = observes.copy()
-    observes["post"] = (observes["obs"] - observes["time"]) <= MAX_DELAI_OBSERVATION_DIRECTE_MS
-    reconstruits = reconstruits.copy()
-    reconstruits["post"] = False
+    # 25/11/2026 -- MEMOIRE. Les deux ``.copy()`` (22 M + 3,5 M lignes) ne servaient qu'a poser la colonne ``post``
+    # avant la reunion : elle est calculee a part et posee sur le tableau reuni (memes colonnes, meme ordre, memes
+    # types) ; ``ignore_index`` remplace ``reset_index`` (une copie au lieu de deux). Pic de l'etude : 18 Go.
+    post = np.concatenate([
+        ((observes["obs"] - observes["time"]) <= MAX_DELAI_OBSERVATION_DIRECTE_MS).to_numpy(dtype=bool),
+        np.zeros(len(reconstruits), dtype=bool)])
     reunis = pd.concat([observes, reconstruits], ignore_index=True)
+    reunis["post"] = post
     if not len(reunis):
         return reunis
     reunis = reunis.sort_values("post", ascending=False, kind="stable").drop_duplicates(list(_IDENTITE_FILL), keep="first")
     suppose = ~reunis["post"].to_numpy(dtype=bool)
     reunis.loc[suppose, "obs"] = reunis.loc[suppose, "time"] + int(assumed_lag_ms)
-    return reunis.sort_values(["vault", "coin", "time", "tid"], kind="stable").reset_index(drop=True)
+    return reunis.sort_values(["vault", "coin", "time", "tid"], kind="stable", ignore_index=True)
 
 
 # --------------------------------------------------------------------------- événements

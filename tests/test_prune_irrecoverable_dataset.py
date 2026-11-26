@@ -153,6 +153,71 @@ def test_terminal_receipt_rejects_path_traversal_or_symlink(tmp_path):
     assert outside.read_text(encoding="utf-8") == "secret"
 
 
+def test_finalize_keeps_receipt_when_index_advanced_before_publish(tmp_path, monkeypatch):
+    import pytest
+
+    root = tmp_path / "repo"
+    catalog = root / "catalog"
+    catalog.mkdir(parents=True)
+    receipt_file = root / "datasets" / "rejected" / "reject.manifest.json"
+    receipt_file.parent.mkdir(parents=True)
+    receipt_file.write_text('{"quality_status":"REJECT"}', encoding="utf-8")
+
+    row = _row("reject", "REJECT", "terminal.jsonl.gz")
+    frozen = {
+        key: row.get(key)
+        for key in (
+            "dataset_id", "sha256", "bytes", "release_repository",
+            "release_tag", "release_asset", "release_container_asset",
+            "quality_status", "replay_compatible", "terminal_repair_evidence",
+            "manifest_path",
+        )
+    }
+    asset = {
+        "release_tag": row["release_tag"],
+        "asset_name": row["release_asset"],
+        "datasets": [frozen],
+    }
+    plan = {
+        "schema": "alina.dataset_deletion_plan.v1",
+        "status": "READY",
+        "deletion_policy": gc.REJECT_PURGE_POLICY,
+        "assets": [asset],
+    }
+    plan["plan_digest"] = gc._digest(plan)
+    plan_path = root / "DATA_DELETION_PLAN.json"
+    plan_path.write_text(json.dumps(plan), encoding="utf-8")
+    history_path = root / "DATA_DELETION_HISTORY.json"
+    response_path = root / "ASSET_DELETE_RECEIPT.json"
+    response_path.write_text(json.dumps({
+        "status": "ASSETS_DELETED",
+        "plan_digest": plan["plan_digest"],
+        "assets": [asset],
+        "asset_count": 1,
+        "dataset_count": 1,
+        "bytes_deleted": 10,
+    }), encoding="utf-8")
+
+    old_index = {"schema": "alina.data_index.v2", "shards": [row]}
+    old_sha = hashlib.sha256(json.dumps(old_index).encode()).hexdigest()
+    current_index = {**old_index, "collector_generation": "newer"}
+    index_path = catalog / "DATA_INDEX.json"
+    index_path.write_text(json.dumps(current_index), encoding="utf-8")
+    monkeypatch.setattr(gc, "ROOT", root)
+    monkeypatch.setattr(gc, "PLAN", plan_path)
+    monkeypatch.setattr(gc, "HISTORY", history_path)
+    monkeypatch.setattr(
+        gc, "_verified_snapshot", lambda: (old_index, [row], old_sha)
+    )
+
+    with pytest.raises(ValueError, match="CANONICAL_INDEX_SOURCE_CHANGED_BEFORE_PUBLISH"):
+        gc.finalize(response_path)
+
+    assert json.loads(index_path.read_text(encoding="utf-8")) == current_index
+    assert receipt_file.is_file()
+    assert not history_path.exists()
+
+
 def test_predelete_rechecks_every_current_member_of_physical_asset():
     import pytest
     reject = _row("reject", "REJECT", "mixed.zip")
@@ -163,9 +228,6 @@ def test_predelete_rechecks_every_current_member_of_physical_asset():
         "release_asset": reject["release_asset"],
         "sha256": reject["sha256"],
         "bytes": reject["bytes"], "quality_status": reject["quality_status"],
-        "release_repository": gc.REPOSITORY,
-        "release_tag": reject["release_tag"],
-        "release_asset": reject["release_asset"],
         "release_container_asset": None,
         "replay_compatible": False,
         "terminal_repair_evidence": reject["terminal_repair_evidence"],
@@ -208,9 +270,6 @@ def test_only_reject_plan_and_current_membership_can_delete():
                                       "release_asset": reject["release_asset"],
                                       "sha256": reject["sha256"], "bytes": reject["bytes"],
                                       "replay_compatible": False,
-                                      "release_repository": gc.REPOSITORY,
-                                      "release_tag": reject["release_tag"],
-                                      "release_asset": reject["release_asset"],
                                       "release_container_asset": None,
                                       "terminal_repair_evidence": reject["terminal_repair_evidence"],
                                       "manifest_path": reject["manifest_path"]}]}]}

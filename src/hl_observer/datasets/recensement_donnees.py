@@ -59,6 +59,8 @@ ZONES: tuple[Zone, ...] = (
     Zone("datasets", "MAGASIN", "jeux SAFE / rejetés / quarantaine du pipeline SAFE"),
     Zone("catalog", "MAGASIN", "catalogue SAFE (campagnes, Git est la source)"),
     Zone("runtime/research_lab/data/goal2_cache", "DERIVE", "caches de recherche calculés depuis le coffre"),
+    Zone("runtime/research_lab/data/copiabilite_cache", "DERIVE",
+         "caches du labo (fills, demi-écarts, mids, funding) recalculés depuis le coffre, clés = SHA-256 des shards"),
     Zone("runtime/data/sessions", "DERIVE", "sessions de démonstration portables (fixtures de fumée)"),
     Zone("runtime/history/ironflow", "EXTERNE", "source externe brute, listée et vérifiée dans MANIFESTE.json"),
     Zone("runtime/history/tardis", "EXTERNE", "source externe brute, listée et vérifiée dans MANIFESTE.json"),
@@ -114,7 +116,7 @@ def _correspond(rel: str, motif: str) -> bool:
     a, b = rel.split("/"), motif.split("/")
     if len(a) < len(b):
         return False
-    for x, m in zip(a, b):
+    for x, m in zip(a, b, strict=False):
         if m == "*":
             continue
         if m.endswith("*"):

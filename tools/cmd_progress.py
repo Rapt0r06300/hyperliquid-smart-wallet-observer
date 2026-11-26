@@ -17,8 +17,8 @@ READ-ONLY : ce module ne fait qu'afficher, aucune mutation.
 """
 from __future__ import annotations
 
-import os
 import json
+import os
 import re
 import sys
 import time
@@ -114,14 +114,59 @@ def _summary(receipt: dict[str, object] | None, return_code: int) -> int:
         64,
     )
     remote_sha = _clean(receipt.get("remote_sha_observed"), 64)
+    pushed_head = _clean(receipt.get("pushed_head"), 64)
+    late_local_paths = receipt.get("late_local_paths")
+    late_local_paths = (
+        [path for path in late_local_paths if isinstance(path, str)]
+        if isinstance(late_local_paths, list)
+        else []
+    )
+    try:
+        late_local_count = max(
+            len(late_local_paths), int(receipt.get("late_local_count") or 0)
+        )
+    except (TypeError, ValueError):
+        late_local_count = len(late_local_paths)
+    push_verified = (
+        receipt.get("push_completed") is True
+        and bool(pushed_head)
+        and pushed_head == remote_sha
+    )
+    pushed_with_local_edits = (
+        not (return_code == 0 and status == "SYNCHRONIZED")
+        and push_verified
+        and late_local_count > 0
+    )
     commit_message = _clean(
         receipt.get("commit_message") or receipt.get("proposed_commit_message")
     )
     success = return_code == 0 and status in {
         "SYNCHRONIZED", "DRY_RUN_ONLY", "LOCAL_CHECKPOINT_ONLY"
     }
-    print(f"Statut       : {'OK' if success else 'ECHEC'} - {status}", flush=True)
-    print(f"Progression  : {'100.0%' if success else str(receipt.get('progress_percent', '?')) + '% (arretee)'}", flush=True)
+    if pushed_with_local_edits:
+        print("Statut       : PUSH VERIFIE - MODIFICATIONS LOCALES EN ATTENTE", flush=True)
+        print(
+            "Publication  : le checkpoint publie est present sur GitHub "
+            f"({pushed_head[:12]}); le run reste incomplet.",
+            flush=True,
+        )
+        print(
+            f"A reprendre   : {late_local_count} modification(s) locale(s), "
+            "conservee(s) sur disque et non incluse(s) dans ce push.",
+            flush=True,
+        )
+        if late_local_paths:
+            print(
+                "Fichiers     : "
+                + ", ".join(_clean(path, 120) for path in late_local_paths[:8]),
+                flush=True,
+            )
+    else:
+        print(f"Statut       : {'OK' if success else 'ECHEC'} - {status}", flush=True)
+    print(
+        f"Progression  : {'100.0%' if success else str(receipt.get('progress_percent', '?')) + '% (arretee)'}",
+        flush=True,
+    )
     print(f"Duree moteur : {duration} | commandes Git : {len(command_list)}", flush=True)
     if commit_message:
         print(f"Commit       : {commit_message}", flush=True)
@@ -131,6 +176,18 @@ def _summary(receipt: dict[str, object] | None, return_code: int) -> int:
         print(f"SHA GitHub   : {remote_sha[:12]}", flush=True)
     if local_sha and remote_sha:
         print(f"Parite SHA   : {'OUI' if local_sha == remote_sha else 'NON'}", flush=True)
+    protected_overlay = receipt.get("adoption_protected_overlay_count")
+    try:
+        protected_overlay_count = max(0, int(protected_overlay or 0))
+    except (TypeError, ValueError):
+        protected_overlay_count = 0
+    if protected_overlay_count:
+        print(
+            "Donnees SAFE : "
+            f"{protected_overlay_count} chemin(s) local(aux) conserve(s) "
+            "hors commit.",
+            flush=True,
+        )
     slow: list[dict[str, object]] = [
         item for item in command_list
         if isinstance(item, dict) and float(item.get("duration_ms") or 0) >= 1000
@@ -147,6 +204,12 @@ def _summary(receipt: dict[str, object] | None, return_code: int) -> int:
         print(f"Diagnostic   : {error}", flush=True)
     if success:
         print("Action       : aucune; preuve enregistree dans LAST_SYNC.json", flush=True)
+    elif pushed_with_local_edits:
+        print(
+            "Action       : laisser les fichiers listes se stabiliser, puis relancer; "
+            "aucune force appliquee.",
+            flush=True,
+        )
     else:
         print("Action       : corriger le diagnostic puis relancer; aucune force appliquee", flush=True)
     print("--------------------------------------------", flush=True)

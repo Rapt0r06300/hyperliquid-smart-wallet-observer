@@ -89,11 +89,54 @@ def _egaux(a, b, chemin="racine"):
     assert type(a) is type(b) and a == b, f"{chemin}: {a!r} != {b!r}"
 
 
+#: Champs ajoutes le 26/11/2026 avec la regle « funding mesure » : seuls autorises en plus de la reference figee.
+NOUVEAUX_CHAMPS_FUNDING = ("funding_measured_k", "funding_coverage_k", "partial_net_excluding_unmeasured_funding_k")
+
+
+def _egaux_attribution(rapide, origine):
+    """Egalite AU BIT avec la reference figee, sous la regle funding du 26/11/2026.
+
+    La reference est la copie d'origine (avant l'acceleration du 24/11). Depuis, ``net_k*_usd`` ne vaut plus le net
+    calcule que si le funding est mesure sur au moins ``MIN_FUNDING_COVERAGE`` de l'exposition (sinon ``None``), et
+    trois champs funding s'ajoutent. Tout le reste doit rester identique au bit : chaque champ d'origine, le tableau
+    journalier, et ``partial_net_excluding_unmeasured_funding`` doit valoir l'ANCIEN net, au bit.
+    """
+    from hl_observer.backtesting import copy_vault_copiability_mesures as mesures
+
+    seuil = getattr(mesures, "MIN_FUNDING_COVERAGE", None)
+    if seuil is None or not isinstance(rapide, dict) or "leaders" not in rapide:
+        _egaux(rapide, origine)
+        return
+    assert [k for k in rapide if k in origine] == list(origine) and set(rapide) == set(origine), "racine"
+    for cle in origine:
+        if cle not in ("leaders", "daily"):
+            _egaux(rapide[cle], origine[cle], cle)
+    assert [k for k in rapide["daily"] if k in origine["daily"]] == list(origine["daily"])
+    assert all(k.startswith(NOUVEAUX_CHAMPS_FUNDING) for k in rapide["daily"] if k not in origine["daily"])
+    for cle in origine["daily"]:
+        _egaux(rapide["daily"][cle], origine["daily"][cle], f"daily.{cle}")
+    assert len(rapide["leaders"]) == len(origine["leaders"])
+    for i, (a, b) in enumerate(zip(rapide["leaders"], origine["leaders"])):
+        chemin = f"leaders[{i}]"
+        assert all(k in a for k in b), chemin
+        assert all(k.startswith(NOUVEAUX_CHAMPS_FUNDING) for k in a if k not in b), chemin
+        for cle, valeur in b.items():
+            if not (cle.startswith("net_k") and cle.endswith("_usd")):
+                _egaux(a[cle], valeur, f"{chemin}.{cle}")
+                continue
+            k = cle[len("net_k"):-len("_usd")]
+            partiel = a[f"partial_net_excluding_unmeasured_funding_k{k}_usd"]
+            _egaux(partiel, valeur, f"{chemin}.partial_net_k{k}")              # l'ancien net, au bit
+            couverture = a[f"funding_coverage_k{k}"]
+            attendu = partiel if couverture is not None and couverture >= seuil else None
+            _egaux(a[cle], attendu, f"{chemin}.{cle}")
+
+
 @pytest.mark.parametrize("graine", range(24))
 def test_la_version_rapide_rend_exactement_la_version_d_origine(graine):
     fills, panel, spreads, units, funding, rng = _monde(graine)
     cfg = CopiabilityConfig()
-    _egaux(attribute_pnl(fills, panel, spreads, units, cfg, funding_rates=funding),
+    _egaux_attribution(attribute_pnl(fills, panel, spreads, units, cfg, funding_rates=funding),
            attribute_pnl_reference(fills, panel, spreads, units, cfg, funding_rates=funding))
 
 
@@ -106,7 +149,7 @@ def test_le_mode_instantanes_rend_exactement_la_version_d_origine(graine):
     cfg = CopiabilityConfig()
     args = dict(observation_times=obs, max_staleness_ms=int(rng.integers(120_000, 3_600_000)),
                 measure_execution=bool(graine % 2), funding_rates=funding)
-    _egaux(attribute_pnl(fills, panel, spreads, units, cfg, **args),
+    _egaux_attribution(attribute_pnl(fills, panel, spreads, units, cfg, **args),
            attribute_pnl_reference(fills, panel, spreads, units, cfg, **args))
 
 
@@ -124,5 +167,5 @@ def test_l_execution_parallele_rend_exactement_la_version_d_origine(instantanes)
                                        for v in fills["vault"].unique()},
                     max_staleness_ms=1_800_000, measure_execution=False)
     cfg = CopiabilityConfig()
-    _egaux(attribute_pnl(fills, panel, spreads, units, cfg, parallele=E.executeur_parallele(2), **args),
+    _egaux_attribution(attribute_pnl(fills, panel, spreads, units, cfg, parallele=E.executeur_parallele(2), **args),
            attribute_pnl_reference(fills, panel, spreads, units, cfg, **args))

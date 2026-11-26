@@ -6,11 +6,18 @@ try:
     from enum import StrEnum
 except ImportError:
     from enum import Enum
-    class StrEnum(str, Enum): pass
+    class StrEnum(str, Enum):
+        pass
 
 from pydantic import BaseModel, Field
 
 from hl_observer.utils.math import clamp
+from hl_observer.utils.time import now_ms
+
+PUBLIC_TRADE_ACTIVITY_SATURATION_PER_45S = 15.0
+PUBLIC_TRADE_RECENCY_FRESH_MS = 5 * 60_000
+PUBLIC_TRADE_RECENCY_STALE_MS = 24 * 60 * 60_000
+PUBLIC_TRADE_CLOCK_SKEW_TOLERANCE_MS = 60_000
 
 
 class WalletDiscoveryDecision(StrEnum):
@@ -58,6 +65,12 @@ def score_discovery_candidate(
     external_volume_usdc: float | None = None,
     external_position_usdc: float | None = None,
     external_win_rate: float | None = None,
+    activity_evidence_verified: bool = False,
+    activity_trade_count: int | None = None,
+    activity_window_start_ms: int | None = None,
+    activity_window_end_ms: int | None = None,
+    last_trade_event_ms: int | None = None,
+    reference_now_ms: int | None = None,
     min_discovery_score: float = 55.0,
     require_positive_pnl: bool = True,
     require_positive_roi: bool = False,
@@ -66,8 +79,54 @@ def score_discovery_candidate(
     reasons: list[str] = []
     pnl_score = 50.0 if external_pnl_usdc is None else clamp(50.0 + external_pnl_usdc / 1000.0 * 50.0, 0.0, 100.0)
     roi_score = 50.0 if external_roi_pct is None else clamp(50.0 + external_roi_pct * 2.0, 0.0, 100.0)
-    activity_score = 55.0 if allow_incomplete_external_metrics else 25.0
-    recency_score = 55.0 if allow_incomplete_external_metrics else 25.0
+    # Public trade observations are discovery triage only. They establish neither
+    # trade direction nor follower-realizable performance, and are only trusted
+    # when the collector explicitly verifies exchange timestamps and scan bounds.
+    activity_score = 50.0 if allow_incomplete_external_metrics else 25.0
+    recency_score = 50.0 if allow_incomplete_external_metrics else 25.0
+    activity_values = (activity_trade_count, activity_window_start_ms, activity_window_end_ms, last_trade_event_ms)
+    activity_types_valid = (
+        isinstance(activity_trade_count, int)
+        and not isinstance(activity_trade_count, bool)
+        and activity_trade_count >= 0
+        and all(isinstance(value, int) and not isinstance(value, bool) and value > 0 for value in activity_values[1:])
+    )
+    activity_window_ms = (
+        activity_window_end_ms - activity_window_start_ms
+        if activity_types_valid and activity_window_start_ms is not None and activity_window_end_ms is not None
+        else 0
+    )
+    if activity_evidence_verified is True and activity_types_valid and 0 < activity_window_ms <= 300_000:
+        event_inside_window = (
+            activity_window_start_ms - PUBLIC_TRADE_CLOCK_SKEW_TOLERANCE_MS
+            <= last_trade_event_ms
+            <= activity_window_end_ms + PUBLIC_TRADE_CLOCK_SKEW_TOLERANCE_MS
+        )
+        activity_score = clamp(
+            activity_trade_count * 45_000.0 / activity_window_ms / PUBLIC_TRADE_ACTIVITY_SATURATION_PER_45S * 100.0,
+            0.0,
+            100.0,
+        )
+        effective_now_ms = now_ms() if reference_now_ms is None else reference_now_ms
+        valid_reference = isinstance(effective_now_ms, int) and not isinstance(effective_now_ms, bool) and effective_now_ms > 0
+        age_ms = effective_now_ms - last_trade_event_ms if valid_reference else -1
+        if event_inside_window and valid_reference and age_ms >= -PUBLIC_TRADE_CLOCK_SKEW_TOLERANCE_MS:
+            age_ms = max(0, age_ms)
+            recency_score = clamp(
+                (PUBLIC_TRADE_RECENCY_STALE_MS - age_ms)
+                / (PUBLIC_TRADE_RECENCY_STALE_MS - PUBLIC_TRADE_RECENCY_FRESH_MS)
+                * 100.0,
+                0.0,
+                100.0,
+            )
+            reasons.append("public_trade_activity_rate_measured_for_backfill_triage")
+            reasons.append("exchange_event_recency_measured_not_edge_proof")
+        else:
+            reasons.append("activity_event_timestamp_invalid")
+            if allow_incomplete_external_metrics:
+                recency_score = 50.0
+    else:
+        reasons.append("activity_evidence_unmeasured_or_unverified")
     volume = external_volume_usdc if external_volume_usdc is not None else external_position_usdc
     if volume is None:
         size_score = 50.0
@@ -81,12 +140,16 @@ def score_discovery_candidate(
         if volume > 5_000_000:
             reasons.append("wallet_too_large_to_copy_hint")
     if external_win_rate is not None:
-        activity_score = clamp(external_win_rate * 100.0, 0.0, 100.0)
+        # A reported win rate is neither trade activity nor copyable net edge:
+        # it lacks a sample-size guarantee and ignores loss size, fees, funding,
+        # spread, slippage, and follower execution delay. Keep it informational
+        # on the candidate record; never let it rank a wallet for backfill.
+        reasons.append("reported_win_rate_not_used_as_activity_or_copy_edge")
     source_score = clamp(source_reliability_score * 100.0, 0.0, 100.0)
-    # LEVIER A (2026-06-22, demande user "0 position / 0 fill frais"): on privilegie les leaders
-    # RECEMMENT ACTIFS (ceux qui tradent maintenant -> fills frais en WS, donc des entrees fraiches
-    # a copier) SANS sacrifier la qualite. activity+recency 30%->42% ; pnl+roi 45%->35% ;
-    # source (fiabilite) et copyability inchanges. Aucune gate touchee, aucun trade force, aucun fake.
+    # Historical activity-forward weights are retained, but this API currently
+    # has no measured trade-count or trade-age inputs. Their scores therefore
+    # remain neutral (or penalized when incomplete data are disallowed); this
+    # ranking is not evidence of freshness or follower profitability.
     final_score = clamp(
         0.20 * pnl_score
         + 0.15 * roi_score

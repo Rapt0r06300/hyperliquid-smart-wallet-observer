@@ -19,6 +19,26 @@ def test_edge_net_v12_refuses_missing_required_market_data():
     assert "MID_MISSING" in result.reason_codes
 
 
+def test_edge_net_v12_refuses_missing_funding_without_publishing_partial_net_edge():
+    result = estimate_edge_net_v12(
+        EdgeNetV12Inputs(
+            leader_reference_price=100.0,
+            current_mid=100.2,
+            leader_expected_edge_bps=80.0,
+            spread_bps=3.0,
+            slippage_bps=4.0,
+            fee_bps=4.5,
+            funding_estimate_bps=None,
+        )
+    )
+
+    assert result.measurable is False
+    assert result.accepted is False
+    assert result.total_cost_bps is None
+    assert result.net_edge_bps is None
+    assert "FUNDING_UNKNOWN" in result.reason_codes
+
+
 def test_edge_net_v12_subtracts_all_costs_and_accepts_positive_edge():
     result = estimate_edge_net_v12(
         EdgeNetV12Inputs(

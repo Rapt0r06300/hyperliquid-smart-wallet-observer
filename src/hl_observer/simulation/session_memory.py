@@ -8,8 +8,10 @@ coin+side.
 
 from __future__ import annotations
 
+import math
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
-from typing import Any, Iterable
+from typing import Any
 
 from hl_observer.backtesting.copy_vault_protocol import PAPER_EQUITY_USD
 from hl_observer.instrument_identity import preserve_native_instrument_symbol
@@ -21,9 +23,10 @@ EXIT_ACTION_MARKERS = ("CLOSE", "REDUCE", "STOP", "TAKE_PROFIT", "TRAILING")
 class SessionMemoryStats:
     coin: str
     side: str
-    session_pnl_usdc: float
-    realized_exit_pnl_usdc: float
+    session_pnl_usdc: float | None
+    realized_exit_pnl_usdc: float | None
     exit_count: int
+    unmeasurable_exit_count: int
     loss_count: int
     win_count: int
     recent_loss_streak: int
@@ -61,6 +64,16 @@ def _as_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def _measurable_pnl(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        pnl = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return pnl if math.isfinite(pnl) else None
+
+
 def _is_local_replay(row: dict[str, Any]) -> bool:
     return str(row.get("status") or "").upper() == "LOCAL_REPLAY"
 
@@ -78,10 +91,12 @@ def _is_exit_event(row: dict[str, Any]) -> bool:
     return any(marker in action for marker in EXIT_ACTION_MARKERS)
 
 
-def _outcome_streaks(values: list[float]) -> tuple[int, int]:
+def _outcome_streaks(values: list[float | None]) -> tuple[int, int]:
     losses = 0
     wins = 0
     for pnl in reversed(values):
+        if pnl is None:
+            break
         if pnl < 0:
             if wins:
                 break
@@ -104,25 +119,39 @@ def coin_side_session_stats(
     coin_native = preserve_native_instrument_symbol(coin)
     side_upper = str(side or "").upper()
     session_pnl = 0.0
-    exit_pnls: list[float] = []
+    exit_pnls: list[float | None] = []
+    unmeasurable_exit_count = 0
     for row in events:
         if not isinstance(row, dict) or not _is_local_replay(row):
             continue
         if _event_coin(row) != coin_native or _event_side(row) != side_upper:
             continue
-        pnl = _as_float(row.get("estimated_net_pnl_usdc"), 0.0)
-        session_pnl += pnl
         if _is_exit_event(row):
+            pnl = _measurable_pnl(row.get("estimated_net_pnl_usdc"))
             exit_pnls.append(pnl)
-    losses = sum(1 for value in exit_pnls if value < 0)
-    wins = sum(1 for value in exit_pnls if value > 0)
+            if pnl is None:
+                unmeasurable_exit_count += 1
+            else:
+                session_pnl += pnl
+        else:
+            # Entry/mark events can legitimately omit realized PnL. Preserve
+            # existing accounting for measurable values while never treating
+            # an unknown exit as a neutral result.
+            session_pnl += _as_float(row.get("estimated_net_pnl_usdc"), 0.0)
+    losses = sum(1 for value in exit_pnls if value is not None and value < 0)
+    wins = sum(1 for value in exit_pnls if value is not None and value > 0)
     loss_streak, win_streak = _outcome_streaks(exit_pnls)
     return SessionMemoryStats(
         coin=coin_native,
         side=side_upper,
-        session_pnl_usdc=round(session_pnl, 6),
-        realized_exit_pnl_usdc=round(sum(exit_pnls), 6),
+        session_pnl_usdc=(None if unmeasurable_exit_count else round(session_pnl, 6)),
+        realized_exit_pnl_usdc=(
+            None
+            if unmeasurable_exit_count
+            else round(sum(value for value in exit_pnls if value is not None), 6)
+        ),
         exit_count=len(exit_pnls),
+        unmeasurable_exit_count=unmeasurable_exit_count,
         loss_count=losses,
         win_count=wins,
         recent_loss_streak=loss_streak,
@@ -153,6 +182,16 @@ def evaluate_coin_side_session_memory(
     """
 
     stats = coin_side_session_stats(events, coin=coin, side=side)
+    if stats.unmeasurable_exit_count:
+        return SessionMemoryDecision(
+            allow_entry=False,
+            reason="COIN_SIDE_UNMEASURABLE_EXIT_PNL_FAIL_CLOSED",
+            stats=stats,
+            required_edge_bps=float(min_edge_required_bps or 0.0),
+            strong_recovery=False,
+            min_consensus=int(min_consensus_after_loss or 0),
+            min_liquidity=float(min_liquidity_after_loss or 0.0),
+        )
     cooldown = (
         max(0.20, float(starting_equity_usdt or 350.0) * 0.00025)
         if cooldown_usdc is None

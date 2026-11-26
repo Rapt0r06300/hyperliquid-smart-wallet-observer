@@ -19,7 +19,9 @@ Quatre instruments, tous causaux (un prix n'est lu que s'il est daté ``<= t`` e
 
 Règles d'honnêteté : une donnée absente reste ``NaN`` (jamais 0) ; un coût inconnu rend le
 résultat ``UNMEASURABLE`` ; une position non clôturée ne produit aucun PnL réalisé ; les
-résultats issus du coffre LOCAL sont exploratoires et ne constituent pas une preuve.
+résultats issus du coffre LOCAL sont exploratoires et ne constituent pas une preuve. Le net
+n'est publié que si au moins 95 % des heures-notionnel de funding sont mesurées ; sinon le
+net partiel reste un diagnostic explicite et le rendement statistique est exclu.
 
 PAPER / READ-ONLY : aucun ordre, aucune signature, aucun accès réseau.
 """
@@ -59,6 +61,7 @@ from hl_observer.backtesting.copy_vault_copiability_entrees import (  # noqa: F4
     prepare_fills,
 )
 from hl_observer.backtesting.copy_vault_copiability_mesures import (  # noqa: F401
+    MIN_FUNDING_COVERAGE,
     attribute_pnl,
     decay_curves,
     mirror_copy_episodes,
@@ -68,6 +71,39 @@ from hl_observer.backtesting.copy_vault_copiability_mesures import (  # noqa: F4
     unit_time_series_tests,
 )
 from hl_observer.contrat_paper import PAPER_EQUITY_USD
+
+
+def _aggregate_universe_attribution(
+    attribution: Mapping[str, Any], config: CopiabilityConfig
+) -> dict[str, Any]:
+    """Agrège l'univers sans publier un net si la couverture funding est insuffisante."""
+
+    daily = attribution["daily"]
+    totals = {key: float(np.asarray(value).sum()) for key, value in daily.items()}
+    universe: dict[str, Any] = {"market_hours": attribution["market_hours"], **totals}
+    for k in config.rebalance_minutes:
+        measured_key = f"funding_measured_k{k}_usd_hours"
+        unmeasured_key = f"funding_unmeasured_k{k}_usd_hours"
+        coverage: float | None = None
+        if measured_key in daily and unmeasured_key in daily:
+            measured = totals[measured_key]
+            unmeasured = totals[unmeasured_key]
+            total = measured + unmeasured
+            if total > 0:
+                coverage = measured / total
+        partial_net = (
+            totals[f"inventory_k{k}_usd"]
+            - totals[f"cost_k{k}_usd"]
+            + totals.get(f"funding_k{k}_usd", 0.0)
+        )
+        universe[f"funding_coverage_k{k}"] = coverage
+        universe[f"partial_net_excluding_unmeasured_funding_k{k}_usd"] = partial_net
+        universe[f"net_k{k}_usd"] = (
+            partial_net if coverage is not None and coverage >= MIN_FUNDING_COVERAGE else None
+        )
+        universe[f"timing_k{k}_usd"] = totals[f"inventory_k{k}_usd"] - totals[f"static_k{k}_usd"]
+    return universe
+
 
 # --------------------------------------------------------------------------- 4. synthèse
 
@@ -331,13 +367,7 @@ def run_copiability_study(
     ]
     universe: dict[str, Any] = {}
     if attribution.get("status") == "MEASURED":
-        totals = {key: float(value.sum()) for key, value in attribution["daily"].items()}
-        universe = {"market_hours": attribution["market_hours"], **totals}
-        for k in cfg.rebalance_minutes:
-            universe[f"net_k{k}_usd"] = (
-                totals[f"inventory_k{k}_usd"] - totals[f"cost_k{k}_usd"] + totals.get(f"funding_k{k}_usd", 0.0)
-            )
-            universe[f"timing_k{k}_usd"] = totals[f"inventory_k{k}_usd"] - totals[f"static_k{k}_usd"]
+        universe = _aggregate_universe_attribution(attribution, cfg)
     return {
         "schema_version": SCHEMA_VERSION,
         "mechanism": MECHANISM,
@@ -477,13 +507,7 @@ def run_position_replication_study(
     universe: dict[str, Any] = {}
     leaders: list[dict[str, Any]] = []
     if attribution.get("status") == "MEASURED":
-        totals = {key: float(value.sum()) for key, value in attribution["daily"].items()}
-        universe = {"market_hours": attribution["market_hours"], **totals}
-        for k in cfg.rebalance_minutes:
-            universe[f"net_k{k}_usd"] = (
-                totals[f"inventory_k{k}_usd"] - totals[f"cost_k{k}_usd"] + totals.get(f"funding_k{k}_usd", 0.0)
-            )
-            universe[f"timing_k{k}_usd"] = totals[f"inventory_k{k}_usd"] - totals[f"static_k{k}_usd"]
+        universe = _aggregate_universe_attribution(attribution, cfg)
         leaders = sorted(attribution["leaders"], key=lambda r: (-(r["mean_exposure_usd"] or 0.0), r["unit"]))
     priced = events["coin"].map(panel.column).notna() if len(events) else pd.Series([], dtype=bool)
     mean_bps = (net.get("unit_daily_return_bps") or {}).get("mean")
@@ -557,13 +581,7 @@ def run_retrospective_study(
     universe: dict[str, Any] = {}
     leaders: list[dict[str, Any]] = []
     if attribution.get("status") == "MEASURED":
-        totals = {key: float(value.sum()) for key, value in attribution["daily"].items()}
-        universe = {"market_hours": attribution["market_hours"], **totals}
-        for k in cfg.rebalance_minutes:
-            universe[f"net_k{k}_usd"] = (
-                totals[f"inventory_k{k}_usd"] - totals[f"cost_k{k}_usd"] + totals.get(f"funding_k{k}_usd", 0.0)
-            )
-            universe[f"timing_k{k}_usd"] = totals[f"inventory_k{k}_usd"] - totals[f"static_k{k}_usd"]
+        universe = _aggregate_universe_attribution(attribution, cfg)
         leaders = sorted(attribution["leaders"], key=lambda r: (-(r["mean_exposure_usd"] or 0.0), r["unit"]))
     # Échelle économique : ce qu'un rendement en bps de l'exposition représente pour NOTRE capital,
     # sans levier. Sert à garder les ordres de grandeur honnêtes ; ce n'est pas une prévision.

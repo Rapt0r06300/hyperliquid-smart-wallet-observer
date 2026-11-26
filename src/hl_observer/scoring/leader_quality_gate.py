@@ -1,26 +1,24 @@
-"""V9 / S5 — Gate de qualité des leaders (le vrai levier PnL).
+"""Historical leader prefilter using verified closed cycles and replay costs.
 
-Diagnostic prouvé hors-échantillon sur le ledger réel : copier TOUS les wallets
-suivis donne ~54 % winrate et un PnL net négatif ; ne copier que les wallets
-"smart money" (sélectionnés sur leur historique) donne ~67 % winrate et un PnL net
-positif. Ce module calcule la qualité réalisée d'un leader (à partir de ses propres
-allers-retours fermés) et décide s'il est copiable.
-
-Sélection sur l'HISTORIQUE, copie sur le FUTUR (walk-forward) — aucun look-ahead,
-aucune donnée inventée. read-only / paper-only. Ne promet aucun PnL.
+This is a candidate-quality heuristic, not OOS/forward evidence or a profitability
+certificate. Historical selection must be separated from later paper evaluation.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
+
+from hl_observer.backtest.ledger_replay_v9 import ReplayConfig
 
 
 @dataclass(frozen=True, slots=True)
 class LeaderQualityConfig:
-    min_round_trips: int = 3
+    min_round_trips: int = 20
     min_winrate: float = 0.60
-    min_mean_move_bps: float = 12.0        # doit dépasser le coût round-trip
-    round_trip_cost_bps: float = 11.0
+    min_mean_move_bps: float = 12.0        # minimum gross move; net edge is checked separately
+    round_trip_cost_bps: float = ReplayConfig().round_trip_cost_bps
+    min_net_edge_lcb_bps: float = 0.0
     max_one_trade_share: float = 0.60      # un seul trade ne doit pas porter tout le gain
 
 
@@ -28,9 +26,10 @@ class LeaderQualityConfig:
 class LeaderQuality:
     wallet: str
     round_trips: int
-    winrate: float
+    winrate: float                         # proportion of cycles positive after configured costs
     mean_move_bps: float
     net_edge_bps: float                    # mean_move - cost
+    net_edge_lcb_bps: float | None         # conservative lower bound; not an OOS certificate
     one_trade_share: float
     qualified: bool
     reasons: tuple[str, ...] = field(default_factory=tuple)
@@ -45,12 +44,23 @@ def assess_leader_quality(
     cfg = config or LeaderQualityConfig()
     n = len(moves_bps)
     if n == 0:
-        return LeaderQuality(wallet, 0, 0.0, 0.0, -cfg.round_trip_cost_bps, 0.0, False, ("NO_HISTORY",))
-    wins = sum(1 for m in moves_bps if m > 0)
+        return LeaderQuality(wallet, 0, 0.0, 0.0, -cfg.round_trip_cost_bps, None, 0.0, False, ("NO_HISTORY",))
+    if any(isinstance(move, bool) or not isinstance(move, (int, float)) for move in moves_bps):
+        return LeaderQuality(wallet, n, 0.0, 0.0, -cfg.round_trip_cost_bps, None, 0.0, False, ("INVALID_MOVE_SAMPLE",))
+    try:
+        moves = [float(move) for move in moves_bps]
+    except (OverflowError, ValueError):
+        return LeaderQuality(wallet, n, 0.0, 0.0, -cfg.round_trip_cost_bps, None, 0.0, False, ("INVALID_MOVE_SAMPLE",))
+    if any(not math.isfinite(move) for move in moves):
+        return LeaderQuality(wallet, n, 0.0, 0.0, -cfg.round_trip_cost_bps, None, 0.0, False, ("INVALID_MOVE_SAMPLE",))
+    net_moves = [move - cfg.round_trip_cost_bps for move in moves]
+    wins = sum(1 for move in net_moves if move > 0)
     winrate = wins / n
-    mean_move = sum(moves_bps) / n
+    mean_move = sum(moves) / n
     net_edge = mean_move - cfg.round_trip_cost_bps
-    gains = [m for m in moves_bps if m > 0]
+    sample_variance = sum((move - mean_move) ** 2 for move in moves) / (n - 1) if n > 1 else 0.0
+    net_edge_lcb = net_edge - 1.96 * math.sqrt(sample_variance / n)
+    gains = [move for move in net_moves if move > 0]
     total_gain = sum(gains)
     one_trade_share = (max(gains) / total_gain) if total_gain > 0 else 0.0
 
@@ -61,6 +71,10 @@ def assess_leader_quality(
         reasons.append(f"WINRATE_{winrate:.2f}<{cfg.min_winrate:.2f}")
     if mean_move < cfg.min_mean_move_bps:
         reasons.append(f"MEAN_MOVE_{mean_move:.1f}<{cfg.min_mean_move_bps:.1f}bps")
+    if net_edge <= 0:
+        reasons.append(f"NON_POSITIVE_NET_EDGE_{net_edge:.1f}bps")
+    if net_edge_lcb <= cfg.min_net_edge_lcb_bps:
+        reasons.append(f"NET_EDGE_LCB_{net_edge_lcb:.1f}<={cfg.min_net_edge_lcb_bps:.1f}bps")
     if one_trade_share > cfg.max_one_trade_share:
         reasons.append("ONE_BIG_WIN_RISK")
 
@@ -73,6 +87,7 @@ def assess_leader_quality(
         winrate=round(winrate, 4),
         mean_move_bps=round(mean_move, 4),
         net_edge_bps=round(net_edge, 4),
+        net_edge_lcb_bps=round(net_edge_lcb, 4),
         one_trade_share=round(one_trade_share, 4),
         qualified=qualified,
         reasons=tuple(reasons),

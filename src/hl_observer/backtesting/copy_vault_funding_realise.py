@@ -28,6 +28,7 @@ confondre un cout reconstitue avec une observation directe.
 from __future__ import annotations
 
 import bisect
+import math
 from collections.abc import Iterable, Mapping, Sequence
 from decimal import Decimal
 from pathlib import Path
@@ -47,13 +48,63 @@ INTERVALLE_ATTENDU = "1h"
 PROVENANCE_RECONSTITUEE = "REST_FUNDING_HISTORY_RECONSTITUEE"
 
 
+class _ValidatedFundingSeries(Sequence[tuple[int, Decimal]]):
+    """Compact immutable view of one sorted, finite funding series.
+
+    Validation happens once when the coffre is read. Re-validating tens of
+    thousands of rates for every trade would erase the benefit of binary search.
+    """
+
+    __slots__ = ("_rows",)
+
+    def __init__(self, rows: Iterable[tuple[int, Decimal]]) -> None:
+        normalized: list[tuple[int, Decimal]] = []
+        previous = -1
+        for point in rows:
+            if not isinstance(point, (tuple, list)) or len(point) != 2:
+                raise ValueError("invalid funding point")
+            instant, value = point
+            if isinstance(instant, bool) or not isinstance(instant, int) or instant <= previous:
+                raise ValueError("funding timestamps must be non-negative and strictly increasing")
+            if isinstance(value, bool) or value is None:
+                raise ValueError("invalid funding rate")
+            try:
+                rate = Decimal(str(value))
+            except (TypeError, ValueError, ArithmeticError) as exc:
+                raise ValueError("invalid funding rate") from exc
+            if not rate.is_finite():
+                raise ValueError("funding rate must be finite")
+            normalized.append((instant, rate))
+            previous = instant
+        if not normalized:
+            raise ValueError("funding series must not be empty")
+        self._rows = tuple(normalized)
+
+    def __getitem__(self, index):
+        return self._rows[index]
+
+    def __len__(self) -> int:
+        return len(self._rows)
+
+
+def _validated_funding_series(
+    rows: Sequence[tuple[int, Decimal]],
+) -> _ValidatedFundingSeries | None:
+    if isinstance(rows, _ValidatedFundingSeries):
+        return rows
+    try:
+        return _ValidatedFundingSeries(rows)
+    except (TypeError, ValueError, ArithmeticError):
+        return None
+
+
 def taux_du_coffre(
     racine: str | Path,
     *,
     coins: Sequence[str] | None,
     debut_ms: int,
     fin_ms: int,
-) -> tuple[dict[str, list[tuple[int, Decimal]]], dict[str, Any]]:
+) -> tuple[dict[str, Sequence[tuple[int, Decimal]]], dict[str, Any]]:
     """Les reglements de funding du coffre, par coin, tries par instant.
 
     Rend aussi un audit : sans le couple « lu / garde », un dictionnaire vide ne se distingue pas
@@ -89,10 +140,12 @@ def taux_du_coffre(
     par_heure: dict[str, dict[int, tuple[int, Decimal, bool]]] = {}
     doublons = doublons_contradictoires = externes_gardes = 0
     lus = gardes = intervalle_inattendu = taux_illisible = 0
+    compteurs_flux: dict[str, Any] = {}
     for ligne in coffre_tranches.flux(
         racine, shards, famille=FAMILLE_FUNDING,
         coins=list(coins) if coins else None,
-        debut_ms=int(debut_ms), fin_ms=int(fin_ms), verifier_sha=False,
+        debut_ms=int(debut_ms), fin_ms=int(fin_ms), verifier_sha=True,
+        compteurs=compteurs_flux,
     ):
         lus += 1
         coin = str(ligne.get("coin") or ligne.get("symbole") or "")
@@ -111,12 +164,25 @@ def taux_du_coffre(
         except (TypeError, ValueError, ArithmeticError):
             taux_illisible += 1
             continue
+        if not taux.is_finite():
+            taux_illisible += 1
+            continue
         instant = ligne.get("ts_ms")
-        if isinstance(instant, bool) or not isinstance(instant, (int, float)):
+        if isinstance(instant, bool):
+            taux_illisible += 1
+            continue
+        if isinstance(instant, int):
+            instant_ms = instant
+        elif isinstance(instant, float) and math.isfinite(instant) and instant.is_integer():
+            instant_ms = int(instant)
+        else:
+            taux_illisible += 1
+            continue
+        if instant_ms <= 0:
             taux_illisible += 1
             continue
         externe = ligne.get("data_origin") == ORIGINE_EXTERNE
-        heure = (int(instant) + 1_800_000) // 3_600_000          # l'heure la plus proche : un règlement tombe à H + quelques ms
+        heure = (instant_ms + 1_800_000) // 3_600_000          # l'heure la plus proche : un règlement tombe à H + quelques ms
         deja = par_heure.setdefault(coin, {}).get(heure)
         if deja is not None:
             doublons += 1
@@ -124,10 +190,24 @@ def taux_du_coffre(
                 doublons_contradictoires += 1
             if not (deja[2] and not externe):
                 continue                                          # garde l'existant, sauf externe remplacé par Alina
-        par_heure[coin][heure] = (int(instant), taux, externe)
-    par_coin: dict[str, list[tuple[int, Decimal]]] = {}
+        par_heure[coin][heure] = (instant_ms, taux, externe)
+    shards_refuses = list(compteurs_flux.get("shards_refuses") or [])
+    if shards_refuses:
+        # Une couverture partielle peut sous-estimer les règlements et donc embellir le PnL.
+        # Ne garder aucun taux si un shard sélectionné manque, échoue à la lecture ou ne passe
+        # pas son SHA : l'appelant recevra un état explicitement non mesurable.
+        return {}, {
+            "status": "SHARDS_REFUSES",
+            "shards": len(shards),
+            "shards_lus": compteurs_flux.get("shards_lus", 0),
+            "shards_refuses": shards_refuses,
+            "lignes_lues": lus,
+            "provenance": PROVENANCE_RECONSTITUEE,
+        }
+    par_coin: dict[str, Sequence[tuple[int, Decimal]]] = {}
     for coin, heures in par_heure.items():
-        par_coin[coin] = sorted(((instant, taux) for instant, taux, _ in heures.values()), key=lambda c: c[0])
+        rows = sorted(((instant, taux) for instant, taux, _ in heures.values()), key=lambda c: c[0])
+        par_coin[coin] = _ValidatedFundingSeries(rows)
         externes_gardes += sum(1 for *_, ext in heures.values() if ext)
     gardes = sum(len(serie) for serie in par_coin.values())
     audit = {
@@ -156,9 +236,10 @@ def _reglements_traverses(
     choisie est donc `(debut, fin]`, et elle est verrouillee par un test -- une borne qui glisse
     d'un reglement, c'est un cout qui change sans que rien ne le dise.
     """
-    instants = [instant for instant, _ in serie]
-    premier = bisect.bisect_right(instants, int(debut_ms))
-    dernier = bisect.bisect_right(instants, int(fin_ms))
+    # Search the sorted rows directly. Building a full timestamp list for every trade
+    # made this O(series length) in both time and transient RAM before the binary search.
+    premier = bisect.bisect_right(serie, int(debut_ms), key=lambda row: row[0])
+    dernier = bisect.bisect_right(serie, int(fin_ms), key=lambda row: row[0])
     return list(serie[premier:dernier])
 
 
@@ -187,11 +268,20 @@ def funding_du_trade(
         return _inconnu("FUNDING_TRADE_TIMESTAMPS_UNMEASURABLE", coin)
     if isinstance(notionnel, bool) or not isinstance(notionnel, (int, float)):
         return _inconnu("FUNDING_NOTIONAL_UNMEASURABLE", coin)
-    if direction not in (1, -1):
+    try:
+        notionnel_float = float(notionnel)
+    except (OverflowError, TypeError, ValueError):
+        return _inconnu("FUNDING_NOTIONAL_UNMEASURABLE", coin)
+    if not math.isfinite(notionnel_float) or notionnel_float <= 0:
+        return _inconnu("FUNDING_NOTIONAL_UNMEASURABLE", coin)
+    if isinstance(direction, bool) or direction not in (1, -1):
         return _inconnu("FUNDING_DIRECTION_UNMEASURABLE", coin)
-    serie = taux_par_coin.get(coin)
-    if not serie:
+    serie_brute = taux_par_coin.get(coin)
+    if not serie_brute:
         return _inconnu("FUNDING_RATES_MISSING_FOR_COIN", coin)
+    serie = _validated_funding_series(serie_brute)
+    if serie is None:
+        return _inconnu("FUNDING_RATE_SERIES_UNMEASURABLE", coin)
     # LA COUVERTURE SE JUGE SUR LA FENETRE LUE, PAS SUR LA POSITION DES REGLEMENTS.
     #
     # Premiere version de cette garde : « refuser si l'entree precede le premier reglement connu ».
@@ -202,17 +292,35 @@ def funding_du_trade(
     # Ce qu'il faut verifier, c'est qu'on a LU tous les reglements de l'intervalle de l'episode.
     # Sans `couverture_ms`, on retombe sur les bornes des reglements connus, qui ne prouvent qu'un
     # minimum -- donc on reste prudent et on refuse les episodes qui en sortent.
-    debut_couvert, fin_couverte = couverture_ms or (serie[0][0], serie[-1][0])
+    if couverture_ms is None:
+        debut_couvert, fin_couverte = serie[0][0], serie[-1][0]
+    elif (
+        not isinstance(couverture_ms, (tuple, list))
+        or len(couverture_ms) != 2
+        or any(isinstance(value, bool) or not isinstance(value, int) for value in couverture_ms)
+        or couverture_ms[0] < 0
+        or couverture_ms[1] < couverture_ms[0]
+    ):
+        return _inconnu("FUNDING_COVERAGE_UNMEASURABLE", coin)
+    else:
+        debut_couvert, fin_couverte = couverture_ms
     if entree < int(debut_couvert) or sortie > int(fin_couverte):
         return _inconnu("FUNDING_RATES_DO_NOT_COVER_EPISODE", coin)
     traverses = _reglements_traverses(serie, entree, sortie)
-    porte = Decimal(str(float(notionnel))) * Decimal(int(direction))
-    cout = sum((taux * porte for _, taux in traverses), Decimal(0))
+    porte = Decimal(str(notionnel_float)) * Decimal(int(direction))
+    try:
+        cout = sum((taux * porte for _, taux in traverses), Decimal(0))
+        pnl_exact = -cout
+        pnl_float = float(pnl_exact)
+    except (ArithmeticError, ValueError):
+        return _inconnu("FUNDING_RATE_SERIES_UNMEASURABLE", coin)
+    if not pnl_exact.is_finite() or not math.isfinite(pnl_float):
+        return _inconnu("FUNDING_RATE_SERIES_UNMEASURABLE", coin)
     return {
         "status": "MEASURED",
         "coin": coin,
-        "carry_pnl_usd": float(-cout),
-        "carry_pnl_usd_exact_decimal": format(-cout, "f"),
+        "carry_pnl_usd": pnl_float,
+        "carry_pnl_usd_exact_decimal": format(pnl_exact, "f"),
         "settlement_crossing_count": len(traverses),
         "settlement_interval_hours": 1,
         "provenance": PROVENANCE_RECONSTITUEE,

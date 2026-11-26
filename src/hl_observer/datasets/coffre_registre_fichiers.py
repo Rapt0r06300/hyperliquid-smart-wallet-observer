@@ -20,6 +20,15 @@ FICHIERS_NON_CERTIFIES: dict[str, tuple[str, str]] = {
         "REDONDANT", "journal des fills WebSocket déjà certifiés via vault_fills_live.jsonl"),
     "lead_lag_event_decisions.jsonl": (
         "HORS_PERIMETRE", "famille Lead-Lag : DISABLED_BY_SCOPE, aucune preuve Copy-Vault n'en dépend"),
+    # 26/11/2026 : écrits par tools/collecter_bbo.py (paires de cotations Hyperliquid + Binance, même contenu sous
+    # deux noms). Ils sortaient en INCONNU. Famille Cross-Venue, hors du périmètre CopyVault ; la cotation Binance
+    # est une source externe qui a sa propre validation (backtesting/cross_venue_certified.py). Gardés sur disque.
+    "bbo_synchro.jsonl": (
+        "HORS_PERIMETRE", "paires de cotations Hyperliquid + Binance (famille Cross-Venue, DISABLED_BY_SCOPE) : "
+                          "source externe à validation séparée (cross_venue_certified), jamais au coffre CopyVault"),
+    "cross_venue_atomic_bbo.jsonl": (
+        "HORS_PERIMETRE", "paires de cotations Hyperliquid + Binance (famille Cross-Venue, DISABLED_BY_SCOPE) : "
+                          "source externe à validation séparée (cross_venue_certified), jamais au coffre CopyVault"),
     "raw_l2_lifecycle.jsonl": (
         "DIAGNOSTIC", "journal technique des abonnements L2 (pas une donnée de marché)"),
     "userfills_integrity_diagnostics.jsonl": (

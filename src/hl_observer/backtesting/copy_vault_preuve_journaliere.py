@@ -6,15 +6,16 @@ y ajoutant la comparaison de segments. L invariant #13 du depot refuse exactemen
 sa regle est d EXTRAIRE, jamais de relever le plafond -- le plafond est donc BAISSE a la
 taille reelle apres extraction, ce qui rend le gain definitif.
 
-POURQUOI CES HUIT-LA. Elles forment une seule etape du pipeline : geler un candidat et
+POURQUOI CES NEUF-LA. Elles forment une seule etape du pipeline : geler un candidat et
 porter la preuve journaliere qui l accompagne. _candidate batit l enregistrement ;
 _daily_lcb et _daily_lcb_rank en tirent la borne inferieure de confiance ;
-_train_active_day_mean la moyenne des jours actifs ; _pnl_uplift_freeze_count le nombre de
-gels ; _latest_daily, _daily_du_segment et _segment_commun_le_plus_profond comparent deux
-cotes sur le segment commun le plus profond (sans quoi on comparait des periodes
+_train_active_day_mean la moyenne des jours actifs ; _daily_exact_values valide les jours
+decimaux canoniques avant le classement de campagne ; _pnl_uplift_freeze_count le nombre
+de gels ; _latest_daily, _daily_du_segment et _segment_commun_le_plus_profond comparent
+deux cotes sur le segment commun le plus profond (sans quoi on comparait des periodes
 differentes). record_frozen_candidate, qui reste dans le module d origine, les consomme.
 
-AUCUN CYCLE POSSIBLE : mesure avant de deplacer, ces huit fonctions ne dependent d aucun
+AUCUN CYCLE POSSIBLE : mesure avant de deplacer, ces neuf fonctions ne dependent d aucun
 nom interne du module d origine (la seule dependance, _segment_commun_le_plus_profond vers
 _daily_du_segment, part elle aussi). La dependance ne va donc que dans un sens.
 """
@@ -29,7 +30,6 @@ from hl_observer.backtesting.leader_quality_signal import SEUIL_LEADER_OFF_USD
 from hl_observer.backtesting.train_statistics import summarize_daily_values
 from hl_observer.economics.numeric import decimal_sum, decimal_value
 from hl_observer.simulation.economic_freeze_registry import parameter_hash
-
 
 
 def _candidate(
@@ -91,6 +91,25 @@ def _daily_lcb(daily_values: object, trial_count: int) -> dict[str, Any]:
     if not isinstance(daily_values, (list, tuple)):
         return summarize_daily_values((), trial_count=trial_count)
     return summarize_daily_values(daily_values, trial_count=trial_count)
+
+
+def _daily_exact_values(statistics: object) -> list[str] | None:
+    """Return only a complete canonical Decimal series; never rank float fallbacks."""
+    if not isinstance(statistics, Mapping):
+        return None
+    values = statistics.get("daily_net_pnl_usd_exact_decimal")
+    distinct_days = statistics.get("distinct_days")
+    if (
+        not isinstance(values, list)
+        or type(distinct_days) is not int
+        or distinct_days != len(values)
+    ):
+        return None
+    parsed = [decimal_value(value) if isinstance(value, str) else None for value in values]
+    if any(value is None or not value.is_finite() for value in parsed):
+        return None
+    return [format(value, "f") for value in parsed]
+
 
 def _daily_lcb_rank(summary: Mapping[str, Any]) -> dict[str, Any]:
     """Adapt the active-day score and error bound to the shared rank guard."""

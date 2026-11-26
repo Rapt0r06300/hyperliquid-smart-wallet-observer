@@ -48,7 +48,7 @@ class WalletDiscoverySettings(BaseModel):
             "hyperliquid_explorer",
             "local_db",
             "local_config",
-            "coinglass_whale_tracker",
+            "public_trades_ws",
             "hyperdash",
             "hypertracker",
         ]

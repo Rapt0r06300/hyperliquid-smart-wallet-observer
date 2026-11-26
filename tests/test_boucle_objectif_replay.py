@@ -9,7 +9,11 @@ from __future__ import annotations
 import json
 
 from hl_observer.backtesting.boucle_objectif_replay import (
-    STATUT_BUDGET_EPUISE, STATUT_ESPACE_EPUISE, STATUT_PROMU, boucle_objectif, cle_config,
+    STATUT_BUDGET_EPUISE,
+    STATUT_ESPACE_EPUISE,
+    STATUT_PROMU,
+    boucle_objectif,
+    cle_config,
 )
 
 CONFIGS = [{"sl": 40, "tp": 70}, {"sl": 30, "tp": 90}, {"sl": 50, "tp": 60}]
@@ -92,3 +96,20 @@ def test_6_une_evaluation_qui_EXPLOSE_est_notee_et_la_boucle_continue():
 def test_7_la_cle_de_config_est_STABLE_et_discriminante():
     assert cle_config({"a": 1, "b": 2}) == cle_config({"b": 2, "a": 1})
     assert cle_config({"a": 1}) != cle_config({"a": 2})
+
+
+def test_8_un_net_absent_ou_non_fini_reste_inconnu_dans_le_recu(capsys):
+    result = boucle_objectif(
+        [{"id": "net-missing"}],
+        lambda _: {
+            "moitie_1": {"net_total_usd": None},
+            "moitie_2": {"net_total_usd": "NaN"},
+            "stress": {"net_total_usd": 0.0},
+        },
+        porte=lambda _: False,
+    )
+
+    assert result["essais"][0]["nets"] == {"moitie_1": None, "moitie_2": None, "stress": 0.0}
+    output = capsys.readouterr().out
+    assert "'moitie_1': None" in output
+    assert "'stress': 0.0" in output

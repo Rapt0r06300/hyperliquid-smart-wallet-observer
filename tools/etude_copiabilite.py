@@ -277,7 +277,11 @@ def load_mid_panel(shards: list[dict[str, Any]], stale_ms: int, cache_dir: Path 
                                           provenance=str(z["provenance"]), stale_ms=int(z["stale_ms"]))
         except (OSError, KeyError, ValueError):
             pass
-    panel = _construire_panneau(shards, stale_ms)
+    panel = None
+    if cache is not None:
+        panel = _construire_panneau_par_shard(shards, stale_ms, Path(cache_dir))
+    if panel is None:
+        panel = _construire_panneau(shards, stale_ms)
     if cache is not None:
         try:
             cache.parent.mkdir(parents=True, exist_ok=True)
@@ -305,6 +309,143 @@ def _construire_panneau(shards: list[dict[str, Any]], stale_ms: int) -> cop.Pric
                         yield row.get("ts_ms"), {k: v for k, v in mids.items() if not k.startswith(("#", "@"))}
 
     return cop.build_mid_panel(snapshots(), stale_ms=stale_ms)
+
+
+MIDS_CACHE_VERSION = "mids-par-shard-v1"
+#: Processus qui lisent les shards ``allmids`` absents du cache (0 ou 1 = dans le processus courant).
+MIDS_OUVRIERS = 4
+
+
+def _mids_d_un_shard(job: tuple[str, str, str]) -> str:
+    """Processus fils : met en cache (une fois par SHA-256) les instantanes ``allMids`` d'UN shard.
+
+    Garde, dans l'ordre de lecture, la PREMIERE ligne de chaque horodatage valide (``type(ts) is int and ts > 0``,
+    la regle de ``build_mid_panel``), ses coins dans l'ordre du dictionnaire (hors '#' et '@') et leur prix converti
+    par ``_to_float`` (NaN s'il n'est pas strictement positif : la case reste vide, comme a l'origine).
+    ``exact = False`` (instant hors int64, nom de coin finissant par NUL) : le panneau est alors construit a l'ancienne.
+    """
+    from hl_observer.backtesting.copy_vault_copiability_entrees import _to_float
+
+    path, sha, cache_dir = job
+    cache = Path(cache_dir) / "mids" / f"{MIDS_CACHE_VERSION}-{sha}.npz"
+    if cache.is_file():
+        return str(cache)
+    vus: set[int] = set()
+    instants: list[int] = []
+    longueurs: list[int] = []
+    cles: list[int] = []
+    valeurs: list[float] = []
+    vocab: dict[str, int] = {}
+    exact = True
+    nan = float("nan")
+    with gzip.open(path, "rt", encoding="utf-8") as handle:
+        for line in handle:
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            mids = row.get("mids")
+            if not isinstance(mids, dict):
+                continue
+            ts = row.get("ts_ms")
+            if not (type(ts) is int and ts > 0) or ts in vus:
+                continue
+            if ts >= 2 ** 63:
+                exact = False
+                break
+            vus.add(ts)
+            n = 0
+            for coin, value in mids.items():
+                if coin.startswith(("#", "@")):
+                    continue
+                if coin.endswith(chr(0)):
+                    exact = False
+                cles.append(vocab.setdefault(coin, len(vocab)))
+                price = _to_float(value)
+                valeurs.append(price if price > 0 else nan)
+                n += 1
+            instants.append(ts)
+            longueurs.append(n)
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    tmp = cache.with_name(f".{cache.name}.{os.getpid()}.tmp.npz")
+    if exact:
+        np.savez(tmp, exact=np.array(True), ts=np.array(instants, dtype=np.int64),
+                 longueurs=np.array(longueurs, dtype=np.int64), cles=np.array(cles, dtype=np.int64),
+                 valeurs=np.array(valeurs, dtype=np.float64), vocab=np.array(list(vocab), dtype=str))
+    else:
+        np.savez(tmp, exact=np.array(False))
+    os.replace(tmp, cache)
+    return str(cache)
+
+
+def _construire_panneau_par_shard(shards: list[dict[str, Any]], stale_ms: int, cache_dir: Path,
+                                  workers: int | None = None) -> cop.PricePanel | None:
+    """Le panneau de ``_construire_panneau``, assemble depuis le cache de chaque shard ; ``None`` = a l'ancienne.
+
+    25/11/2026 -- 188 s mesurees a chaque nouveau shard ``allmids`` : tout le panneau etait relu en JSON. Ici seuls
+    les shards absents du cache sont lus. L'assemblage suit ``build_mid_panel`` a la lettre : premier horodatage lu
+    (dans l'ordre des shards) garde, lignes triees par instant, colonnes dans l'ordre de premiere apparition en
+    parcourant les lignes triees puis leurs coins, cases vides = NaN.
+    """
+    if not shards or not all(item.get("sha256") and item.get("path") for item in shards):
+        return None
+    workers = MIDS_OUVRIERS if workers is None else int(workers)
+    jobs = [(str(item["path"]), str(item["sha256"]), str(cache_dir)) for item in shards]
+    fichiers = [Path(cache_dir) / "mids" / f"{MIDS_CACHE_VERSION}-{job[1]}.npz" for job in jobs]
+    manquants = [job for job, f in zip(jobs, fichiers) if not f.is_file()]
+    if manquants:
+        if workers > 1 and len(manquants) > 1:
+            with ProcessPoolExecutor(max_workers=workers) as pool:
+                list(pool.map(_mids_d_un_shard, manquants, chunksize=1))
+        else:
+            for job in manquants:
+                _mids_d_un_shard(job)
+    blocs_ts = []
+    for f in fichiers:
+        with np.load(f, allow_pickle=False) as z:
+            if not bool(z["exact"]):
+                return None
+            blocs_ts.append(z["ts"])
+    tous = np.concatenate(blocs_ts)
+    instants, premiers = np.unique(tous, return_index=True)       # trie ; premiere occurrence dans l'ordre lu
+    rang = np.full(len(tous), -1, dtype=np.int64)
+    rang[premiers] = np.arange(len(instants), dtype=np.int64)
+    bornes = np.cumsum([0] + [len(b) for b in blocs_ts])
+    pas_de_ligne = np.int64(2 ** 20)
+    infini = np.iinfo(np.int64).max
+
+    def entrees(numero: int):
+        with np.load(fichiers[numero], allow_pickle=False) as z:
+            longueurs, cles, valeurs, vocab = z["longueurs"], z["cles"], z["valeurs"], z["vocab"].tolist()
+        rangs = np.repeat(rang[bornes[numero]:bornes[numero + 1]], longueurs)
+        debuts = np.repeat(np.cumsum(longueurs) - longueurs, longueurs)
+        positions = np.arange(len(cles), dtype=np.int64) - debuts
+        garde = rangs >= 0
+        return rangs[garde], positions[garde], cles[garde], valeurs[garde], vocab
+
+    premiere: dict[str, int] = {}
+    for numero in range(len(fichiers)):
+        rangs, positions, cles, _valeurs, vocab = entrees(numero)
+        if not len(cles):
+            continue
+        if int(positions.max()) >= int(pas_de_ligne):
+            return None
+        mini = np.full(len(vocab), infini, dtype=np.int64)
+        np.minimum.at(mini, cles, rangs * pas_de_ligne + positions)
+        for j, code in enumerate(mini.tolist()):
+            if code != infini:
+                nom = vocab[j]
+                premiere[nom] = code if nom not in premiere else min(premiere[nom], code)
+    coins = sorted(premiere, key=premiere.__getitem__)          # deux coins ne partagent jamais une case
+    colonne = {nom: i for i, nom in enumerate(coins)}
+    px = np.full((len(instants), len(coins)), np.nan, dtype=np.float64)
+    for numero in range(len(fichiers)):
+        rangs, _positions, cles, valeurs, vocab = entrees(numero)
+        if len(cles):
+            locales = np.array([colonne.get(nom, -1) for nom in vocab], dtype=np.int64)
+            px[rangs, locales[cles]] = valeurs
+    return cop.PricePanel(ts=instants.astype(np.int64), px=px, coins=tuple(coins),
+                          provenance="HYPERLIQUID_ALLMIDS_OBSERVED", stale_ms=stale_ms)
 
 
 def _spreads_observes(path: str, sample_every: int) -> dict[str, list[float]]:
@@ -392,18 +533,75 @@ def funding_shards(shards: dict[str, list[dict[str, Any]]]) -> list[dict[str, An
     return [*shards.get("asset_ctx", []), *shards.get("funding_history", [])]
 
 
-def load_funding(shards: list[dict[str, Any]]):
-    """``(coin, ts_ms, taux horaire)`` depuis le coffre : contexte d'actif observé ou historique publié."""
+FUNDING_CACHE_VERSION = "funding-v1"
 
-    for item in shards:
-        with gzip.open(item["path"], "rt", encoding="utf-8") as handle:
-            for line in handle:
-                try:
-                    row = json.loads(line)
-                except ValueError:
-                    continue
-                if isinstance(row, dict) and row.get("funding") is not None:
-                    yield str(row.get("coin") or ""), row.get("ts_ms"), row.get("funding")
+
+def _lire_funding(path: str):
+    """``(coin, ts_ms, taux)`` d'UN shard, dans l'ordre des lignes (lecture directe)."""
+    with gzip.open(path, "rt", encoding="utf-8") as handle:
+        for line in handle:
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(row, dict) and row.get("funding") is not None:
+                yield str(row.get("coin") or ""), row.get("ts_ms"), row.get("funding")
+
+
+def _funding_d_un_shard(job: tuple[str, str, str]) -> str:
+    """Processus fils : met en cache (une fois par SHA-256) les observations de funding d'un shard. Un shard dont une
+    ligne n'a pas exactement les types (``int`` pour l'instant, ``float`` pour le taux) est marqué « à relire »."""
+    path, sha, cache_dir = job
+    cache = Path(cache_dir) / "funding" / f"{FUNDING_CACHE_VERSION}-{sha}.npz"
+    if cache.is_file():
+        return str(cache)
+    lignes = list(_lire_funding(path))
+    # int64 tient l'instant ; numpy rogne les NUL finaux d'une chaine : ces cas rares restent en lecture directe.
+    exact = all(type(t) is int and -(2 ** 63) <= t < 2 ** 63 and type(f) is float and not c.endswith("\x00")
+                for c, t, f in lignes)
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    tmp = cache.with_name(f".{cache.name}.{os.getpid()}.tmp.npz")
+    if exact:
+        np.savez(tmp, exact=np.array(True), coins=np.array([c for c, _t, _f in lignes], dtype=str),
+                 ts=np.array([t for _c, t, _f in lignes], dtype=np.int64),
+                 taux=np.array([f for _c, _t, f in lignes], dtype=np.float64))
+    else:
+        np.savez(tmp, exact=np.array(False))
+    os.replace(tmp, cache)
+    return str(cache)
+
+
+def load_funding(shards: list[dict[str, Any]], cache_dir: Path | None = None, workers: int = 4):
+    """``(coin, ts_ms, taux horaire)`` depuis le coffre : contexte d'actif observé ou historique publié.
+
+    25/11/2026 -- CACHE PAR SHARD. 102 s mesurées (12,5 M lignes JSON) refaites par 4 études. Avec ``cache_dir``, les
+    observations de chaque shard (immuable) sont gardées sous son SHA-256 et restituées à l'IDENTIQUE : mêmes tuples,
+    mêmes types (``str``, ``int``, ``float``), même ordre ; un shard à autres types est relu directement."""
+    if cache_dir is None or not all(item.get("sha256") for item in shards):
+        for item in shards:
+            yield from _lire_funding(item["path"])
+        return
+    jobs = [(item["path"], item["sha256"], str(cache_dir)) for item in shards]
+    dossier = Path(cache_dir) / "funding"
+    fichiers = [str(dossier / f"{FUNDING_CACHE_VERSION}-{job[1]}.npz") for job in jobs]
+    manquants = [job for job, f in zip(jobs, fichiers) if not Path(f).is_file()]
+    if manquants:
+        if workers > 1 and len(manquants) > 1:
+            with ProcessPoolExecutor(max_workers=workers) as pool:
+                list(pool.map(_funding_d_un_shard, manquants, chunksize=4))
+        else:
+            for job in manquants:
+                _funding_d_un_shard(job)
+    for item, fichier in zip(shards, fichiers):
+        with np.load(fichier, allow_pickle=False) as z:
+            if not bool(z["exact"]):
+                coins = None
+            else:
+                coins, ts, taux = z["coins"].tolist(), z["ts"].tolist(), z["taux"].tolist()
+        if coins is None:
+            yield from _lire_funding(item["path"])
+        else:
+            yield from zip(coins, ts, taux)
 
 
 def spread_shards(shards: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
@@ -627,7 +825,7 @@ def run(root: Path, *, price: str, workers: int, config: cop.CopiabilityConfig, 
     for reason, count in prepared_rejects.items():
         rejects[reason] = rejects.get(reason, 0) + count
     print(f"[copiabilite] {len(fills):,} fills retenus · panel {panel.px.shape} · {len(half_spreads)} demi-spreads", flush=True)
-    funding = cop.build_funding_rates(load_funding(funding_shards(shards)), panel)
+    funding = cop.build_funding_rates(load_funding(funding_shards(shards), cache_dir=root / CACHE_DIR), panel)
     report = _jsonable(cop.run_copiability_study(fills, panel, half_spreads, config, funding_rates=funding,
                                                  parallele=executeur_parallele(workers)))
     run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
@@ -798,7 +996,7 @@ def run_retrospective(root: Path, *, lag_s: float, workers: int, write: bool = T
     for reason, count in prepared_rejects.items():
         rejects[reason] = rejects.get(reason, 0) + count
     half_spreads = load_half_spreads(spread_shards(shards), cache_dir=root / CACHE_DIR)
-    funding = cop.build_funding_rates(load_funding(funding_shards(shards)), panel)
+    funding = cop.build_funding_rates(load_funding(funding_shards(shards), cache_dir=root / CACHE_DIR), panel)
     print(f"[retrospectif] {len(fills):,} fills · {fills['vault'].nunique() if len(fills) else 0} vaults · "
           f"panel {panel.px.shape} · {len(half_spreads)} demi-spreads", flush=True)
     report = _jsonable(cop.run_retrospective_study(fills, panel, half_spreads, config, assumed_lag_ms=lag_ms,
@@ -922,7 +1120,7 @@ def run_positions(root: Path, *, price: str, write: bool = True) -> dict[str, An
         panel, _ = cop.alias_legacy_symbols(panel, events["coin"].unique())
     identity["corpus_tier"] = EVIDENCE_TIER_POSITIONS
     half_spreads = load_half_spreads(spread_shards(shards), cache_dir=root / CACHE_DIR)
-    funding = cop.build_funding_rates(load_funding(funding_shards(shards)), panel)
+    funding = cop.build_funding_rates(load_funding(funding_shards(shards), cache_dir=root / CACHE_DIR), panel)
     print(f"[positions] {len(events):,} changements de position · {len(seen)} vaults · "
           f"{sum(len(v) for v in seen.values()):,} instantanés · panel {panel.px.shape}", flush=True)
     report = _jsonable(cop.run_position_replication_study(events, seen, panel, half_spreads, config,
@@ -1380,7 +1578,166 @@ def borne_du_hasard_replication(portefeuilles: Mapping[str, list], panel: Any,
     }
 
 
-def capacite_de_la_fenetre(root: Path, *, debut_ms: int, fin_ms: int) -> dict[str, Any]:
+#: Processus de lecture de la capacite (0 ou 1 = l'ancienne lecture en flux, un seul processus).
+CAPACITE_OUVRIERS = 4
+#: Au-dela, un instant n'est plus garanti exact en int64 (ni sa minute dans la cle) : shard relu en flux.
+_BORNE_INSTANT = 2 ** 53
+
+
+def _capacite_d_un_shard(job: tuple[str, str, Any, str]) -> dict[str, Any]:
+    """Processus fils : UN shard de ``trades_marche``, lu ligne par ligne comme ``TRANCHES.flux``.
+
+    Rend, pour chaque ligne que le flux laisserait passer hors fenetre, son instant de fenetre, et pour
+    chaque ligne mesurable (``ROLES.trade_mesurable``, la regle de ``capacite_par_coin``) son coin, son
+    instant et son notionnel. La fenetre est appliquee par le parent. ``repli`` = relire ce shard en flux.
+    """
+    racine_txt, rel, attendu, famille = job
+    racine = Path(racine_txt).resolve()
+    chemin = (racine / rel).resolve()
+    try:
+        chemin.relative_to(racine)
+    except ValueError:
+        return {"refus": "HORS_COFFRE"}
+    if not chemin.is_file():
+        return {"refus": "ABSENT_DU_DISQUE"}
+    if not isinstance(attendu, str) or len(attendu) != 64:
+        return {"refus": "SHA_ABSENT"}
+    if TRANCHES._sha256(chemin) != attendu:
+        return {"refus": "SHA_DIVERGENT"}
+    fenetre: list[int] = []
+    mesurable: list[bool] = []
+    coins: list[int] = []
+    instants: list[int] = []
+    notionnels: list[float] = []
+    vocab: dict[str, int] = {}
+    sans_horloge = 0
+    interrompu = False
+    ouvrir = gzip.open if chemin.suffix == ".gz" else open
+    try:
+        with ouvrir(chemin, "rt", encoding="utf-8") as fh:
+            for brut in fh:
+                if not brut.strip():
+                    continue
+                try:
+                    ligne = json.loads(brut)
+                except ValueError:
+                    continue
+                if not isinstance(ligne, dict):
+                    continue
+                instant_fenetre = TRANCHES.instant_de(ligne, famille)
+                if instant_fenetre is None:
+                    sans_horloge += 1
+                    continue
+                if not -_BORNE_INSTANT <= instant_fenetre <= _BORNE_INSTANT:
+                    return {"repli": True}
+                trade = ROLES.trade_mesurable(ligne)
+                fenetre.append(instant_fenetre)
+                mesurable.append(trade is not None)
+                if trade is not None:
+                    coin, instant, notionnel = trade
+                    if not -_BORNE_INSTANT <= instant <= _BORNE_INSTANT:
+                        return {"repli": True}
+                    coins.append(vocab.setdefault(coin, len(vocab)))
+                    instants.append(instant)
+                    notionnels.append(notionnel)
+    except (OSError, EOFError, gzip.BadGzipFile):
+        interrompu = True
+    return {"fenetre": np.array(fenetre, dtype=np.int64), "mesurable": np.array(mesurable, dtype=bool),
+            "coins": np.array(coins, dtype=np.int64), "instants": np.array(instants, dtype=np.int64),
+            "notionnels": np.array(notionnels, dtype=np.float64), "vocab": list(vocab), "interrompu": interrompu,
+            "sans_horloge": sans_horloge}
+
+
+def _capacite_en_parallele(root: Path, shards: list[dict[str, Any]], *, famille: str, debut_ms: int, fin_ms: int,
+                           compteurs: dict[str, Any], ouvriers: int) -> dict[str, Any]:
+    """Meme sortie que ``ROLES.capacite_par_coin(TRANCHES.flux(...))``, au bit pres.
+
+    25/11/2026 -- 475 s mesurees sur 2,45 Go de trades, lus par UN processus. Les shards sont lus par
+    ``ouvriers`` processus mais CONSOMMES DANS L'ORDRE du flux : memes refus au meme rang, memes lignes
+    lues, et chaque notionnel est ajoute a la somme de sa minute dans le meme ordre qu'avant (``np.add.at``
+    est sequentiel et part de la valeur deja accumulee), donc les memes flottants. Les coins entrent dans
+    le dictionnaire dans l'ordre de leur premiere apparition (il departage les ex aequo du classement).
+    """
+    from collections import deque
+
+    c = compteurs
+    c.setdefault("shards_lus", 0)
+    c.setdefault("shards_refuses", [])
+    c.setdefault("lignes_sans_horloge", 0)
+    c.setdefault("lignes_hors_coin", 0)
+    c.setdefault("lignes_hors_fenetre", 0)
+    par_coin: dict[str, dict[int, float]] = {}
+    etat = {"lues": 0, "ignorees": 0, "debut": None, "fin": None}
+    decalage = 2 ** 39
+    masque = 2 ** 40 - 1
+
+    def consommer(entree: dict[str, Any], r: dict[str, Any]) -> None:
+        rel = str(entree.get("shard") or "")
+        if "refus" in r:
+            c["shards_refuses"].append({"shard": rel, "motif": r["refus"]})
+            return
+        if r.get("repli"):
+            for trade in TRANCHES.flux(root, [entree], famille=famille, debut_ms=debut_ms, fin_ms=fin_ms,
+                                       compteurs=c):
+                etat["lues"] += 1
+                mesure = ROLES.trade_mesurable(trade)
+                if mesure is None:
+                    etat["ignorees"] += 1
+                    continue
+                coin, instant, notionnel = mesure
+                minutes = par_coin.setdefault(coin, {})
+                cle = instant // ROLES.MINUTE_MS
+                minutes[cle] = minutes.get(cle, 0.0) + notionnel
+                etat["debut"] = instant if etat["debut"] is None else min(etat["debut"], instant)
+                etat["fin"] = instant if etat["fin"] is None else max(etat["fin"], instant)
+            return
+        c["shards_lus"] += 1
+        dans = (r["fenetre"] >= int(debut_ms)) & (r["fenetre"] <= int(fin_ms))
+        n_dans = int(dans.sum())
+        c["lignes_sans_horloge"] += r["sans_horloge"]
+        c["lignes_hors_fenetre"] += len(r["fenetre"]) - n_dans
+        garde = dans[r["mesurable"]]
+        n_mesures = int(garde.sum())
+        etat["lues"] += n_dans
+        etat["ignorees"] += n_dans - n_mesures
+        if n_mesures:
+            coins, instants, valeurs = r["coins"][garde], r["instants"][garde], r["notionnels"][garde]
+            vocab = r["vocab"]
+            uniques, premiers = np.unique(coins, return_index=True)
+            for rang in np.argsort(premiers, kind="stable").tolist():
+                par_coin.setdefault(vocab[int(uniques[rang])], {})
+            cles = coins * (masque + 1) + (instants // ROLES.MINUTE_MS + decalage)
+            cles_uniques, inverse = np.unique(cles, return_inverse=True)
+            noms = [vocab[k] for k in (cles_uniques >> 40).tolist()]
+            minutes_k = ((cles_uniques & masque) - decalage).tolist()
+            sommes = np.array([par_coin[nom].get(m, 0.0) for nom, m in zip(noms, minutes_k)], dtype=np.float64)
+            np.add.at(sommes, inverse, valeurs)
+            for nom, m, v in zip(noms, minutes_k, sommes.tolist()):
+                par_coin[nom][m] = v
+            bas, haut = int(instants.min()), int(instants.max())
+            etat["debut"] = bas if etat["debut"] is None else min(etat["debut"], bas)
+            etat["fin"] = haut if etat["fin"] is None else max(etat["fin"], haut)
+        if r["interrompu"]:
+            c["shards_refuses"].append({"shard": rel, "motif": "LECTURE_INTERROMPUE"})
+
+    racine = str(Path(root))
+    with ProcessPoolExecutor(max_workers=ouvriers) as pool:
+        en_vol: deque = deque()
+        for entree in shards:
+            job = (racine, str(entree.get("shard") or ""), entree.get("sha256"), famille)
+            en_vol.append((entree, pool.submit(_capacite_d_un_shard, job)))
+            if len(en_vol) >= 2 * ouvriers:
+                premier, futur = en_vol.popleft()
+                consommer(premier, futur.result())
+        while en_vol:
+            premier, futur = en_vol.popleft()
+            consommer(premier, futur.result())
+    return ROLES.capacite_depuis_minutes(par_coin, lues=etat["lues"], ignorees=etat["ignorees"],
+                                         debut=etat["debut"], fin=etat["fin"])
+
+
+def capacite_de_la_fenetre(root: Path, *, debut_ms: int, fin_ms: int,
+                           ouvriers: int | None = None) -> dict[str, Any]:
     """Capacité du marché par coin sur la fenêtre de l'étude, lue en flux depuis le coffre.
 
     Rend la sortie de ``capacite_par_coin`` plus ce que la lecture a coûté et refusé. Un shard
@@ -1392,9 +1749,15 @@ def capacite_de_la_fenetre(root: Path, *, debut_ms: int, fin_ms: int) -> dict[st
     selection = TRANCHES.selectionner(shards, famille="trades_marche",
                                       debut_ms=debut_ms, fin_ms=fin_ms)
     compteurs: dict[str, Any] = {}
-    capacite = ROLES.capacite_par_coin(
-        TRANCHES.flux(root, selection["retenus"], famille="trades_marche",
-                      debut_ms=debut_ms, fin_ms=fin_ms, compteurs=compteurs))
+    ouvriers = CAPACITE_OUVRIERS if ouvriers is None else int(ouvriers)
+    if ouvriers > 1 and len(selection["retenus"]) > 1:
+        capacite = _capacite_en_parallele(root, list(selection["retenus"]), famille="trades_marche",
+                                          debut_ms=debut_ms, fin_ms=fin_ms, compteurs=compteurs,
+                                          ouvriers=ouvriers)
+    else:
+        capacite = ROLES.capacite_par_coin(
+            TRANCHES.flux(root, selection["retenus"], famille="trades_marche",
+                          debut_ms=debut_ms, fin_ms=fin_ms, compteurs=compteurs))
     capacite["lecture_du_coffre"] = {
         "shards_retenus": len(selection["retenus"]),
         "shards_lus": compteurs.get("shards_lus", 0),
@@ -1459,7 +1822,7 @@ def run_replication_paper(root: Path, *, price: str, write: bool = True, min_sna
     if refus is not None:
         return refus
     half_spreads = load_half_spreads(spread_shards(shards), cache_dir=root / CACHE_DIR)
-    funding = cop.build_funding_rates(load_funding(funding_shards(shards)), panel)
+    funding = cop.build_funding_rates(load_funding(funding_shards(shards), cache_dir=root / CACHE_DIR), panel)
     par_leader: dict[str, Any] = {}
     for compte, portefeuille in portefeuilles.items():
         if len(portefeuille) < min_snapshots:

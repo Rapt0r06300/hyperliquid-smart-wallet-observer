@@ -6,13 +6,16 @@ from sqlalchemy.orm import Session
 from hl_observer.config.settings import Settings
 from hl_observer.storage.models import (
     ExplorerWalletCandidate,
-    LeaderboardWalletCandidate,
     TopWallet,
     TopWalletSource,
     WalletBootstrapRun,
 )
 from hl_observer.utils.time import now_ms
-from hl_observer.wallets.leaderboard_models import LeaderboardCandidate
+from hl_observer.wallets.leaderboard_models import (
+    LeaderboardCandidate,
+    candidate_from_persisted_row,
+)
+from hl_observer.wallets.leaderboard_queries import latest_leaderboard_candidate_rows
 from hl_observer.wallets.top_wallet_ranker import RankedTopWallet, rank_top_wallets
 
 
@@ -37,23 +40,11 @@ def bootstrap_top_wallets(
     dry_run: bool = True,
 ) -> Top500BootstrapResult:
     session.flush()
-    rows = session.query(LeaderboardWalletCandidate).order_by(
-        LeaderboardWalletCandidate.leaderboard_score.desc()
-    ).limit(settings.wallet_bootstrap.max_candidates_total).all()
-    candidates = [
-        LeaderboardCandidate(
-            wallet_address=row.wallet_address,
-            rank=row.rank,
-            period=row.period,
-            account_value_usdc=row.account_value_usdc,
-            pnl_usdc=row.pnl_usdc,
-            roi_pct=row.roi_pct,
-            volume_usdc=row.volume_usdc,
-            leaderboard_score=row.leaderboard_score,
-            source_confidence=row.source_confidence,
-        )
-        for row in rows
-    ]
+    rows = latest_leaderboard_candidate_rows(
+        session,
+        limit=settings.wallet_bootstrap.max_candidates_total,
+    )
+    candidates = [candidate_from_persisted_row(row) for row in rows]
     if source in {"all", "explorer", "hyperliquid_explorer"}:
         known = {candidate.wallet_address for candidate in candidates}
         explorer_rows = session.query(ExplorerWalletCandidate).order_by(

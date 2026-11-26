@@ -1,3 +1,5 @@
+import pytest
+
 from hl_observer.simulation.session_memory import (
     coin_side_session_stats,
     evaluate_coin_side_session_memory,
@@ -120,6 +122,55 @@ def test_coin_side_session_stats_uses_local_replay_exits_and_fees():
     assert stats.realized_exit_pnl_usdc == 0.4
     assert stats.win_count == 1
     assert stats.recent_win_streak == 1
+
+
+@pytest.mark.parametrize(
+    "exit_pnl",
+    [None, float("nan"), float("inf"), "invalid", True],
+)
+def test_unmeasurable_exit_pnl_blocks_same_coin_side_entry(exit_pnl):
+    events = [{
+        "status": "LOCAL_REPLAY",
+        "bot_replay_action": "PAPER_CLOSE_REPLAYED",
+        "coin": "ETH",
+        "leader_side": "LONG",
+        "estimated_net_pnl_usdc": exit_pnl,
+    }]
+
+    stats = coin_side_session_stats(events, coin="ETH", side="LONG")
+    decision = evaluate_coin_side_session_memory(
+        events=events,
+        coin="ETH",
+        side="LONG",
+        edge_remaining_bps=100.0,
+        min_edge_required_bps=10.0,
+        consensus_wallets=4,
+        liquidity_score=1.0,
+        starting_equity_usdt=1000.0,
+    )
+
+    assert stats.session_pnl_usdc is None
+    assert stats.realized_exit_pnl_usdc is None
+    assert stats.exit_count == 1
+    assert stats.unmeasurable_exit_count == 1
+    assert not decision.allow_entry
+    assert decision.reason == "COIN_SIDE_UNMEASURABLE_EXIT_PNL_FAIL_CLOSED"
+
+
+def test_missing_entry_pnl_is_not_misclassified_as_an_unmeasurable_exit():
+    events = [{
+        "status": "LOCAL_REPLAY",
+        "bot_replay_action": "PAPER_OPEN_REPLAYED",
+        "coin": "ETH",
+        "leader_side": "LONG",
+        "estimated_net_pnl_usdc": None,
+    }]
+
+    stats = coin_side_session_stats(events, coin="ETH", side="LONG")
+
+    assert stats.session_pnl_usdc == 0.0
+    assert stats.exit_count == 0
+    assert stats.unmeasurable_exit_count == 0
 
 
 def test_session_memory_does_not_merge_case_distinct_instruments():

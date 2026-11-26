@@ -4,6 +4,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
 
@@ -52,7 +54,8 @@ def test_la_derive_captee_tot_est_perdue_tard():
     assert par[60_000]["net_bps_par_decision"] < par[5_000]["net_bps_par_decision"]
     assert res["net_devient_positif_a_faible_delai"] is True
     assert res["gain_bps_en_copiant_plus_vite"] > 0
-    assert "LE DÉLAI EST LE VERROU" in res["lecture"]
+    assert res["signaux_apparies_delai_extremes"] == 1
+    assert "NET POSITIF AU DÉLAI COURT" in res["lecture"]
 
 
 def test_sans_signal_executable_le_verdict_le_dit():
@@ -66,6 +69,10 @@ def test_sans_signal_executable_le_verdict_le_dit():
     assert res["meilleur_net_bps_par_decision"] is None
     assert "pas assez de signaux exécutables" in res["lecture"]
     assert all(d["signaux_executes"] == 0 for d in res["par_delai"])
+    assert all(d["signaux_candidats"] == 1 for d in res["par_delai"])
+    assert all(d["couverture_execution_pct"] == 0.0 for d in res["par_delai"])
+    assert res["gain_bps_en_copiant_plus_vite"] is None
+    assert res["signaux_apparies_delai_extremes"] == 0
     assert all("L2_CONNECTION_IDENTITY_INCOMPLETE" in d["refus_par_motif"] for d in res["par_delai"])
 
 
@@ -74,3 +81,81 @@ def test_tous_les_delais_sont_mesures():
     carnets = [_carnet(T0 + 1_025 + i * 1_000, 100.0 + i * 0.01, ligne=i + 1) for i in range(800)]
     res = L.etude_latence(metaordres, {"ETH": carnets})
     assert [d["copy_delay_ms"] for d in res["par_delai"]] == list(L.DELAIS_MS)
+
+
+def test_un_delai_long_positif_ne_devient_pas_un_signal_de_copie_rapide():
+    metaordres = _metaordre()
+    signal = T0 + 1_025
+    carnets = []
+    for dt in range(700):
+        if dt <= 5:
+            bid = 120.0
+        elif dt <= 60:
+            bid = 120.0 - (dt - 5) * (40.0 / 55.0)
+        else:
+            bid = 110.0
+        carnets.append(_carnet(signal + dt * 1_000, bid, ligne=dt + 1))
+
+    res = L.etude_latence(
+        metaordres, {"ETH": carnets}, delais_ms=(5_000, 60_000), horizon_ms=300_000
+    )
+    par = {d["copy_delay_ms"]: d for d in res["par_delai"]}
+
+    assert par[5_000]["net_bps_par_decision"] < 0
+    assert par[60_000]["net_bps_par_decision"] > 0
+    assert res["meilleur_delai_ms"] == 60_000
+    assert res["net_devient_positif_a_faible_delai"] is False
+    assert "NET POSITIF AU DÉLAI COURT" not in res["lecture"]
+    assert res["gain_bps_en_copiant_plus_vite"] < 0
+    assert res["scope_resultat"] == "EXPLORATOIRE_NON_OOS"
+
+
+def test_effet_de_latence_appaire_uniquement_les_signaux_communs(monkeypatch):
+    metaorders = [
+        {"coin": "ETH", "id": "both"},
+        {"coin": "ETH", "id": "fast-only"},
+        {"coin": "ETH", "id": "slow-only"},
+    ]
+
+    def execution(meta, _books, *, horizon_ms, copy_delay_ms, require_causal_books):
+        del horizon_ms, require_causal_books
+        values = {
+            ("both", 5_000): 0.1,
+            ("both", 60_000): 0.0,
+            ("fast-only", 5_000): -100.0,
+            ("slow-only", 60_000): 100.0,
+        }
+        net = values.get((meta["id"], copy_delay_ms))
+        return (None, "NO_EXECUTION") if net is None else ({"net_pnl_usd": net}, "")
+
+    monkeypatch.setattr(L, "execute_metaorder", execution)
+    res = L.etude_latence(metaorders, {"ETH": []}, delais_ms=(5_000, 60_000))
+    by_delay = {row["copy_delay_ms"]: row for row in res["par_delai"]}
+
+    assert by_delay[5_000]["signaux_candidats"] == 3
+    assert by_delay[5_000]["signaux_executes"] == 2
+    assert by_delay[5_000]["couverture_execution_pct"] == pytest.approx(200 / 3)
+    assert res["signaux_apparies_delai_extremes"] == 1
+    assert res["gain_bps_en_copiant_plus_vite"] == pytest.approx(10.0)
+
+
+def test_etude_refuse_parametres_de_delai_ambigus():
+    with pytest.raises(ValueError, match="doublons"):
+        L.etude_latence([], {}, delais_ms=(5_000, 5_000))
+    with pytest.raises(ValueError, match="strictement positif"):
+        L.etude_latence([], {}, horizon_ms=0)
+
+
+def test_rapport_ne_compte_pas_un_net_non_fini(monkeypatch):
+    monkeypatch.setattr(
+        L,
+        "execute_metaorder",
+        lambda *_args, **_kwargs: ({"net_pnl_usd": float("nan")}, ""),
+    )
+    res = L.etude_latence(_metaordre(), {"ETH": []}, delais_ms=(5_000,))
+    row = res["par_delai"][0]
+    assert row["signaux_executes"] == 0
+    assert row["signaux_refuses"] == 1
+    assert row["couverture_execution_pct"] == 0.0
+    assert row["net_total_usd"] is None
+    assert row["refus_par_motif"] == {"NET_NON_FINI": 1}

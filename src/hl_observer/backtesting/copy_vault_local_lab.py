@@ -90,6 +90,7 @@ from hl_observer.simulation.economic_freeze_registry import parameter_hash
 from .copy_vault_preuve_journaliere import (  # noqa: F401
     _candidate,
     _daily_du_segment,
+    _daily_exact_values,
     _daily_lcb,
     _daily_lcb_rank,
     _latest_daily,
@@ -3062,10 +3063,8 @@ def run_local_campaign(
                 )
                 best["train"] = incumbent_train
                 incumbent_statistics = incumbent_train.get("statistics") or {}
-                incumbent_exact_days = incumbent_statistics.get(
-                    "daily_net_pnl_usd_exact_decimal"
-                )
-                if isinstance(incumbent_exact_days, list):
+                incumbent_exact_days = _daily_exact_values(incumbent_statistics)
+                if incumbent_exact_days is not None:
                     best["daily_net_pnl_usd_exact_decimal"] = incumbent_exact_days
                     best["daily_net_pnl_usd"] = incumbent_statistics.get(
                         "daily_net_pnl_usd"
@@ -3099,21 +3098,19 @@ def run_local_campaign(
         # SAFE matérialisés. Support du pré-filtre GELABLE « ne copier que les bons leaders ».
         _leader_index = build_leader_quality_index(_charger_leader_fills_safe(workspace))
         duplicates_since_checkpoint = 0
-        baseline_days = (
-            (baseline_train.get("statistics") or {}).get(
-                "daily_net_pnl_usd_exact_decimal"
-            )
-            or (baseline_train.get("statistics") or {}).get("daily_net_pnl_usd")
-            if baseline_train else None
+        baseline_statistics = (
+            baseline_train.get("statistics")
+            if isinstance(baseline_train, Mapping) else None
         )
+        baseline_days = _daily_exact_values(baseline_statistics)
         best_days = (
             best.get("daily_net_pnl_usd_exact_decimal")
-            or best.get("daily_net_pnl_usd")
             if isinstance(best, dict) else None
         )
-        if best_days is None and isinstance(best, dict):
-            best_days = (best.get("train") or {}).get("daily_net_pnl_usd")
-        baseline_mean = _train_active_day_mean(baseline_train)
+        baseline_mean = (
+            _train_active_day_mean(baseline_train)
+            if baseline_days is not None else None
+        )
         pnl_comparison_floor = baseline_mean
         if baseline_mean is not None:
             for row in history_rows:
@@ -3251,10 +3248,9 @@ def run_local_campaign(
             )
             stats = train.get("statistics") if isinstance(train.get("statistics"), Mapping) else {}
             daily_values = list(stats.get("daily_net_pnl_usd") or [])
-            daily_exact_values = list(
-                stats.get("daily_net_pnl_usd_exact_decimal") or daily_values
-            )
-            candidate_lcb = _daily_lcb(daily_exact_values, trial_count)
+            daily_exact_values = _daily_exact_values(stats)
+            daily_score_values = daily_exact_values or []
+            candidate_lcb = _daily_lcb(daily_score_values, trial_count)
             baseline_lcb = _daily_lcb(baseline_days, trial_count)
             incumbent_lcb = _daily_lcb(best_days, trial_count)
             # Diagnostic #8 (exploratoire, hors verdict) : un candidat est
@@ -3262,11 +3258,11 @@ def run_local_campaign(
             # ci-dessous applique une famille de test restreinte aux candidats
             # scoreables DE CETTE CAMPAGNE (ignore les essais anterieurs) : c'est
             # une borne HAUTE du benefice de #8, jamais le verdict conservateur.
-            candidate_is_scoreable = len(daily_exact_values) >= 3
+            candidate_is_scoreable = len(daily_score_values) >= 3
             if candidate_is_scoreable:
                 campaign_scoreable += 1
             exploratory_scoreable_lcb = _daily_lcb(
-                daily_exact_values, max(1, campaign_scoreable)
+                daily_score_values, max(1, campaign_scoreable)
             )
             exploratory_scoreable_score = decimal_value(
                 exploratory_scoreable_lcb.get("daily_mean_lcb_usd_exact_decimal")
@@ -3341,7 +3337,10 @@ def run_local_campaign(
                 and comparison_rank_resolved
                 and prior_count_known
             )
-            candidate_mean = _train_active_day_mean(train)
+            candidate_mean = (
+                _train_active_day_mean(train)
+                if daily_exact_values is not None else None
+            )
             candidate_sample_count = _number(stats.get("sample_count") or 0)
             candidate_active_day_count = _number(stats.get("distinct_days") or 0)
             pnl_comparison_floor_before_trial = pnl_comparison_floor
@@ -3416,6 +3415,9 @@ def run_local_campaign(
                 ),
                 "daily_lcb_numeric_error_bound_usd_exact_decimal": candidate_lcb.get(
                     "daily_mean_lcb_numeric_error_bound_usd_exact_decimal"
+                ),
+                "daily_exact_pnl_status": (
+                    "MEASURED" if daily_exact_values is not None else "UNMEASURABLE"
                 ),
                 "daily_net_pnl_usd": daily_values,
                 "daily_net_pnl_usd_exact_decimal": daily_exact_values,

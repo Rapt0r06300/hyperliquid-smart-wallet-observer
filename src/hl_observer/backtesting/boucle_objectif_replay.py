@@ -24,13 +24,16 @@ L'AVERTISSEMENT DE L'ARTICLE, PRIS AU SÉRIEUX
 REPLAY-only : on rejoue des données enregistrées. Aucun ordre, aucun réseau requis ici.
 """
 from __future__ import annotations
-from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 import hashlib
 import json
+import math
 import time
+from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any
+
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 STATUT_PROMU = "PROMU"
 STATUT_ESPACE_EPUISE = "ESPACE_EPUISE"
@@ -105,8 +108,14 @@ def boucle_objectif(
                 for etage in ("moitie_1", "moitie_2", "stress"):
                     m = rapport.get(etage)
                     if isinstance(m, dict) and "net_total_usd" in m:
-                        essai.setdefault("nets", {})[etage] = round(
-                            float(m.get("net_total_usd") or 0.0), 4)
+                        raw_net = m.get("net_total_usd")
+                        try:
+                            numeric_net = None if raw_net is None or isinstance(raw_net, bool) else float(raw_net)
+                        except (TypeError, ValueError, OverflowError):
+                            numeric_net = None
+                        essai.setdefault("nets", {})[etage] = (
+                            round(numeric_net, 4) if numeric_net is not None and math.isfinite(numeric_net) else None
+                        )
                 if rapport.get("instabilite"):
                     essai["instabilite"] = rapport["instabilite"]
         except Exception as exc:  # noqa: BLE001 — une eval qui explose n'arrete pas la recherche
@@ -118,13 +127,12 @@ def boucle_objectif(
         # 21/07 (« le replay ne fonctionne pas ») : la recherche moulinait des MINUTES par
         # config en silence total -> ca ressemble a un gel. Une ligne par essai, AVEC le
         # diagnostic (quels nets, quelle porte a tue) : on apprend a chaque ligne.
-        print("  essai %d : %s -> %s%s" % (
-            len(essais), config, essai.get("verdict"),
-            (" %s" % essai["nets"]) if essai.get("nets") else ""), flush=True)
+        nets_suffix = f" {essai['nets']}" if essai.get("nets") else ""
+        print(f"  essai {len(essais)} : {config} -> {essai.get('verdict')}{nets_suffix}", flush=True)
         # 22/07 — jeton d'AVANCEMENT lisible ET parsable (le HUD en tire un temps restant MESURÉ
         # sur la vitesse réelle du run, pas une constante). Toutes les 20 configs pour rester léger.
         if total_hint and n_ce_run % 20 == 0:
-            print("  … avancement %d/%d configs" % (n_ce_run, int(total_hint)), flush=True)
+            print(f"  … avancement {n_ce_run}/{int(total_hint)} configs", flush=True)
         if chemin:
             _ecrire_etat(chemin, {"essais": essais})   # APRES CHAQUE essai : un Ctrl-C ne perd rien
         if promu and s_arreter_au_premier:

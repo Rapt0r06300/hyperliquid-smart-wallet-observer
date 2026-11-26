@@ -43,8 +43,9 @@ laissee de cote.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 #: Familles lues par defaut. ``fills_backfill`` est la nouvelle source (81,3 % de couverture) ;
 #: ``fills_forward`` peut etre ajoutee par l'appelant, au prix d'une seconde lecture de ses
@@ -110,9 +111,11 @@ def positions_depuis_les_fills(
         if not shards:
             continue
         audit["shards"] += len(shards)
+        compteurs_flux: dict[str, Any] = {}
         for ligne in coffre_tranches.flux(
             racine, shards, famille=famille, coins=None,
-            debut_ms=debut_lecture, fin_ms=int(fin_ms), verifier_sha=False,
+            debut_ms=debut_lecture, fin_ms=int(fin_ms), verifier_sha=True,
+            compteurs=compteurs_flux,
         ):
             audit["lignes_lues"] += 1
             avant = _nombre(ligne.get("start_position"))
@@ -133,6 +136,19 @@ def positions_depuis_les_fills(
                 continue
             series.setdefault(cle, []).append((int(instant), avant + signe * taille))
             audit["observations_gardees"] += 1
+        shards_refuses = list(compteurs_flux.get("shards_refuses") or [])
+        if shards_refuses:
+            # Une position dérivée partielle pourrait requalifier à tort un OPEN en ADD.
+            return {}, {
+                **audit,
+                "status": "SHARDS_REFUSES",
+                "integrite": {
+                    "famille": famille,
+                    "shards": len(shards),
+                    "shards_lus": compteurs_flux.get("shards_lus", 0),
+                    "shards_refuses": shards_refuses,
+                },
+            }
 
     for serie in series.values():
         serie.sort(key=lambda couple: couple[0])

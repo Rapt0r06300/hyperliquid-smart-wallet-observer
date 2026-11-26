@@ -228,9 +228,11 @@ def carnets_du_coffre(
         lus = retenus = 0
         exploitables_vues = 0
         abandonnee = False
+        compteurs_flux: dict[str, Any] = {}
         for ligne in coffre_tranches.flux(
             racine, shards, famille=famille, coins=list(coins),
-            debut_ms=debut_ms - fenetre_ms, fin_ms=fin_ms + apres_ms, verifier_sha=False,
+            debut_ms=debut_ms - fenetre_ms, fin_ms=fin_ms + apres_ms,
+            verifier_sha=True, compteurs=compteurs_flux,
         ):
             lus += 1
             coin = str(ligne.get("coin") or ligne.get("symbole") or "")
@@ -400,6 +402,18 @@ def carnets_du_coffre(
                 liste_du_coin[rang_liste] = carnet
                 places[remplace] = (rang_liste, ecart)
                 trop_denses += 1
+        shards_refuses = list(compteurs_flux.get("shards_refuses") or [])
+        if shards_refuses:
+            # Une sélection de carnets amputée peut changer le carnet de référence, l'entrée ou
+            # la sortie retenue. N'expose donc aucun carnet de cette lecture comme replayable.
+            return {}, {
+                "status": "SHARDS_REFUSES",
+                "famille": famille,
+                "shards": len(shards),
+                "shards_lus": compteurs_flux.get("shards_lus", 0),
+                "lignes_lues": lus,
+                "shards_refuses": shards_refuses,
+            }
         par_famille[famille] = {"shards": len(shards), "lus": lus, "gardes": retenus,
                                 "abandonnee_sans_champs_de_carnet": abandonnee}
 
@@ -488,9 +502,11 @@ def positions_du_coffre(
         return {}, {"status": "AUCUN_SHARD_DE_POSITION", "shards": 0}
     series: dict[tuple[str, str], list[tuple[int, float]]] = {}
     lus = gardes = 0
+    compteurs_flux: dict[str, Any] = {}
     for ligne in coffre_tranches.flux(
         racine, shards, famille="position", coins=None,
-        debut_ms=debut_lecture, fin_ms=int(fin_ms), verifier_sha=False,
+        debut_ms=debut_lecture, fin_ms=int(fin_ms), verifier_sha=True,
+        compteurs=compteurs_flux,
     ):
         lus += 1
         instant = ligne.get("received_at_ms")
@@ -505,6 +521,15 @@ def positions_du_coffre(
             continue
         series.setdefault(cle, []).append((int(instant), szi))
         gardes += 1
+    shards_refuses = list(compteurs_flux.get("shards_refuses") or [])
+    if shards_refuses:
+        return {}, {
+            "status": "SHARDS_REFUSES",
+            "shards": len(shards),
+            "shards_lus": compteurs_flux.get("shards_lus", 0),
+            "lignes_lues": lus,
+            "shards_refuses": shards_refuses,
+        }
     for serie in series.values():
         serie.sort(key=lambda couple: couple[0])
     return series, {
@@ -653,9 +678,11 @@ def fills_du_coffre(
         # `selectionner` rend ses shards sous la cle `retenus`.
         shards = choix.get("retenus") or choix.get("shards") or []
         lus = rendus = 0
+        compteurs_flux: dict[str, Any] = {}
         for ligne in coffre_tranches.flux(
             racine, shards, famille=famille,
-            debut_ms=debut_ms, fin_ms=fin_ms, verifier_sha=False,
+            debut_ms=debut_ms, fin_ms=fin_ms, verifier_sha=True,
+            compteurs=compteurs_flux,
         ):
             lus += 1
             action = _ACTION_PAR_LIBELLE.get(str(ligne.get("dir") or "").strip().lower())
@@ -739,6 +766,17 @@ def fills_du_coffre(
                 audit["actions"][action] = audit["actions"].get(action, 0) + 1
                 audit["doublons_plus_informatifs"] += 1
                 entrees[deja] = entree
+        shards_refuses = list(compteurs_flux.get("shards_refuses") or [])
+        if shards_refuses:
+            # Ne pas construire des metaordres à partir d'une fenêtre de fills amputée.
+            audit["status"] = "SHARDS_REFUSES"
+            audit["integrite"] = {
+                "famille": famille,
+                "shards": len(shards),
+                "shards_lus": compteurs_flux.get("shards_lus", 0),
+                "shards_refuses": shards_refuses,
+            }
+            return [], audit
         audit["familles"][famille] = {"shards": len(shards), "lus": lus, "rendus": rendus}
         audit["lignes_lues"] += lus
         audit["entrees_rendues"] += rendus

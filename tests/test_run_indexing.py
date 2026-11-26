@@ -368,9 +368,7 @@ def test_index_drops_only_redudant_scalars_and_keeps_cryptographic_locator():
 
 
 def test_lossless_existing_index_repo_compaction(tmp_path):
-    from index_run_manifest import (
-        compact_existing_index, hydrate_default_release_repository
-    )
+    from index_run_manifest import compact_existing_index, hydrate_default_release_repository
     root = _bootstrap_root(tmp_path)
     path = root / "catalog/DATA_INDEX.json"
     baseline = json.loads(path.read_text(encoding="utf-8"))
@@ -410,8 +408,8 @@ def test_compaction_refuses_noncanonical_release_repository(tmp_path):
 
 
 def test_index_size_failure_never_mutates_existing_manifests(tmp_path, monkeypatch):
-    import pytest
     import index_run_manifest as module
+    import pytest
 
     root = _bootstrap_root(tmp_path)
     old = root / "datasets/quarantine/same-id.manifest.json"
@@ -430,8 +428,9 @@ def test_index_size_failure_never_mutates_existing_manifests(tmp_path, monkeypat
     # The canonical writer may publish verified partitions instead of a
     # single DATA_INDEX blob. Inject failure at the real publication boundary,
     # not at the old inline JSON helper which partitioned writes bypass.
-    def reject_oversize_index(path, payload):
+    def reject_oversize_index(path, payload, *, expected_source_sha256=None):
         assert Path(path).name == "DATA_INDEX.json"
+        assert expected_source_sha256 == hashlib.sha256(original_index).hexdigest()
         raise ValueError("DATA_INDEX_TOO_LARGE: index mutation not published")
 
     monkeypatch.setattr(module, "_publish_canonical_index", reject_oversize_index)
@@ -455,7 +454,7 @@ def test_index_loads_trade_patch_files_once_per_batch(tmp_path, monkeypatch):
         _manifest(family="trades", reconciliation="SOURCE_CONTINUITY_VERIFIED",
                   dataset_id="trade-patch-2"),
     ]
-    for i, manifest in enumerate(entries, start=1):
+    for manifest in entries:
         manifest["unique_trade_count_exact"] = False
         manifest["unique_trade_count"] = None
 
@@ -631,7 +630,7 @@ def test_index_preserves_conflicting_run_manifest_tag_aliases(tmp_path):
     }
 
 def test_repeated_collection_run_ids_are_reversibly_factored(tmp_path):
-    from index_run_manifest import hydrate_default_release_repository, compact_existing_index
+    from index_run_manifest import compact_existing_index, hydrate_default_release_repository
     root = _bootstrap_root(tmp_path)
     run = tmp_path / "RUN_MANIFEST.json"
     manifests = [
@@ -683,7 +682,8 @@ def test_mixed_collection_run_ids_stay_explicit_and_conflicts_fail_closed(tmp_pa
 def test_measurement_writers_keep_index_alias_factorization():
     """Round-trip expanded rows from backfills without duplicating huge fields."""
     from index_run_manifest import (
-        CANONICAL_DATA_REPOSITORY, compact_index_rows,
+        CANONICAL_DATA_REPOSITORY,
+        compact_index_rows,
         hydrate_default_release_repository,
     )
     row = {
@@ -741,6 +741,69 @@ def test_reconciliation_does_not_rewrite_oversized_legacy_git_tree(tmp_path, mon
     reread = json.loads((root / "catalog/DATA_INDEX.json").read_text(encoding="utf-8"))
     assert reread["shards"][0]["manifest_path"] == row["manifest_path"]
     assert {p.name: p.read_bytes() for p in legacy.iterdir()} == immutable
+
+
+def test_reconciliation_refuses_to_overwrite_concurrent_index_change(tmp_path, monkeypatch) -> None:
+    import index_run_manifest as module
+    import pytest
+
+    root = _bootstrap_root(tmp_path)
+    index_path = root / "catalog/DATA_INDEX.json"
+    run = tmp_path / "RUN_MANIFEST.json"
+    _write_run(run, [_manifest(
+        family="l2Book", reconciliation="SOURCE_CONTINUITY_VERIFIED",
+        dataset_id="concurrent-index-guard",
+    )])
+    publish = module._publish_canonical_index
+
+    def race_before_publish(path, payload, *, expected_source_sha256=None):
+        current = json.loads(path.read_text(encoding="utf-8"))
+        current["collector_generation"] = "newer"
+        path.write_text(json.dumps(current), encoding="utf-8")
+        publish(
+            path, payload, expected_source_sha256=expected_source_sha256
+        )
+
+    monkeypatch.setattr(module, "_publish_canonical_index", race_before_publish)
+    with pytest.raises(ValueError, match="CANONICAL_INDEX_SOURCE_CHANGED_BEFORE_PUBLISH"):
+        module.index_run_manifests([run], root=root)
+
+    saved = json.loads(index_path.read_text(encoding="utf-8"))
+    assert saved["collector_generation"] == "newer"
+    assert saved["shards"] == []
+    assert not list((root / "datasets").rglob("concurrent-index-guard.manifest.json"))
+
+
+def test_index_compaction_refuses_to_overwrite_concurrent_index_change(tmp_path, monkeypatch):
+    import index_run_manifest as module
+    import pytest
+
+    root = _bootstrap_root(tmp_path)
+    index_path = root / "catalog/DATA_INDEX.json"
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    index["shards"] = [{
+        "dataset_id": "compact-race",
+        "release_repository": module.CANONICAL_DATA_REPOSITORY,
+        "release_tag": "release-a",
+        "sha256": "a" * 64,
+        "quality_status": "PARTIAL",
+    }]
+    index_path.write_text(json.dumps(index), encoding="utf-8")
+    publish = module._publish_canonical_index
+
+    def race_before_publish(path, payload, *, expected_source_sha256=None):
+        current = json.loads(path.read_text(encoding="utf-8"))
+        current["collector_generation"] = "newer"
+        path.write_text(json.dumps(current), encoding="utf-8")
+        publish(path, payload, expected_source_sha256=expected_source_sha256)
+
+    monkeypatch.setattr(module, "_publish_canonical_index", race_before_publish)
+    with pytest.raises(ValueError, match="CANONICAL_INDEX_SOURCE_CHANGED_BEFORE_PUBLISH"):
+        module.compact_existing_index(root)
+
+    saved = json.loads(index_path.read_text(encoding="utf-8"))
+    assert saved["collector_generation"] == "newer"
+    assert saved["shards"][0]["release_repository"] == module.CANONICAL_DATA_REPOSITORY
 
 
 def test_sharded_receipt_is_deterministic_and_bounded(tmp_path) -> None:

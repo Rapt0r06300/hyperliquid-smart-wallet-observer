@@ -1177,6 +1177,33 @@ reference. It writes and verifies the complete new partition set first, then
 atomically replaces `DATA_INDEX.json` as the sole publication boundary. If
 interrupted before that root switch, the prior catalog remains fully readable;
 unreferenced immutable partitions may be retained for later reuse or review.
+Long-running global-unique-trade backfills must bind their candidate inventory
+to the exact source `DATA_INDEX.json` root SHA-256 and abort publication if that
+root changes during enumeration or scanning. Per-shard identity evidence may
+be applied only when its recorded `asset_sha256` equals the current row's
+`sha256`; manifest counters must likewise be bound to that asset hash and must
+not overwrite a manifest whose bytes changed concurrently. Stale evidence is a
+fail-closed publication error, not a reason to coerce counts or refresh the
+candidate universe silently. The resulting patch receipt records this starting
+`source_index_sha256` explicitly, so it is not confused with the post-patch
+`DATA_INDEX.json` hash.
+The same source-root binding is mandatory for every long-running index
+producer, including exact-trade-count backfills: capture the root SHA before
+enumerating or scanning, pass it through `_publish_canonical_index` and the
+selected inline/partitioned writer, and refuse publication when the root no
+longer matches. Exact-count manifest writes must also require matching row,
+result, and manifest asset hashes and preserve any manifest bytes changed by a
+concurrent collector.
+Every other producer that derives a new canonical index from a previously
+read snapshot—including run-manifest reconciliation, replay-compatibility
+backfills, SAFE replay migrations, and lossless compaction—must capture the
+source root SHA before reading, verify that the root stayed stable while it
+was loaded, and pass that SHA to the canonical publisher. A publisher must
+refuse a stale root rather than merge stale counters or rows implicitly.
+For migrations or finalizers that also update or retire receipt files, publish
+the guarded index first; only after that succeeds may local cleanup remove an
+unreferenced receipt. If the source root advances or publication fails, retain
+the original evidence and leave the concurrent index intact.
 All replay-compatibility receipt capture and reapplication code, including
 `tools/replay_receipt_publish.py`, must load the complete, parity-checked index
 through `read_index` rather than expecting a root-level `shards` array. A
@@ -1686,6 +1713,15 @@ Copy delay is evidence-dependent.
 
 Every replay records the actual latency class.
 
+#### Paired latency sensitivity
+
+Latency sweeps report candidate count, executed count, refusal count, and execution coverage separately
+for each delay. The fast-versus-slow effect is computed only on identical candidate metaorders that
+produced finite net results at both the shortest and longest requested delays. Do not substitute a
+nearby measurable delay when an endpoint has no executable observations. A positive best-delay mean
+is an exploratory in-sample finding, never proof that fast copying is profitable; validation still
+requires a frozen policy and independent chronological validation/OOS evidence.
+
 #### Leader information score
 
 Leader quality uses more than historical vault PnL.
@@ -1705,6 +1741,12 @@ Causal features may include:
 - frequency and independence of opportunities.
 
 A profitable wallet that merely reacts after the dominant venue already moved may be a poor copy candidate.
+
+Public leaderboard rank and follower/popularity counts are discovery metadata only and must not add
+points to a wallet's economic edge score. They may help prioritize collection, but economic admission
+requires measured causal history and execution costs; rank may be retained for audit display. Copy-run
+recomputes legacy persisted candidate scores from their underlying fields before selection, so an old
+rank-weighted score cannot silently survive as a runtime input.
 
 An anticipatory wallet whose flow repeatedly precedes subsequent market movement may receive a higher priority, subject to held-out persistence.
 
@@ -14705,3 +14747,21 @@ Un reçu incomplet n’est ni remplacé par zéro ni promu SAFE ou économique. 
 ### 2026-11-25 — Mesure d’activité de l’ETA collecte
 
 Le compteur d’activité de fichiers de l’ETA mesure uniquement la croissance locale des rubans de données identifiés (`.jsonl`, `.ndjson`, `.csv` et chemins de rubans explicitement connus). Les JSON d’état/checkpoint, rapports, catalogues, archives et shards ne sont pas des flux de débit et doivent être exclus du dénominateur. L’interface doit appeler ce nombre « fichiers de flux locaux », le distinguer du nombre de processus/collecteurs, et ne pas présenter cette mesure locale comme l’activité de GitHub ou d’AlinaSync. La santé des collecteurs provient de leurs reçus dédiés.
+
+### 2026-11-25 — Certification de couverture fail-closed
+
+Le recensement du coffre ne peut annoncer une couverture complète si `scandir`, l’itération d’un dossier ou l’inspection d’une entrée échoue. Il conserve un compteur et des exemples bornés des erreurs, déclare `complet=false`, `cent_pour_cent=false` et `couverture_pct=null` quand le dénominateur a pu être tronqué. Un inventaire terminé avec zéro fichier de données rapporte 0 % et ne reçoit pas la certification 100 %. L’ETA affiche explicitement `SCAN INCOMPLET` et refuse les reçus incohérents (par exemple `cent_pour_cent=true` avec une couverture inférieure à 100 %). Aucun fichier ni reçu du coffre n’est modifié par la mesure.
+
+### 2026-11-25 — Rapport de synchronisation après modifications concurrentes
+
+Si `main` distant confirme le SHA publié mais que des fichiers admissibles ont changé localement pendant le run, le reçu doit conserver l’échec global et le code retour non nul. Le résumé opérateur distingue alors « push vérifié » des changements locaux encore en attente, donne le SHA publié et les chemins restés sur disque, puis recommande une relance après stabilisation. Il ne doit ni masquer ces changements, ni les inclure rétroactivement dans le reçu de publication, ni présenter le run complet comme synchronisé. Les overlays de données protégées restent séparés du code publié.
+
+### 2026-11-25 — Reconstruction des cycles historiques des leaders Copy-Vault
+
+Le filtre historique des leaders consomme désormais les transitions réellement persistées (`OPEN`, `ADD`, `REDUCE`, `CLOSE`, `FLIP`, `UNKNOWN`, `LIQUIDATION`) et reconstruit le sens de position depuis `previous_size`/`new_size`, jamais depuis le libellé brut du côté du fill. Il n'émet un rendement de cycle qu'après fermeture complète, calcule le prix moyen pondéré des ajouts, cumule le PnL réalisé des réductions partielles et refuse les chaînes de tailles incohérentes, doublons conflictuels, identités absentes, événements non admissibles, source inconnue ou preuves insuffisantes. Un snapshot n'est utilisable que si ses reçus `has_fills`, `size_match`, `temporal_consistency` et `price_from_fill` sont tous vrais.
+
+Quand plusieurs fills d’un même wallet et marché partagent le même timestamp milliseconde, l’ordre lexical d’un hash ne prouve pas leur causalité. Le reconstructeur requiert alors un source_sequence de persistance unique pour chaque événement de ce groupe; sans séquence complète et distincte, il invalide le cycle concerné. Le chargeur SQL transmet l’identifiant de persistance et conserve cet ordre.
+
+Les coûts du filtre doivent rester alignés sur `ReplayConfig().round_trip_cost_bps`; le taux de réussite et la décision de qualification sont calculés après ce coût. Le préfiltre demande au moins 20 cycles clos et une borne inférieure conservatrice de l'edge net strictement positive; cette approximation ne corrige pas la dépendance temporelle ni les comparaisons multiples et ne constitue donc jamais une preuve OOS/forward ou de rentabilité. Les replis de warm-up du collecteur maintiennent l'observation en lecture seule afin d'accumuler l'historique; ils ne valent pas admissibilité économique et ne doivent pas être présentés comme tels. Aucun résultat financier n'est inféré de cette correction.
+
+Le détecteur `copy-run` ne doit pas attribuer un mouvement futur positif fixe aux ouvertures. Sans prévision mesurée et tracée fournie explicitement, `leader_expected_move_bps` reste à zéro, le signal n'est pas généré et le rapport indique `leader_expected_move_unmeasured`. Un paramètre d'expérience explicite permet des tests de modèle, mais ne constitue pas à lui seul une preuve de performance.

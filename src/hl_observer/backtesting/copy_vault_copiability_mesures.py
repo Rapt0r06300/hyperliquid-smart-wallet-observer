@@ -13,12 +13,14 @@ import numpy as np
 import pandas as pd
 
 from hl_observer.backtesting.copy_vault_copiability_entrees import (
-    CopiabilityConfig,
     DAY_MS,
+    CopiabilityConfig,
     PricePanel,
     _row_nanmean,
     _stat,
 )
+
+MIN_FUNDING_COVERAGE = 0.95
 
 
 def observation_lag_profile(fills: pd.DataFrame) -> dict[str, Any]:
@@ -342,7 +344,9 @@ def _contributions_d_un_coin(tache: dict[str, Any]) -> list[tuple[int, int, dict
         r["leader_fee_usd"] = np.bincount(fill_day[inside], weights=np.nan_to_num(couple["fee"])[inside],
                                           minlength=n_days)
 
-        def position(times: np.ndarray, initial: float, at: np.ndarray = ts) -> np.ndarray:
+        def position(
+            times: np.ndarray, initial: float, at: np.ndarray = ts, after: np.ndarray = after
+        ) -> np.ndarray:
             j = np.searchsorted(times, at, side="right") - 1
             return np.where(j >= 0, after[np.clip(j, 0, len(after) - 1)], initial)
 
@@ -368,11 +372,14 @@ def _contributions_d_un_coin(tache: dict[str, Any]) -> list[tuple[int, int, dict
             # Funding de la position répliquée (connu seulement là où le taux a été observé).
             notional_hours = p_k_ok * price_ok * dt_ok
             if "fr_wr" not in c:
+                r[f"funding_measured_k{k}_usd_hours"] = np.zeros(n_days)
                 r[f"funding_unmeasured_k{k}_usd_hours"] = np.bincount(
                     d_ok, weights=np.abs(notional_hours), minlength=n_days)
             else:
                 r[f"funding_k{k}_usd"] = np.bincount(
                     c["d_wr"], weights=-notional_hours[c["with_rate"]] * c["fr_wr"], minlength=n_days)
+                r[f"funding_measured_k{k}_usd_hours"] = np.bincount(
+                    c["d_wr"], weights=np.abs(notional_hours[c["with_rate"]]), minlength=n_days)
                 r[f"funding_unmeasured_k{k}_usd_hours"] = np.bincount(
                     c["d_wo"], weights=np.abs(notional_hours[c["without"]]), minlength=n_days)
             # rotation : non nulle seulement aux débuts de fenêtre de rééquilibrage (p_k y change ; ailleurs
@@ -450,7 +457,8 @@ def attribute_pnl(
     fields = ["execution_usd", "inventory_true_usd", "exposure_usd_hours", "leader_closed_pnl_usd", "leader_fee_usd"]
     for k in cfg.rebalance_minutes:
         fields += [f"inventory_k{k}_usd", f"static_k{k}_usd", f"turnover_k{k}_usd", f"cost_k{k}_usd",
-                   f"unmeasured_turnover_k{k}_usd", f"funding_k{k}_usd", f"funding_unmeasured_k{k}_usd_hours"]
+                   f"unmeasured_turnover_k{k}_usd", f"funding_k{k}_usd",
+                   f"funding_measured_k{k}_usd_hours", f"funding_unmeasured_k{k}_usd_hours"]
     acc = {name: np.zeros((n_units, n_days)) for name in fields}
     # Heures où la position de l'unité est CONNUE, par jour. Sans instantanés c'est la couverture
     # de prix du jour ; avec instantanés, seules comptent les heures où le dernier instantané est
@@ -556,7 +564,16 @@ def attribute_pnl(
         for name_field in fields:
             row[name_field] = float(acc[name_field][i].sum())
         for k in cfg.rebalance_minutes:
-            row[f"net_k{k}_usd"] = row[f"inventory_k{k}_usd"] - row[f"cost_k{k}_usd"] + row[f"funding_k{k}_usd"]
+            funding_measured = row[f"funding_measured_k{k}_usd_hours"]
+            funding_unmeasured = row[f"funding_unmeasured_k{k}_usd_hours"]
+            funding_total = funding_measured + funding_unmeasured
+            coverage = funding_measured / funding_total if funding_total > 0 else None
+            partial_net = row[f"inventory_k{k}_usd"] - row[f"cost_k{k}_usd"] + row[f"funding_k{k}_usd"]
+            row[f"funding_coverage_k{k}"] = coverage
+            row[f"partial_net_excluding_unmeasured_funding_k{k}_usd"] = partial_net
+            row[f"net_k{k}_usd"] = (
+                partial_net if coverage is not None and coverage >= MIN_FUNDING_COVERAGE else None
+            )
             row[f"timing_k{k}_usd"] = row[f"inventory_k{k}_usd"] - row[f"static_k{k}_usd"]
         leaders.append(row)
     return {
@@ -599,6 +616,16 @@ def _daily_unit_returns(
     # heures où la position de CHAQUE unité est connue (par défaut : couverture de prix du jour)
     hours = np.asarray(attribution.get("unit_day_hours", np.tile(day_hours, (pnl.shape[0], 1))), dtype=np.float64)
     usable = hours >= cfg.min_day_coverage_hours          # [unités, jours]
+    funding_measured = daily[f"funding_measured_k{k}_usd_hours"]
+    funding_unmeasured = daily[f"funding_unmeasured_k{k}_usd_hours"]
+    funding_total = funding_measured + funding_unmeasured
+    funding_day_coverage = np.divide(
+        funding_measured,
+        funding_total,
+        out=np.ones_like(funding_total),
+        where=funding_total > 0,
+    )
+    usable &= funding_day_coverage >= MIN_FUNDING_COVERAGE
     usable_day = usable.any(axis=0)                       # jour exploitable pour au moins une unité
     exposure = daily["exposure_usd_hours"] / np.where(hours > 0, hours, np.nan)
     # Base de capital STABLE par unité : son exposition moyenne pondérée par le temps, sur ses
@@ -609,6 +636,16 @@ def _daily_unit_returns(
                     / np.where(known > 0, known, 1.0), np.nan)
     eligible = np.nan_to_num(base) >= cfg.min_exposure_usd
     eligible &= unmeasured <= 0.05 * np.where(turnover > 0, turnover, 1.0)
+    funding_measured_total = funding_measured.sum(axis=1)
+    funding_unmeasured_total = funding_unmeasured.sum(axis=1)
+    funding_total_by_unit = funding_measured_total + funding_unmeasured_total
+    funding_coverage = np.divide(
+        funding_measured_total,
+        funding_total_by_unit,
+        out=np.zeros_like(funding_measured_total),
+        where=funding_total_by_unit > 0,
+    )
+    eligible &= (funding_total_by_unit > 0) & (funding_coverage >= MIN_FUNDING_COVERAGE)
     # Fenêtre propre à l'unité : du premier au dernier jour où une position a été répliquée.
     # Avant sa première observation le copieur ne sait rien : ces jours ne sont pas des « 0 ».
     active = usable & (np.nan_to_num(exposure) > 0)

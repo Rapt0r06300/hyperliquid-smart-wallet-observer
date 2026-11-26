@@ -76,6 +76,7 @@ def test_replay_backfill_skips_certified_safe_without_manifest_io(monkeypatch):
 
 def test_sharded_historical_receipt_is_sha_bound_and_selectable(monkeypatch, tmp_path):
     import hashlib
+
     import pytest
 
     monkeypatch.setattr(backfill, "ROOT", tmp_path)
@@ -659,6 +660,27 @@ def test_replay_refresh_preserves_reversible_compaction(tmp_path):
     backfill._refresh_catalog(saved, tmp_path)
     assert (catalog / "DATA_INDEX.json").read_bytes() == first
 
+
+def test_replay_refresh_refuses_to_overwrite_concurrent_index_change(tmp_path):
+    import pytest
+
+    catalog = tmp_path / "catalog"
+    catalog.mkdir()
+    index_path = catalog / "DATA_INDEX.json"
+    original = {"schema": "alina.data_index.v2", "shards": []}
+    index_path.write_text(json.dumps(original), encoding="utf-8")
+    source_sha256 = backfill.index_file_sha256(index_path)
+    concurrent = {**original, "collector_generation": "newer"}
+    index_path.write_text(json.dumps(concurrent), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="CANONICAL_INDEX_SOURCE_CHANGED_BEFORE_PUBLISH"):
+        backfill._refresh_catalog(
+            original, tmp_path, expected_source_sha256=source_sha256
+        )
+
+    assert json.loads(index_path.read_text(encoding="utf-8")) == concurrent
+
+
 def test_grouped_replay_quota_picks_families_once_in_original_precedence():
     specs = backfill.parse_group_quotas("2:trades,agg_trades;1:bbo;2:*")
     rows = [
@@ -1009,7 +1031,7 @@ def test_reject_with_missing_manifest_hydrates_historical_release_before_downloa
         verified.append("applied")
     monkeypatch.setattr(backfill, "_apply_result", apply)
     monkeypatch.setattr(backfill, "_write_json", lambda *_: None)
-    monkeypatch.setattr(backfill, "_refresh_catalog", lambda *_: None)
+    monkeypatch.setattr(backfill, "_refresh_catalog", lambda *_, **__: None)
     result = backfill.backfill(1, {"trades"})
     assert result["attempted"] == 1
     assert result["updated"] == 1

@@ -17,9 +17,12 @@ RACINE = Path(__file__).resolve().parents[1]
 if str(RACINE / "src") not in sys.path:
     sys.path.insert(0, str(RACINE / "src"))
 
-from hl_observer.backtesting import copy_vault_coffre_vers_labo as C  # noqa: E402
-from hl_observer.backtesting import copy_vault_position_derivee as D  # noqa: E402
-
+from hl_observer.backtesting import (
+    copy_vault_coffre_vers_labo as C,
+)  # noqa: E402
+from hl_observer.backtesting import (
+    copy_vault_position_derivee as D,
+)
 
 # --------------------------------------------------------------------------- le calcul
 
@@ -59,6 +62,34 @@ def test_position_apres_le_fill_et_pas_avant(monkeypatch, tmp_path: Path) -> Non
     assert instant == 1795064449055
     assert valeur == -1761.38 + (-1 * 0.009)       # = -1761.389
     assert audit["observations_gardees"] == 1
+
+
+def test_une_serie_derivee_refuse_un_shard_non_verifie(monkeypatch, tmp_path: Path) -> None:
+    import json
+
+    from hl_observer.backtesting import coffre_tranches
+
+    index = tmp_path / "runtime/coffre_certifie/LOCAL_INDEX.json"
+    index.parent.mkdir(parents=True)
+    index.write_text(json.dumps({"shards": [{"famille": "fills_backfill", "shard": "s1"}]}),
+                     encoding="utf-8")
+    monkeypatch.setattr(coffre_tranches, "selectionner",
+                        lambda *a, **k: {"shards": [{"shard": "s1"}]})
+
+    def flux_non_verifie(*args, compteurs=None, **kwargs):
+        assert kwargs["verifier_sha"] is True
+        compteurs["shards_lus"] = 0
+        compteurs["shards_refuses"] = [{"shard": "s1", "motif": "SHA_DIVERGENT"}]
+        return iter([_fill()])
+
+    monkeypatch.setattr(coffre_tranches, "flux", flux_non_verifie)
+    series, audit = D.positions_depuis_les_fills(tmp_path, debut_ms=0, fin_ms=10**15)
+
+    assert series == {}
+    assert audit["status"] == "SHARDS_REFUSES"
+    assert audit["integrite"]["shards_refuses"] == [
+        {"shard": "s1", "motif": "SHA_DIVERGENT"}
+    ]
 
 
 def test_un_achat_augmente_la_position() -> None:

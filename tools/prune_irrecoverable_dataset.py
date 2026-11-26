@@ -54,7 +54,12 @@ REJECT_PURGE_POLICY = "alina.reject-only-verified-repair-exhausted.v2"
 TERMINAL_PROOF_SCHEMA = "alina.terminal_repair_exhaustion.v1"
 
 
-def _refresh_catalog(index: dict[str, Any], root: Path) -> None:
+def _refresh_catalog(
+    index: dict[str, Any],
+    root: Path,
+    *,
+    expected_source_sha256: str | None = None,
+) -> None:
     """Publish one lossless index mutation and its exact status counters."""
     rows = hydrate_default_release_repository(index)
     active = (
@@ -64,7 +69,11 @@ def _refresh_catalog(index: dict[str, Any], root: Path) -> None:
     index["active_data_status"] = active
     index["release_repository_default"] = REPOSITORY
     index["shards"] = compact_index_rows(index, rows)
-    _publish_canonical_index(root / "catalog" / "DATA_INDEX.json", index)
+    _publish_canonical_index(
+        root / "catalog" / "DATA_INDEX.json",
+        index,
+        expected_source_sha256=expected_source_sha256,
+    )
     counts = {
         status: sum(row.get("quality_status") == status for row in rows)
         for status in ("SAFE", "PARTIAL", "STALE", "REJECT")
@@ -117,10 +126,12 @@ def _digest(value: Mapping[str, Any]) -> str:
 def _verified_snapshot() -> tuple[dict[str, Any], list[dict[str, Any]], str]:
     index_raw = INDEX.read_bytes()
     index = read_index(INDEX)
+    source_sha = hashlib.sha256(index_raw).hexdigest()
+    if index_file_sha256(INDEX) != source_sha:
+        raise Refuse("DELETION_INDEX_CHANGED_DURING_READ")
     rows = hydrate_default_release_repository(index)
     metrics = _load(METRICS)
     totals = metrics.get("totals")
-    source_sha = hashlib.sha256(index_raw).hexdigest()
     if (
         metrics.get("schema_version") != "alina.data_metrics.v4"
         or metrics.get("source_index_sha256") != source_sha
@@ -473,7 +484,7 @@ def finalize(receipt_path: Path) -> dict[str, Any]:
         or not _reject_only_plan(plan)
     ):
         raise Refuse("DELETION_RECEIPT_PLAN_MISMATCH")
-    index, rows, _ = _verified_snapshot()
+    index, rows, source_sha = _verified_snapshot()
     _verify_target_membership(rows, plan["assets"])
     frozen = {
         item["dataset_id"]: item
@@ -482,6 +493,7 @@ def finalize(receipt_path: Path) -> dict[str, Any]:
     }
     kept: list[dict[str, Any]] = []
     removed: list[dict[str, Any]] = []
+    receipt_paths: list[str] = []
     for row in rows:
         expected = frozen.get(str(row.get("dataset_id") or ""))
         if expected is None:
@@ -492,12 +504,17 @@ def finalize(receipt_path: Path) -> dict[str, Any]:
             for key in ("sha256", "bytes", "quality_status", "replay_compatible", "manifest_path")
         ):
             raise Refuse("DELETION_FINALIZE_TARGET_CHANGED")
-        _remove_terminal_receipt(ROOT, str(row.get("manifest_path") or ""))
+        receipt_paths.append(str(row.get("manifest_path") or ""))
         removed.append(expected)
     if len(removed) != len(frozen):
         raise Refuse("DELETION_FINALIZE_INCOMPLETE")
     index["shards"] = kept
-    _refresh_catalog(index, ROOT)
+    _refresh_catalog(index, ROOT, expected_source_sha256=source_sha)
+    # Publish the index that stops referencing terminal receipts before local
+    # cleanup. If the source index advanced, publication refuses and evidence
+    # remains physically available for recovery.
+    for manifest_path in receipt_paths:
+        _remove_terminal_receipt(ROOT, manifest_path)
     history = _load(HISTORY) if HISTORY.is_file() else {
         "schema": "alina.dataset_deletion_history.v1", "entries": []
     }

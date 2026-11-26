@@ -59,3 +59,12 @@ def test_ui_kill_switch_blocks_sensitive_actions():
     assert not result.allowed
     assert not result.success
     assert result.level == "RISK"
+
+
+def test_ui_paper_smoke_labels_synthetic_funding_and_non_economic_status():
+    result = asyncio.run(run_safe_action("paper_run", load_settings(), UiState()))
+
+    assert "synthetic zero" in result.message
+    assert result.details["funding_status"] == "SYNTHETIC_ZERO_SMOKE_ONLY"
+    assert result.details["economic_evidence"] is False
+    assert result.details["real_orders"] is False

@@ -13,6 +13,7 @@ from hl_observer.wallets.leaderboard_models import (
     LeaderboardResult,
     LeaderboardRowRecord,
     LeaderboardSourceStatus,
+    candidate_from_persisted_row,
     row_to_candidate,
     score_leaderboard_row,
 )
@@ -20,7 +21,6 @@ from hl_observer.wallets.leaderboard_validation import (
     LeaderboardAddressStatus,
     validate_leaderboard_wallet_address,
 )
-
 
 WALLET = "0x" + "a" * 40
 TRUNCATED = "0x1234...abcd"
@@ -214,6 +214,7 @@ def test_models_score_candidates_and_result_statuses() -> None:
     )
     score = score_leaderboard_row(rich)
     assert 0 <= score <= 100
+    assert score_leaderboard_row(rich.model_copy(update={"rank": 500})) == score
     candidate = row_to_candidate(rich)
     assert candidate is not None
     assert candidate.wallet_address == WALLET
@@ -237,6 +238,38 @@ def test_models_score_candidates_and_result_statuses() -> None:
     invalid = LeaderboardResult.from_rows([LeaderboardRowRecord(address="bad")])
     assert invalid.status == LeaderboardSourceStatus.IMPORT_REQUIRED
     assert invalid.rejected[0]["reason"] == "INVALID"
+
+
+def test_candidate_stocke_recalcule_le_score_sans_faire_confiance_a_l_ancien_score() -> None:
+    from types import SimpleNamespace
+
+    row = SimpleNamespace(
+        wallet_address=WALLET,
+        rank=1,
+        period="30D",
+        account_value_usdc=1_000_000,
+        pnl_usdc=100_000,
+        roi_pct=50,
+        volume_usdc=10_000_000,
+        source_confidence=95,
+        leaderboard_score=0,
+        selected_for_revalidation=True,
+        selected_for_backfill=False,
+    )
+
+    candidate = candidate_from_persisted_row(row)
+    rank_changed = candidate_from_persisted_row(
+        SimpleNamespace(**{**row.__dict__, "rank": 500, "leaderboard_score": 100})
+    )
+
+    assert candidate.leaderboard_score == score_leaderboard_row(
+        LeaderboardRowRecord(
+            rank=1, account_value_usdc=1_000_000, pnl_usdc=100_000, roi_pct=50,
+            volume_usdc=10_000_000, source_confidence_score=95,
+        )
+    )
+    assert rank_changed.leaderboard_score == candidate.leaderboard_score
+    assert candidate.selected_for_backfill is True
 
 
 def test_leaderboard_parser_files_helpers_and_display_extract(tmp_path) -> None:

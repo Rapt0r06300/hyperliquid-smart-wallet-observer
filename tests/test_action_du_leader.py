@@ -67,6 +67,46 @@ def test_une_position_inconnue_est_refusee_et_comptee(tmp_path: Path, monkeypatc
     assert audit["actions"] == {}, "surtout pas d'OPEN inventé"
 
 
+def test_un_fill_d_un_shard_non_verifie_n_est_pas_expose(tmp_path: Path, monkeypatch) -> None:
+    _index(tmp_path)
+    monkeypatch.setattr(coffre_tranches, "selectionner",
+                        lambda *a, **k: {"retenus": [{"shard": "s1"}]})
+
+    def flux_non_verifie(*args, compteurs=None, **kwargs):
+        assert kwargs["verifier_sha"] is True
+        compteurs["shards_lus"] = 0
+        compteurs["shards_refuses"] = [{"shard": "s1", "motif": "SHA_DIVERGENT"}]
+        return iter([_fill(hash="0xbad", start_position=0.0, source="LIVE_WS")])
+
+    monkeypatch.setattr(coffre_tranches, "flux", flux_non_verifie)
+    entrees, audit = pont.fills_du_coffre(tmp_path, debut_ms=0, fin_ms=10_000_000)
+
+    assert entrees == []
+    assert audit["status"] == "SHARDS_REFUSES"
+    assert audit["integrite"]["shards_refuses"] == [
+        {"shard": "s1", "motif": "SHA_DIVERGENT"}
+    ]
+
+
+def test_une_position_d_un_shard_non_verifie_n_est_pas_expose(tmp_path: Path, monkeypatch) -> None:
+    _index(tmp_path)
+    monkeypatch.setattr(coffre_tranches, "selectionner",
+                        lambda *a, **k: {"shards": [{"shard": "s1"}]})
+
+    def flux_non_verifie(*args, compteurs=None, **kwargs):
+        assert kwargs["verifier_sha"] is True
+        compteurs["shards_lus"] = 0
+        compteurs["shards_refuses"] = [{"shard": "s1", "motif": "SHA_ABSENT"}]
+        return iter([{"received_at_ms": 1_000, "szi": 7.0, "vault": "0xleader", "coin": "BTC"}])
+
+    monkeypatch.setattr(coffre_tranches, "flux", flux_non_verifie)
+    positions, audit = pont.positions_du_coffre(tmp_path, debut_ms=2_000_000, fin_ms=3_000_000)
+
+    assert positions == {}
+    assert audit["status"] == "SHARDS_REFUSES"
+    assert audit["shards_refuses"] == [{"shard": "s1", "motif": "SHA_ABSENT"}]
+
+
 def test_une_position_declaree_decide_l_action(tmp_path: Path, monkeypatch) -> None:
     """Quand le fill porte la position, elle tranche : nulle = ouverture, non nulle = renforcement."""
     entrees, audit = _lire(tmp_path, monkeypatch, [

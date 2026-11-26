@@ -332,8 +332,11 @@ def _restore_exact_trade_count_row(
     return changed
 
 
-def _iter_trade_scan_rows(index_path: Path) -> tuple[list[Mapping[str, Any]], int, list[str], int]:
-    root = json.loads(index_path.read_text(encoding="utf-8"))
+def _iter_trade_scan_rows(
+    index_path: Path,
+) -> tuple[list[Mapping[str, Any]], int, list[str], int, str]:
+    source_root_bytes = index_path.read_bytes()
+    root = json.loads(source_root_bytes)
     if not isinstance(root, Mapping):
         raise ValueError("DATA_INDEX_INVALID_ROOT")
     default, release_tags, collection_runs = _index_aliases(root)
@@ -358,14 +361,26 @@ def _iter_trade_scan_rows(index_path: Path) -> tuple[list[Mapping[str, Any]], in
             unproven.append(str(row.get("dataset_id") or ""))
         if _unique_candidate(row):
             candidates.append(_CompactScanRow(row))
-    return candidates, trade_shards, sorted(unproven), restored
+    if index_path.read_bytes() != source_root_bytes:
+        raise ValueError("GLOBAL_UNIQUE_SOURCE_INDEX_CHANGED_DURING_SCAN")
+    source_root_sha256 = hashlib.sha256(source_root_bytes).hexdigest()
+    return candidates, trade_shards, sorted(unproven), restored, source_root_sha256
 
 
-def _patch_index_streaming(index_path: Path, counts: Mapping[str, Mapping[str, Any]]) -> None:
+def _patch_index_streaming(
+    index_path: Path,
+    counts: Mapping[str, Mapping[str, Any]],
+    *,
+    expected_root_sha256: str | None = None,
+) -> None:
     """Patch unique counts without reconstructing a multi-gigabyte logical index."""
     if index_path.is_symlink() or not index_path.is_file():
         raise ValueError("PARTITION_PARITY_UNSAFE_INDEX")
     original_root_bytes = index_path.read_bytes()
+    if expected_root_sha256 is not None:
+        observed_root_sha256 = hashlib.sha256(original_root_bytes).hexdigest()
+        if observed_root_sha256 != expected_root_sha256:
+            raise ValueError("GLOBAL_UNIQUE_SOURCE_INDEX_CHANGED_BEFORE_PUBLISH")
     root = json.loads(original_root_bytes)
     if not isinstance(root, dict):
         raise ValueError("DATA_INDEX_INVALID_ROOT")
@@ -378,6 +393,10 @@ def _patch_index_streaming(index_path: Path, counts: Mapping[str, Mapping[str, A
         for row in rows:
             patch = counts.get(str(row.get("dataset_id") or ""))
             if isinstance(patch, Mapping):
+                expected_sha = str(row.get("sha256") or "").lower()
+                evidence_sha = str(patch.get("asset_sha256") or "").lower()
+                if len(expected_sha) != 64 or evidence_sha != expected_sha:
+                    raise ValueError("GLOBAL_UNIQUE_STALE_ASSET_EVIDENCE")
                 row.update(patch)
         if index_path.read_bytes() != original_root_bytes:
             raise ValueError("PARTITION_PARITY_CONCURRENT_ROOT_CHANGE")
@@ -491,6 +510,10 @@ def _patch_index_streaming(index_path: Path, counts: Mapping[str, Mapping[str, A
                 source_count += 1
                 patch = counts.get(str(row.get("dataset_id") or ""))
                 if isinstance(patch, Mapping):
+                    expected_sha = str(row.get("sha256") or "").lower()
+                    evidence_sha = str(patch.get("asset_sha256") or "").lower()
+                    if len(expected_sha) != 64 or evidence_sha != expected_sha:
+                        raise ValueError("GLOBAL_UNIQUE_STALE_ASSET_EVIDENCE")
                     row.update(patch)
                 encoded_len = len(_json_bytes(row)) - 1
                 if batch and batch_bytes + encoded_len + 1 > partition_limit:
@@ -716,23 +739,45 @@ def _persist_manifest_unique_counts(
     unique_count: int,
     exact: bool,
 ) -> None:
-    manifest_path = (ROOT / str(row.get("manifest_path") or "")).resolve()
+    manifest_candidate = ROOT / str(row.get("manifest_path") or "")
+    if manifest_candidate.is_symlink():
+        return
+    manifest_path = manifest_candidate.resolve()
     if not manifest_path.is_relative_to(ROOT.resolve()) or not manifest_path.is_file():
         return
     try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        original_manifest_bytes = manifest_path.read_bytes()
+        manifest = json.loads(original_manifest_bytes)
     except (OSError, ValueError):
         return
     if not isinstance(manifest, dict):
         return
+    expected_sha = str(row.get("sha256") or "").lower()
+    manifest_sha = str(manifest.get("sha256") or "").lower()
+    if len(expected_sha) != 64 or manifest_sha != expected_sha:
+        return
+    manifest_dataset_id = manifest.get("dataset_id")
+    row_dataset_id = str(row.get("dataset_id") or "")
+    if manifest_dataset_id is not None and str(manifest_dataset_id) != row_dataset_id:
+        return
     manifest["unique_trade_count"] = int(unique_count) if exact else None
     manifest["unique_trade_count_exact"] = bool(exact)
-    temporary = manifest_path.with_suffix(manifest_path.suffix + ".tmp")
-    temporary.write_text(
-        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{manifest_path.name}.global-unique-",
+        suffix=".tmp",
+        dir=manifest_path.parent,
     )
-    os.replace(temporary, manifest_path)
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        if manifest_path.read_bytes() != original_manifest_bytes:
+            return
+        os.replace(temporary, manifest_path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _restore_exact_trade_count_rows(
@@ -924,7 +969,8 @@ def main() -> None:
     if not 1 <= args.workers <= 32:
         raise SystemExit("workers must be between 1 and 32")
 
-    all_candidates, trade_shards_in_scope, unproven_trade_count_ids, restored_exact_trade_rows = (
+    (all_candidates, trade_shards_in_scope, unproven_trade_count_ids,
+     restored_exact_trade_rows, source_index_sha256) = (
         _iter_trade_scan_rows(INDEX_PATH)
     )
 
@@ -1105,7 +1151,11 @@ def main() -> None:
     observed_identity_digest = _digest_sqlite_identities(database)
     database.close()
 
-    _patch_index_streaming(INDEX_PATH, counts)
+    _patch_index_streaming(
+        INDEX_PATH,
+        counts,
+        expected_root_sha256=source_index_sha256,
+    )
 
     remaining_ids = [
         str(row.get("dataset_id") or "")
@@ -1133,6 +1183,7 @@ def main() -> None:
         "method": "bounded_trade_corpus_scan_with_durable_sqlite_checkpoint",
         "identity_version": IDENTITY_VERSION,
         "merge_order_version": MERGE_ORDER_VERSION,
+        "source_index_sha256": source_index_sha256,
         "collision_policy": (
             "full canonical identity strings; native identifiers preferred; "
             "ambiguous missing identities fail closed"

@@ -66,6 +66,29 @@ def test_un_coffre_absent_est_dit_et_non_confondu_avec_un_corpus_vide(tmp_path: 
     assert "LOCAL_INDEX.json" in audit["chemin"]
 
 
+def test_un_shard_de_carnet_non_verifie_invalide_la_lecture(tmp_path: Path, monkeypatch) -> None:
+    _index(tmp_path, [{"famille": "book_l2", "ts_min_ms": 0, "ts_max_ms": 10_000_000}])
+    monkeypatch.setattr(coffre_tranches, "selectionner",
+                        lambda *a, **k: {"shards": [{"shard": "s1"}]})
+    monkeypatch.setattr(coffre_tranches, "horloge_de", lambda famille: "ts_ms")
+
+    def flux_non_verifie(*args, compteurs=None, **kwargs):
+        assert kwargs["verifier_sha"] is True
+        compteurs["shards_lus"] = 0
+        compteurs["shards_refuses"] = [{"shard": "s1", "motif": "SHA_DIVERGENT"}]
+        return iter([{"coin": "BTC", "ts_ms": 1_000, **_cotation()}])
+
+    monkeypatch.setattr(coffre_tranches, "flux", flux_non_verifie)
+    carnets, audit = deux_phases.carnets_du_coffre(
+        tmp_path, coins=["BTC"], debut_ms=0, fin_ms=2_000, familles=("book_l2",),
+        instants_par_coin={"BTC": [1_000]},
+    )
+
+    assert carnets == {}
+    assert audit["status"] == "SHARDS_REFUSES"
+    assert audit["shards_refuses"] == [{"shard": "s1", "motif": "SHA_DIVERGENT"}]
+
+
 def test_les_carnets_hors_portee_d_un_signal_ne_sont_pas_materialises(
     tmp_path: Path, monkeypatch
 ) -> None:

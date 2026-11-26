@@ -74,6 +74,25 @@ def test_train_active_day_mean_uses_exact_daily_pnl_values() -> None:
     assert _train_active_day_mean(train) == Decimal("0.45")
 
 
+def test_search_daily_scores_require_complete_exact_decimal_values() -> None:
+    assert local_lab._daily_exact_values({
+        "distinct_days": 2,
+        "daily_net_pnl_usd": [0.1, 0.2],
+    }) is None
+    assert local_lab._daily_exact_values({
+        "distinct_days": 2,
+        "daily_net_pnl_usd_exact_decimal": ["0.1"],
+    }) is None
+    assert local_lab._daily_exact_values({
+        "distinct_days": 2,
+        "daily_net_pnl_usd_exact_decimal": ["0.1", "not-a-number"],
+    }) is None
+    assert local_lab._daily_exact_values({
+        "distinct_days": 2,
+        "daily_net_pnl_usd_exact_decimal": ["0.1", "0.2"],
+    }) == ["0.1", "0.2"]
+
+
 @pytest.mark.parametrize(
     ("exact_values", "distinct_days"),
     [(["0.3"], 2), (["invalid", "0.4"], 2), ([], 0), ("0.3", 1)],

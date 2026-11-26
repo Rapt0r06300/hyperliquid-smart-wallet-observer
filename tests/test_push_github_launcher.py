@@ -67,6 +67,45 @@ def test_git_summary_reports_checkpoint_sha_when_reconciliation_fails(capsys) ->
     assert f"SHA local    : {'a' * 12}" not in output
 
 
+def test_git_summary_distinguishes_verified_push_from_late_local_edits(capsys) -> None:
+    pushed = "d" * 40
+    receipt = {
+        "status": "NO_GO",
+        "head_after": pushed,
+        "remote_sha_observed": pushed,
+        "pushed_head": pushed,
+        "push_completed": True,
+        "progress_percent": 93.3,
+        "late_local_count": 3,
+        "late_local_paths": ["docs/a.md", "src/a.py", "tests/a.py"],
+        "git_commands": [],
+        "error": "3 modifications arrivees pendant Git Sync; contenu conserve sur disque.",
+    }
+
+    assert cmd_progress._summary(receipt, 2) == 1
+    output = capsys.readouterr().out
+    assert "PUSH VERIFIE - MODIFICATIONS LOCALES EN ATTENTE" in output
+    assert "le run reste incomplet" in output
+    assert "A reprendre   : 3 modification(s) locale(s)" in output
+    assert "docs/a.md, src/a.py, tests/a.py" in output
+    assert "aucune force appliquee" in output
+
+
+def test_git_summary_reports_preserved_safe_overlay(capsys) -> None:
+    receipt = {
+        "status": "SYNCHRONIZED",
+        "head_after": "e" * 40,
+        "remote_sha_observed": "e" * 40,
+        "progress_percent": 100,
+        "adoption_protected_overlay_count": 161,
+        "git_commands": [],
+    }
+
+    assert cmd_progress._summary(receipt, 0) == 0
+    output = capsys.readouterr().out
+    assert "Donnees SAFE : 161 chemin(s) local(aux) conserve(s) hors commit." in output
+
+
 def _include_sync_engine(repo: Path) -> None:
     tools = repo / "tools"
     tools.mkdir(exist_ok=True)
@@ -266,7 +305,7 @@ def test_safe_push_blocks_tracked_runtime_dirt_and_reports_source_dirt_in_dry_ru
     # Dry-run is an inspection mode. Tracked runtime bytes are excluded from
     # publication and must be reported, not treated as a publishable commit.
     assert runtime_result.returncode == 0, runtime_result.stdout + runtime_result.stderr
-    assert "Modifications locales protegees conservees hors" in runtime_result.stdout
+    assert "[GARDE DONNEES] Modifications locales protegees exclues du commit;" in runtime_result.stdout
     assert "[DRY-RUN TERMINE]" in runtime_result.stdout
     assert "Aucun add, commit, fetch, merge ou push n'a ete execute." in runtime_result.stdout
     assert (local / "runtime" / "state.json").read_text(encoding="utf-8") == '{"live":true}\n'
@@ -296,33 +335,11 @@ def test_safe_push_blocks_tracked_runtime_dirt_and_reports_source_dirt_in_dry_ru
     assert _git(local, "ls-remote", "origin", "refs/heads/main").split()[0] == remote_head_before
 
 
-@pytest.mark.skipif(os.name != "nt", reason="la garde CMD utilise Windows PowerShell")
-def test_pousser_index_lock_probe_fails_closed_under_cmd_parser(tmp_path: Path) -> None:
-    """The embedded PowerShell process probe must survive CMD parsing and fail closed."""
+def test_pousser_delegates_lock_repair_to_engine_and_fails_closed() -> None:
+    """The CMD launcher delegates lock ownership checks and aborts on any unsafe result."""
     source = MAIN_LAUNCHER.read_text(encoding="utf-8")
     guard = source.split(":ensure_no_stale_lock\n", 1)[1]
-    assert "^|" not in guard
-    assert "UNKNOWN" in guard and '=="CLEAR"' in guard
+    assert "--repair-stale-lock" in guard
+    assert "if errorlevel 1" in guard
+    assert "[NO_GO] Verrou Git non reparable en securite" in guard
     assert "if errorlevel 1 goto :finish" in source
-
-    line = next(row for row in guard.splitlines() if "for /f" in row and "powershell" in row)
-    command = line.split("in ('", 1)[1].rsplit("') do set", 1)[0]
-    harness = tmp_path / "probe.cmd"
-    harness.write_text(
-        "@echo off\r\nsetlocal DisableDelayedExpansion\r\n"
-        "set \"STATE=\"\r\n"
-        f"for /f \"delims=\" %%G in ('{command}') do set \"STATE=%%G\"\r\n"
-        "echo STATE=%STATE%\r\nexit /b 0\r\n",
-        encoding="utf-8",
-    )
-    result = subprocess.run(
-        ("cmd.exe", "/d", "/c", str(harness)),
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=30,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "STATE=ACTIVE" in result.stdout or "STATE=CLEAR" in result.stdout

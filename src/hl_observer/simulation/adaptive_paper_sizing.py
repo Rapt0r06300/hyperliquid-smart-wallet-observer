@@ -7,8 +7,10 @@ entry may use after looking at recent local outcomes.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
-from typing import Any, Iterable
+import math
+from collections.abc import Iterable
+from dataclasses import asdict, dataclass
+from typing import Any
 
 from hl_observer.risk.adaptive_sizing import compute_size_pct, size_to_notional
 
@@ -24,7 +26,7 @@ class AdaptivePaperSize:
     consecutive_wins: int
     confidence: float
     size_pct: float
-    session_pnl_usdt: float
+    session_pnl_usdt: float | None
     reason: str
     enabled: bool = True
 
@@ -35,8 +37,8 @@ class AdaptivePaperSize:
         return fields
 
 
-def realized_exit_pnls(events: Iterable[dict[str, Any]]) -> list[float]:
-    """Return realized paper exit PnLs from the local decision ledger."""
+def realized_exit_pnls(events: Iterable[dict[str, Any]]) -> list[float | None]:
+    """Return measured exit PnLs; preserve unmeasurable exits as ``None``."""
 
     pnls: list[float] = []
     for row in events:
@@ -47,21 +49,28 @@ def realized_exit_pnls(events: Iterable[dict[str, Any]]) -> list[float]:
         action = str(row.get("bot_replay_action") or row.get("paper_action_type") or "").upper()
         if not any(marker in action for marker in EXIT_ACTION_MARKERS):
             continue
-        try:
-            pnl = float(row.get("estimated_net_pnl_usdc") or 0.0)
-        except (TypeError, ValueError):
+        raw_pnl = row.get("estimated_net_pnl_usdc")
+        if raw_pnl is None or isinstance(raw_pnl, bool):
+            pnls.append(None)
             continue
-        pnls.append(pnl)
+        try:
+            pnl = float(raw_pnl)
+        except (TypeError, ValueError, OverflowError):
+            pnls.append(None)
+            continue
+        pnls.append(pnl if math.isfinite(pnl) else None)
     return pnls
 
 
-def outcome_streaks(pnls: Iterable[float]) -> tuple[int, int]:
+def outcome_streaks(pnls: Iterable[float | None]) -> tuple[int, int]:
     """Return consecutive losses and wins from the end of a realized PnL series."""
 
     values = list(pnls)
     losses = 0
     wins = 0
     for pnl in reversed(values):
+        if pnl is None:
+            break
         if pnl < 0:
             if wins:
                 break
@@ -122,8 +131,21 @@ def adaptive_paper_margin(
         )
 
     pnls = realized_exit_pnls(recent_events)
-    losses, wins = outcome_streaks(pnls)
-    session_pnl = sum(pnls)
+    if any(pnl is None for pnl in pnls):
+        return AdaptivePaperSize(
+            requested_margin_usdt=round(requested, 6),
+            final_margin_usdt=0.0,
+            cap_margin_usdt=0.0,
+            consecutive_losses=0,
+            consecutive_wins=0,
+            confidence=0.0,
+            size_pct=0.0,
+            session_pnl_usdt=None,
+            reason="ADAPTIVE_SIZE_BLOCKED_UNMEASURABLE_EXIT_PNL",
+        )
+    measured_pnls = [pnl for pnl in pnls if pnl is not None]
+    losses, wins = outcome_streaks(measured_pnls)
+    session_pnl = sum(measured_pnls)
     edge_component = min(0.35, max(0.0, float(edge_remaining_bps or 0.0)) / 120.0)
     liquidity_component = min(0.2, max(0.0, float(liquidity_score or 0.0)) * 0.2)
     consensus_component = min(0.25, max(0, int(consensus_wallets or 0) - 1) * 0.08)

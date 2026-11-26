@@ -21,12 +21,12 @@ from hl_observer.edge.edge_net_v12 import EdgeNetV12Estimate, EdgeNetV12Inputs, 
 from hl_observer.evidence.decision_ledger import PaperDecisionEvidence, evidence_from_paper_result
 from hl_observer.gating.filter_pipeline import ContexteDecision, appliquer_filtres
 from hl_observer.instrument_identity import preserve_native_instrument_symbol
-from hl_observer.risk.drawdown_scaling import facteur_capital
 from hl_observer.models import DataQuality, Fill, SourceMeta
 from hl_observer.normalization.fills import NormalizedFillResult, normalize_hyperliquid_fill
 from hl_observer.paper_trading.execution_truth import ExecutionTruth
 from hl_observer.paper_trading.paper_engine import PaperDecisionResult, PaperEngine, PaperEngineConfig
-from hl_observer.position_lifecycle.reconstructor import LifecycleAction, LifecycleEvent, event_from_fill
+from hl_observer.position_lifecycle.reconstructor import LifecycleEvent, event_from_fill
+from hl_observer.risk.drawdown_scaling import facteur_capital
 from hl_observer.signals.cluster_detector import ClusterConfig, SignalCluster, detect_signal_clusters
 from hl_observer.signals.leader_delta import LeaderDelta, leader_delta_from_lifecycle_event
 from hl_observer.storage.raw_store import RawStore, make_raw_event
@@ -43,7 +43,8 @@ class V12DecisionPipelineConfig:
     spread_bps: float | None = 2.0
     slippage_bps: float | None = 2.0
     fee_bps: float | None = 4.5
-    funding_estimate_bps: float | None = 0.0
+    # A missing estimate must remain unknown; zero requires explicit evidence.
+    funding_estimate_bps: float | None = None
     latency_penalty_bps: float = 0.0
     copy_degradation_bps: float = 0.0
     liquidity_penalty_bps: float = 0.0
@@ -173,14 +174,29 @@ def run_v12_decision_pipeline(
         edge = _estimate_edge(delta, event, mid, leader_expected_edge, cfg)
         etat_moteur = _etat_moteur(engine)                       # capital/marge/drawdown RÉELS (X2/X3)
         edge, gardes_ctx = _appliquer_gardes(edge, delta, mid, pipeline_input, cfg, etat_moteur)
+        if "FUNDING_UNKNOWN" in edge.reason_codes:
+            gardes_ctx["funding_status"] = "UNMEASURABLE"
         margin_scale = _facteur_sizing(etat_moteur)              # X3 : réduit la taille en drawdown
         edge_estimates[delta.delta_id] = edge
         if store is not None:
             store.upsert_edge_estimate(_edge_id(delta), edge, created_at_ms=pipeline_input.observed_at_ms)
 
         enriched_delta = delta
-        if edge.reason_codes:
-            enriched_delta = replace(delta, reason_codes=tuple(dict.fromkeys((*delta.reason_codes, *edge.reason_codes))))
+        decision_blocking_edge_reasons = tuple(
+            reason
+            for reason in edge.reason_codes
+            # An unknown forecast must block new risk, but must not veto a
+            # risk-reducing close. The unmeasurable state remains on the edge
+            # receipt and decision context; no complete net PnL is claimed.
+            if not (delta.is_exit_or_reduce and reason == "FUNDING_UNKNOWN")
+        )
+        if decision_blocking_edge_reasons:
+            enriched_delta = replace(
+                delta,
+                reason_codes=tuple(
+                    dict.fromkeys((*delta.reason_codes, *decision_blocking_edge_reasons))
+                ),
+            )
         market_price = float(mid or 0.0)
         execution_truth = pipeline_input.execution_truth_by_coin.get(
             preserve_native_instrument_symbol(delta.coin)
@@ -313,7 +329,7 @@ def _appliquer_gardes(
     edge: EdgeNetV12Estimate,
     delta: LeaderDelta,
     current_mid: float | None,
-    pipeline_input: "V12DecisionPipelineInput",
+    pipeline_input: V12DecisionPipelineInput,
     cfg: V12DecisionPipelineConfig,
     etat: dict[str, float | None],
 ) -> tuple[EdgeNetV12Estimate, dict[str, object]]:

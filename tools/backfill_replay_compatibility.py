@@ -646,7 +646,6 @@ def _apply_result(
     *,
     root: Path,
 ) -> None:
-    manifest_path=root/str(row["manifest_path"])
     manifest,recovery=_load_manifest_for_apply(row,root=root)
     if str(manifest.get("dataset_id"))!=str(row.get("dataset_id")):
         raise BackfillError("manifest/index dataset_id mismatch")
@@ -835,7 +834,12 @@ def _apply_result(
     })
 
 
-def _refresh_catalog(index: dict[str,Any], root: Path) -> None:
+def _refresh_catalog(
+    index: dict[str,Any],
+    root: Path,
+    *,
+    expected_source_sha256: str | None = None,
+) -> None:
     # Always expand the root aliases before rewriting the index. This
     # also makes a second refresh byte-for-byte stable.
     rows=hydrate_default_release_repository(index)
@@ -849,7 +853,11 @@ def _refresh_catalog(index: dict[str,Any], root: Path) -> None:
     # A plain row update otherwise retains the per-shard hydrated run IDs
     # and can make an already near-limit canonical index unpublishable.
     index["shards"] = compact_index_rows(index, rows)
-    _publish_canonical_index(root/"catalog"/"DATA_INDEX.json",index)
+    _publish_canonical_index(
+        root/"catalog"/"DATA_INDEX.json",
+        index,
+        expected_source_sha256=expected_source_sha256,
+    )
 
     catalog=_load_json(root/"catalog"/"DATA_CATALOG.json")
     registry=_load_json(root/"catalog"/"DATA_QUALITY_REGISTRY.json")
@@ -959,7 +967,10 @@ def backfill(
     limit: int, families: set[str],
     *, group_quotas: list[tuple[int, set[str]]] | None = None,
 ) -> dict[str,Any]:
+    source_index_sha256=index_file_sha256(INDEX_PATH)
     index=read_index(INDEX_PATH)
+    if index_file_sha256(INDEX_PATH) != source_index_sha256:
+        raise BackfillError("canonical index changed while reading replay candidates")
     try:
         rows=hydrate_default_release_repository(index)
     except (TypeError, ValueError) as exc:
@@ -1093,7 +1104,9 @@ def backfill(
     # No verified repair means no change to the canonical data index. Avoid
     # rewriting tens of MiB in every bounded replay wave.
     if updated:
-        _refresh_catalog(index,ROOT)
+        _refresh_catalog(
+            index, ROOT, expected_source_sha256=source_index_sha256
+        )
 
     return {
         "attempted":len(candidates),

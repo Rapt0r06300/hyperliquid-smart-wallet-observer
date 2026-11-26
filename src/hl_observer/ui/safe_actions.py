@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from sqlalchemy import select
+
+from hl_observer.analysis.opening_patterns import compute_opening_pattern_stats
 from hl_observer.collection.collector import CollectionPlan, run_collection_once
 from hl_observer.config.settings import ExecutionEnvironment, Settings
 from hl_observer.edge.edge_remaining import compute_edge_remaining
@@ -7,17 +10,23 @@ from hl_observer.explorer.explorer_revalidation import revalidate_explorer_walle
 from hl_observer.explorer.explorer_source import create_explorer_candidates, scrape_explorer
 from hl_observer.explorer.explorer_transaction_tape import get_explorer_tape
 from hl_observer.hyperliquid.schemas import EdgeRemainingInputs, RiskDecision, SignalDecision
-from hl_observer.markets.scanner import MarketScanPlan, run_scan_markets
-from hl_observer.markets.scanner import MarketDiscoveryPlan, run_discover_markets
+from hl_observer.markets.scanner import (
+    MarketDiscoveryPlan,
+    MarketScanPlan,
+    run_discover_markets,
+    run_scan_markets,
+)
 from hl_observer.paper.paper_executor import PaperExecutor
+from hl_observer.risk.adaptive_filter import apply_adaptive_risk_filter
 from hl_observer.risk.gates import RiskContext
+from hl_observer.risk.risk_context import AdaptiveRiskContext
 from hl_observer.risk.risk_engine import RiskEngine
 from hl_observer.security.mainnet_guard import MainnetExecutionForbidden, assert_mainnet_execution_disabled
 from hl_observer.security.safety_audit import run_safety_audit
 from hl_observer.storage.database import create_session_factory, create_sqlite_engine, init_db
 from hl_observer.storage.models import AutoWatchlist
-from hl_observer.testnet.testnet_order_builder import build_testnet_order_intent
 from hl_observer.testnet.testnet_executor_locked import LockedTestnetExecutor
+from hl_observer.testnet.testnet_order_builder import build_testnet_order_intent
 from hl_observer.testnet.testnet_safety_gates import TestnetLocked
 from hl_observer.ui.schemas import UiActionResult
 from hl_observer.ui.state import UiState
@@ -27,10 +36,6 @@ from hl_observer.wallets.discovery import build_wallet_discovery_plan, run_walle
 from hl_observer.wallets.leaderboard_source import scrape_leaderboard
 from hl_observer.wallets.scan_queue import scan_wallet_queue
 from hl_observer.wallets.top500_bootstrap import bootstrap_top_wallets
-from hl_observer.analysis.opening_patterns import compute_opening_pattern_stats
-from hl_observer.risk.adaptive_filter import apply_adaptive_risk_filter
-from hl_observer.risk.risk_context import AdaptiveRiskContext
-from sqlalchemy import select
 
 ALLOWED_ACTIONS = {
     "doctor",
@@ -320,6 +325,9 @@ async def _paper_run(action: str, settings: Settings, state: UiState) -> UiActio
             spread_cost_bps=2,
             estimated_slippage_bps=3,
             latency_decay_bps=2,
+            adverse_selection_bps=0.0,
+            # Synthetic smoke path only; not an economic result or forecast.
+            funding_expected_cost_bps=0.0,
         ),
         min_edge_required_bps=settings.risk.min_edge_required_bps,
     )
@@ -339,9 +347,18 @@ async def _paper_run(action: str, settings: Settings, state: UiState) -> UiActio
         action,
         allowed=risk.allowed,
         success=risk.allowed,
-        message=f"Paper smoke decision: {risk.decision.value}",
+        message=(
+            f"Paper smoke decision: {risk.decision.value}; funding is a synthetic zero "
+            "for this demonstration only, not economic evidence."
+        ),
         level="INFO" if risk.allowed else "RISK",
-        details={"risk": risk.model_dump(), "paper_orders": len(PaperExecutor().orders)},
+        details={
+            "risk": risk.model_dump(),
+            "paper_orders": len(PaperExecutor().orders),
+            "funding_status": "SYNTHETIC_ZERO_SMOKE_ONLY",
+            "economic_evidence": False,
+            "real_orders": False,
+        },
     )
 
 

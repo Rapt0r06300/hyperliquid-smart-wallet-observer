@@ -82,23 +82,44 @@ def capacite_par_coin(trades: Iterable[Mapping[str, Any]], *,
     debut = fin = None
     for trade in trades or ():
         lues += 1
-        coin = trade.get("coin")
-        # Pas de `a or b` ici : un horodatage 0 est FAUX au sens de Python et serait pris pour
-        # une absence. On teste None explicitement, comme le scelleur.
-        instant = _entier(trade.get("exchange_ts_ms"))
-        if instant is None:
-            instant = _entier(trade.get("received_at_ms"))
-        prix = _nombre(trade.get("price", trade.get("px")))
-        taille = _nombre(trade.get("size", trade.get("sz")))
-        if (not isinstance(coin, str) or not coin or instant is None
-                or prix is None or taille is None or prix <= 0 or taille <= 0):
+        mesurable = trade_mesurable(trade)
+        if mesurable is None:
             ignorees += 1
             continue
+        coin, instant, notionnel = mesurable
         minutes = par_coin.setdefault(coin, {})
         cle = instant // MINUTE_MS
-        minutes[cle] = minutes.get(cle, 0.0) + prix * taille
+        minutes[cle] = minutes.get(cle, 0.0) + notionnel
         debut = instant if debut is None else min(debut, instant)
         fin = instant if fin is None else max(fin, instant)
+    return capacite_depuis_minutes(par_coin, lues=lues, ignorees=ignorees, debut=debut, fin=fin,
+                                   ordre_usd=ordre_usd)
+
+
+def trade_mesurable(trade: Mapping[str, Any]) -> tuple[str, int, float] | None:
+    """``(coin, instant, notionnel)`` d'un trade de marche, ou ``None`` s'il ne mesure rien.
+
+    25/11/2026 : extrait tel quel de ``capacite_par_coin`` pour que la lecture parallele du labo
+    (``tools/etude_copiabilite.capacite_de_la_fenetre``) applique EXACTEMENT la meme regle.
+    """
+    coin = trade.get("coin")
+    # Pas de `a or b` ici : un horodatage 0 est FAUX au sens de Python et serait pris pour
+    # une absence. On teste None explicitement, comme le scelleur.
+    instant = _entier(trade.get("exchange_ts_ms"))
+    if instant is None:
+        instant = _entier(trade.get("received_at_ms"))
+    prix = _nombre(trade.get("price", trade.get("px")))
+    taille = _nombre(trade.get("size", trade.get("sz")))
+    if (not isinstance(coin, str) or not coin or instant is None
+            or prix is None or taille is None or prix <= 0 or taille <= 0):
+        return None
+    return coin, instant, prix * taille
+
+
+def capacite_depuis_minutes(par_coin: Mapping[str, Mapping[int, float]], *, lues: int, ignorees: int,
+                            debut: int | None, fin: int | None,
+                            ordre_usd: float = float(PAPER_EQUITY_USD)) -> dict[str, Any]:
+    """Le resume de ``capacite_par_coin`` a partir des notionnels deja sommes par coin et par minute."""
     minutes_fenetre = 0 if debut is None else (fin - debut) // MINUTE_MS + 1
     coins: dict[str, dict[str, Any]] = {}
     for coin, minutes in par_coin.items():
@@ -344,6 +365,6 @@ def exposition_a_la_capacite(volume_usd_par_coin: Mapping[str, float],
 __all__ = [
     "exposition_a_la_capacite",
     "SCHEMA", "ROLE_CAPACITE", "ROLE_RISQUE", "ROLE_FLUX", "ROLE_RESULTAT", "ROLE_APPLICABILITE",
-    "MULTIPLE_CAPACITE_LARGE", "capacite_par_coin", "risque_de_liquidation", "flux_de_capital",
+    "MULTIPLE_CAPACITE_LARGE", "capacite_par_coin", "capacite_depuis_minutes", "trade_mesurable", "risque_de_liquidation", "flux_de_capital",
     "resultat_overshoot", "applicabilite_microstructure",
 ]

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from hl_observer.paper_trading.execution_truth import ExecutionTruth
 from hl_observer.paper_trading.paper_engine import PaperEngine, PaperEngineConfig
 from hl_observer.pipeline.v12_decision_pipeline import (
@@ -11,7 +13,6 @@ from hl_observer.position_lifecycle.reconstructor import LifecycleAction
 from hl_observer.storage.raw_store import RawStore
 from hl_observer.storage.run_context import RunContext
 from hl_observer.storage.v12_sqlite_store import V12SQLiteStore
-
 
 WALLET = "0x" + "c" * 40
 
@@ -86,6 +87,7 @@ def test_v12_decision_pipeline_opens_then_follows_leader_close(tmp_path):
     assert open_result.persisted_counts["v12_edge_estimates"] == 1
     assert open_result.persisted_counts["v12_decision_evidence"] == 1
 
+    close_config = replace(_cfg(), funding_estimate_bps=None)
     close_result = run_v12_decision_pipeline(
         V12DecisionPipelineInput(
             wallet=WALLET,
@@ -110,7 +112,7 @@ def test_v12_decision_pipeline_opens_then_follows_leader_close(tmp_path):
                 },
             ),
         ),
-        config=_cfg(),
+        config=close_config,
         paper_engine=engine,
         store=store,
         raw_store=raw_store,
@@ -120,7 +122,11 @@ def test_v12_decision_pipeline_opens_then_follows_leader_close(tmp_path):
     assert close_result.paper_results[0].accepted
     assert close_result.paper_results[0].trade is not None
     assert close_result.paper_results[0].trade.action == "CLOSE"
-    assert close_result.paper_results[0].realized_pnl_usdt > 0
+    close_edge = close_result.edge_estimates[close_result.leader_deltas[0].delta_id]
+    assert close_edge.measurable is False
+    assert close_edge.net_edge_bps is None
+    assert "FUNDING_UNKNOWN" in close_result.no_trade_reasons
+    assert close_result.paper_results[0].decision_context["funding_status"] == "UNMEASURABLE"
     assert len(engine.positions) == 0
     assert close_result.persisted_counts["v12_edge_estimates"] == 2
     assert close_result.persisted_counts["v12_decision_evidence"] == 2
@@ -164,6 +170,46 @@ def test_v12_decision_pipeline_refuses_missing_market_mid_without_fake_pnl(tmp_p
     assert result.paper_results[0].equity_usdt == engine.config.starting_cash_usdt
     assert len(engine.positions) == 0
     assert store.count("v12_decision_evidence") == 1
+
+
+def test_v12_default_funding_is_unknown_and_blocks_entry_without_partial_edge():
+    assert V12DecisionPipelineConfig().funding_estimate_bps is None
+    config = replace(
+        _cfg(),
+        funding_estimate_bps=None,
+    )
+    result = run_v12_decision_pipeline(
+        V12DecisionPipelineInput(
+            wallet=WALLET,
+            observed_at_ms=1_700_000_000_200,
+            market_mids={"HYPE": 100.5},
+            leader_expected_edge_bps_by_coin={"HYPE": 80.0},
+            run_context=RunContext.TEST_FIXTURE,
+            execution_truth_by_coin={"HYPE": _book(100.5, 1_700_000_000_200)},
+            raw_fills=(
+                {
+                    "coin": "HYPE",
+                    "dir": "Open Long",
+                    "side": "B",
+                    "sz": "0.5",
+                    "px": "100",
+                    "time": 1_700_000_000_000,
+                    "startPosition": "0",
+                    "tid": "open-funding-unknown",
+                },
+            ),
+        ),
+        config=config,
+        paper_engine=PaperEngine(config=config.paper_config),
+    )
+
+    estimate = result.edge_estimates[result.leader_deltas[0].delta_id]
+    assert estimate.measurable is False
+    assert estimate.net_edge_bps is None
+    assert "FUNDING_UNKNOWN" in estimate.reason_codes
+    assert result.paper_results[0].accepted is False
+    assert result.paper_results[0].trade is not None
+    assert result.paper_results[0].trade.action == "NO_TRADE"
 
 
 def test_v12_never_uses_a_case_folded_mid_for_a_different_native_symbol(tmp_path):

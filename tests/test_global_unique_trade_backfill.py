@@ -308,9 +308,9 @@ def test_bounded_scan_resumes_to_complete_global_count(tmp_path, monkeypatch):
     monkeypatch.setattr(
         global_counts,
         "_iter_trade_scan_rows",
-        lambda _path: ([dict(row) for row in rows], len(rows), [], 0),
+        lambda _path: ([dict(row) for row in rows], len(rows), [], 0, "0" * 64),
     )
-    monkeypatch.setattr(global_counts, "_patch_index_streaming", lambda *_args: None)
+    monkeypatch.setattr(global_counts, "_patch_index_streaming", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(global_counts, "_persist_manifest_unique_counts", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(global_counts, "_scan_candidate", fake_scan)
     monkeypatch.setattr(sys, "argv", ["scan", "--limit", "1", "--workers", "1"])
@@ -318,6 +318,7 @@ def test_bounded_scan_resumes_to_complete_global_count(tmp_path, monkeypatch):
     global_counts.main()
     first = json.loads(global_counts.PATCH_PATH.read_text(encoding="utf-8"))
     assert first["coverage_complete"] is False
+    assert first["source_index_sha256"] == "0" * 64
     assert first["remaining_candidate_shards"] == 1
     assert first["global_unique_trade_count"] is None
 
@@ -325,6 +326,7 @@ def test_bounded_scan_resumes_to_complete_global_count(tmp_path, monkeypatch):
     final = json.loads(global_counts.PATCH_PATH.read_text(encoding="utf-8"))
     assert scanned_ids == ["a", "b"]
     assert final["schema"] == SCHEMA_V5
+    assert final["source_index_sha256"] == "0" * 64
     assert final["counts"]["a"] == ["a" * 64, 2, 2, 2, 0, True]
     assert final["counts"]["b"] == ["b" * 64, 2, 2, 1, 1, True]
     assert global_unique_count_rows(final)["b"]["cross_shard_overlap_count"] == 1
@@ -363,9 +365,11 @@ def test_parallel_scan_merges_in_dataset_order_despite_completion_order(tmp_path
         monkeypatch.setattr(
             global_counts,
             "_iter_trade_scan_rows",
-            lambda _path: ([dict(row) for row in rows], len(rows), [], 0),
+            lambda _path: ([dict(row) for row in rows], len(rows), [], 0, "0" * 64),
         )
-        monkeypatch.setattr(global_counts, "_patch_index_streaming", lambda *_args: None)
+        monkeypatch.setattr(
+            global_counts, "_patch_index_streaming", lambda *_args, **_kwargs: None,
+        )
         monkeypatch.setattr(global_counts, "_persist_manifest_unique_counts", lambda *_args, **_kwargs: None)
 
         def fake_scan(row, temporary_root, *, delay_map=delays, identity_map=identities_by_id):
@@ -406,9 +410,9 @@ def test_parallel_scan_stops_checkpoint_at_first_failed_dataset(tmp_path, monkey
     monkeypatch.setattr(
         global_counts,
         "_iter_trade_scan_rows",
-        lambda _path: ([dict(row) for row in rows], len(rows), [], 0),
+        lambda _path: ([dict(row) for row in rows], len(rows), [], 0, "0" * 64),
     )
-    monkeypatch.setattr(global_counts, "_patch_index_streaming", lambda *_args: None)
+    monkeypatch.setattr(global_counts, "_patch_index_streaming", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(global_counts, "_persist_manifest_unique_counts", lambda *_args, **_kwargs: None)
 
     def fake_scan(row, temporary_root):
@@ -469,22 +473,26 @@ def test_streaming_index_patch_updates_partitioned_catalog_without_rehydrating(t
         "schema": "alina.data_index.v1",
         "release_repository_default": "owner/repo",
         "shards": [
-            {"dataset_id": "a", "family": "trades", "unique_trade_count": None,
+            {"dataset_id": "a", "family": "trades", "sha256": "a" * 64,
+             "unique_trade_count": None,
              "fixture_padding": "x" * 600},
-            {"dataset_id": "b", "family": "trades", "unique_trade_count": None,
+            {"dataset_id": "b", "family": "trades", "sha256": "b" * 64,
+             "unique_trade_count": None,
              "fixture_padding": "x" * 600},
         ],
     }
     save_index(index_path, logical, max_inline_bytes=1024, max_partition_bytes=1024)
     original_root = json.loads(index_path.read_text(encoding="utf-8"))
+    source_root_sha256 = global_counts.hashlib.sha256(index_path.read_bytes()).hexdigest()
     original_parts = {
         descriptor["path"]: (tmp_path / descriptor["path"]).read_bytes()
         for descriptor in original_root["partitions"]
     }
 
     global_counts._patch_index_streaming(index_path, {
-        "a": {"unique_trade_count": 7, "unique_trade_count_exact": True},
-    })
+        "a": {"asset_sha256": "a" * 64, "unique_trade_count": 7,
+              "unique_trade_count_exact": True},
+    }, expected_root_sha256=source_root_sha256)
 
     updated = read_index(index_path)
     assert updated["shards"][0]["unique_trade_count"] == 7
@@ -506,9 +514,11 @@ def test_streaming_index_patch_root_failure_preserves_old_catalog(tmp_path, monk
     original = {
         "schema": "alina.data_index.v1",
         "shards": [
-            {"dataset_id": "a", "family": "trades", "unique_trade_count": None,
+            {"dataset_id": "a", "family": "trades", "sha256": "a" * 64,
+             "unique_trade_count": None,
              "fixture_padding": "x" * 600},
-            {"dataset_id": "b", "family": "trades", "unique_trade_count": None,
+            {"dataset_id": "b", "family": "trades", "sha256": "b" * 64,
+             "unique_trade_count": None,
              "fixture_padding": "x" * 600},
         ],
     }
@@ -528,7 +538,8 @@ def test_streaming_index_patch_root_failure_preserves_old_catalog(tmp_path, monk
     monkeypatch.setattr(os, "replace", fail_root_replace)
     with pytest.raises(OSError, match="simulated root publication interruption"):
         global_counts._patch_index_streaming(index_path, {
-            "a": {"unique_trade_count": 5, "unique_trade_count_exact": True},
+            "a": {"asset_sha256": "a" * 64, "unique_trade_count": 5,
+                  "unique_trade_count_exact": True},
         })
 
     assert index_path.read_bytes() == original_root
@@ -537,16 +548,228 @@ def test_streaming_index_patch_root_failure_preserves_old_catalog(tmp_path, monk
         assert (tmp_path / relative).read_bytes() == content
 
 
+@pytest.mark.parametrize("partitioned", [False, True])
+def test_streaming_index_patch_rejects_stale_asset_evidence(tmp_path, partitioned):
+    index_path = tmp_path / "DATA_INDEX.json"
+    logical = {
+        "schema": "alina.data_index.v1",
+        "shards": [
+            {"dataset_id": "a", "family": "trades", "sha256": "a" * 64,
+             "unique_trade_count": None, "fixture_padding": "x" * 1200},
+        ],
+    }
+    if partitioned:
+        save_index(index_path, logical, max_inline_bytes=1024, max_partition_bytes=2048)
+    else:
+        index_path.write_text(
+            json.dumps(logical, sort_keys=True, separators=(",", ":")) + "\n",
+            encoding="utf-8",
+        )
+    original_root = index_path.read_bytes()
+
+    with pytest.raises(ValueError, match="GLOBAL_UNIQUE_STALE_ASSET_EVIDENCE"):
+        global_counts._patch_index_streaming(index_path, {
+            "a": {"asset_sha256": "f" * 64, "unique_trade_count": 7,
+                  "unique_trade_count_exact": True},
+        })
+
+    assert index_path.read_bytes() == original_root
+    assert read_index(index_path)["shards"] == logical["shards"]
+
+
+def test_streaming_index_patch_refuses_catalog_changed_after_scan(tmp_path):
+    index_path = tmp_path / "DATA_INDEX.json"
+    logical = {
+        "schema": "alina.data_index.v1",
+        "shards": [
+            {"dataset_id": "a", "family": "trades", "sha256": "a" * 64,
+             "unique_trade_count": None},
+        ],
+    }
+    index_path.write_text(json.dumps(logical), encoding="utf-8")
+    scan_root_sha256 = global_counts.hashlib.sha256(index_path.read_bytes()).hexdigest()
+    concurrent = {**logical, "collection_epoch": 4}
+    index_path.write_text(json.dumps(concurrent), encoding="utf-8")
+    current_root = index_path.read_bytes()
+
+    with pytest.raises(ValueError, match="GLOBAL_UNIQUE_SOURCE_INDEX_CHANGED_BEFORE_PUBLISH"):
+        global_counts._patch_index_streaming(
+            index_path,
+            {"a": {"asset_sha256": "a" * 64, "unique_trade_count": 1}},
+            expected_root_sha256=scan_root_sha256,
+        )
+
+    assert index_path.read_bytes() == current_root
+
+
+def test_trade_scan_rows_rejects_index_change_during_enumeration(tmp_path, monkeypatch):
+    index_path = tmp_path / "DATA_INDEX.json"
+    original = {"schema": "alina.data_index.v1", "shards": []}
+    index_path.write_text(json.dumps(original), encoding="utf-8")
+    concurrent = {**original, "collection_epoch": 5}
+    real_iter_index_rows = global_counts.iter_index_rows
+
+    def enumerate_then_simulate_collection_update(path):
+        yield from real_iter_index_rows(path)
+        index_path.write_text(json.dumps(concurrent), encoding="utf-8")
+
+    monkeypatch.setattr(global_counts, "iter_index_rows", enumerate_then_simulate_collection_update)
+
+    with pytest.raises(ValueError, match="GLOBAL_UNIQUE_SOURCE_INDEX_CHANGED_DURING_SCAN"):
+        global_counts._iter_trade_scan_rows(index_path)
+
+
+def test_trade_scan_rows_returns_hash_of_exact_source_root(tmp_path):
+    index_path = tmp_path / "DATA_INDEX.json"
+    source_bytes = json.dumps(
+        {"schema": "alina.data_index.v1", "shards": []},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    index_path.write_bytes(source_bytes)
+
+    result = global_counts._iter_trade_scan_rows(index_path)
+
+    assert result[:4] == ([], 0, [], 0)
+    assert result[4] == global_counts.hashlib.sha256(source_bytes).hexdigest()
+
+
+def test_streaming_index_patch_does_not_overwrite_concurrent_root_update(
+    tmp_path, monkeypatch,
+):
+    index_path = tmp_path / "DATA_INDEX.json"
+    original = {
+        "schema": "alina.data_index.v1",
+        "shards": [
+            {"dataset_id": "a", "family": "trades", "sha256": "a" * 64,
+             "unique_trade_count": None,
+             "fixture_padding": "x" * 600},
+            {"dataset_id": "b", "family": "trades", "sha256": "b" * 64,
+             "unique_trade_count": None,
+             "fixture_padding": "x" * 600},
+        ],
+    }
+    save_index(index_path, original, max_inline_bytes=1024, max_partition_bytes=1024)
+    original_partitions = json.loads(index_path.read_text(encoding="utf-8"))["partitions"]
+    original_paths = [descriptor["path"] for descriptor in original_partitions]
+    real_publish = global_counts._publish_immutable_partition
+    concurrent_update_applied = False
+
+    def publish_then_simulate_collector_update(destination, content):
+        nonlocal concurrent_update_applied
+        result = real_publish(destination, content)
+        concurrent_root = json.loads(index_path.read_text(encoding="utf-8"))
+        concurrent_root["collection_epoch"] = 99
+        index_path.write_text(
+            json.dumps(concurrent_root, sort_keys=True, separators=(",", ":")) + "\n",
+            encoding="utf-8",
+        )
+        concurrent_update_applied = True
+        return result
+
+    monkeypatch.setattr(
+        global_counts, "_publish_immutable_partition", publish_then_simulate_collector_update,
+    )
+
+    with pytest.raises(ValueError, match="PARTITION_PARITY_CONCURRENT_ROOT_CHANGE"):
+        global_counts._patch_index_streaming(index_path, {
+            "a": {"asset_sha256": "a" * 64, "unique_trade_count": 7,
+                  "unique_trade_count_exact": True},
+        })
+
+    current_root = json.loads(index_path.read_text(encoding="utf-8"))
+    assert concurrent_update_applied is True
+    assert current_root["collection_epoch"] == 99
+    assert [descriptor["path"] for descriptor in current_root["partitions"]] == original_paths
+    reconstructed = read_index(index_path)
+    assert reconstructed["collection_epoch"] == 99
+    assert reconstructed["shards"] == original["shards"]
+
+
+@pytest.mark.parametrize("manifest_sha, should_update", [
+    ("a" * 64, True),
+    ("b" * 64, False),
+])
+def test_manifest_unique_count_write_requires_matching_asset_hash(
+    tmp_path, monkeypatch, manifest_sha, should_update,
+):
+    monkeypatch.setattr(global_counts, "ROOT", tmp_path)
+    manifest_path = tmp_path / "datasets" / "manifest.json"
+    manifest_path.parent.mkdir()
+    original = {
+        "dataset_id": "dataset-a",
+        "sha256": manifest_sha,
+        "quality_status": "SAFE",
+    }
+    manifest_path.write_text(json.dumps(original), encoding="utf-8")
+
+    global_counts._persist_manifest_unique_counts(
+        {
+            "dataset_id": "dataset-a",
+            "manifest_path": "datasets/manifest.json",
+            "sha256": "a" * 64,
+        },
+        unique_count=3,
+        exact=True,
+    )
+
+    observed = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if should_update:
+        assert observed["unique_trade_count"] == 3
+        assert observed["unique_trade_count_exact"] is True
+    else:
+        assert manifest_path.read_text(encoding="utf-8") == json.dumps(original)
+
+
+def test_manifest_unique_count_write_preserves_concurrent_collector_update(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.setattr(global_counts, "ROOT", tmp_path)
+    manifest_path = tmp_path / "datasets" / "manifest.json"
+    manifest_path.parent.mkdir()
+    original = {"dataset_id": "dataset-a", "sha256": "a" * 64, "quality_status": "SAFE"}
+    concurrent = {**original, "quality_status": "UPDATED_BY_COLLECTOR"}
+    original_bytes = json.dumps(original).encode("utf-8")
+    concurrent_bytes = json.dumps(concurrent).encode("utf-8")
+    manifest_path.write_bytes(original_bytes)
+    real_read_bytes = Path.read_bytes
+    read_count = 0
+
+    def update_between_read_and_replace(path):
+        nonlocal read_count
+        if path == manifest_path:
+            read_count += 1
+            if read_count == 2:
+                path.write_bytes(concurrent_bytes)
+                return concurrent_bytes
+        return real_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", update_between_read_and_replace)
+    global_counts._persist_manifest_unique_counts(
+        {
+            "dataset_id": "dataset-a",
+            "manifest_path": "datasets/manifest.json",
+            "sha256": "a" * 64,
+        },
+        unique_count=3,
+        exact=True,
+    )
+
+    assert real_read_bytes(manifest_path) == concurrent_bytes
+    assert json.loads(real_read_bytes(manifest_path)).get("unique_trade_count") is None
+
+
 def test_streaming_index_patch_repartitions_when_evidence_grows_rows(tmp_path):
     index_path = tmp_path / "DATA_INDEX.json"
     logical = {
         "schema": "alina.data_index.v1",
         "shards": [
-            {"dataset_id": f"dataset-{number}", "family": "trades", "note": "x" * 40}
+            {"dataset_id": f"dataset-{number}", "family": "trades",
+             "sha256": f"{number:x}" * 64, "note": "x" * 40}
             for number in range(6)
         ],
     }
-    root, parts = partition_index(logical, max_partition_bytes=256)
+    root, parts = partition_index(logical, max_partition_bytes=400)
     (tmp_path / "data-index-parts").mkdir()
     index_path.write_bytes(
         (json.dumps(root, sort_keys=True, separators=(",", ":")) + "\n").encode()
@@ -558,6 +781,7 @@ def test_streaming_index_patch_repartitions_when_evidence_grows_rows(tmp_path):
 
     global_counts._patch_index_streaming(index_path, {
         f"dataset-{number}": {
+            "asset_sha256": f"{number:x}" * 64,
             "unique_trade_count": number,
             "unique_trade_count_exact": True,
             "identity_version": "v3",

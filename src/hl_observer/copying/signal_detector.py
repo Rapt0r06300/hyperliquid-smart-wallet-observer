@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import math
 import os
+
 try:
     from enum import StrEnum
 except ImportError:
     from enum import Enum
-    class StrEnum(str, Enum): pass
+
+    class StrEnum(str, Enum):
+        pass
 
 from pydantic import BaseModel, Field
 
@@ -34,22 +38,27 @@ class CopySourceMode(StrEnum):
 
 
 class CopySignalTuning(BaseModel):
-    # Les leaders Hyperliquid font typiquement 0.5–1% de mouvement.
-    # 50 bps = atténuation conservatrice.
-    leader_expected_move_bps: float = 50.0
-    cluster_confirmation_bps: float = 0.0
-    orderbook_confirmation_bps: float = 0.0
-    regime_bonus_bps: float = 0.0
-    # Frais taker LUS à la source unique (4,5 bps au palier de base). La valeur 4,0 recopiée ici
-    # sous-estimait le coût de 0,5 bps par jambe et rendait l'avantage restant trop favorable.
-    taker_fee_bps: float = TAKER_PERP_BPS
-    spread_cost_bps: float = 3.0
-    estimated_slippage_bps: float = 5.0
-    latency_decay_bps: float = 2.0
-    adverse_selection_bps: float = 2.0   # réduit (was 3)
-    funding_expected_cost_bps: float = 0.0
-    orderbook_depth_usdc: float = 25_000.0
-    # Edge net attendu = 50 - (4+3+5+2+2) = 34 bps >> min 5 bps
+    # No measured forecast is available by default; a fixed positive edge would
+    # manufacture paper candidates from an unsupported assumption.
+    leader_expected_move_bps: float = Field(0.0, allow_inf_nan=False)
+    cluster_confirmation_bps: float = Field(0.0, allow_inf_nan=False)
+    orderbook_confirmation_bps: float = Field(0.0, allow_inf_nan=False)
+    regime_bonus_bps: float = Field(0.0, allow_inf_nan=False)
+    # Per execution leg; the edge gate charges entry and exit against ReplayConfig.
+    taker_fee_bps: float = Field(TAKER_PERP_BPS, ge=0, allow_inf_nan=False)
+    # Full spread crossing cost for a completed round trip.
+    spread_cost_bps: float = Field(3.0, ge=0, allow_inf_nan=False)
+    # Per execution leg; the edge gate charges entry and exit.
+    estimated_slippage_bps: float = Field(5.0, ge=0, allow_inf_nan=False)
+    latency_decay_bps: float = Field(2.0, ge=0, allow_inf_nan=False)
+    adverse_selection_bps: float = Field(2.0, ge=0, allow_inf_nan=False)
+    # A missing forecast is not a zero-cost assumption. Production callers
+    # must provide a finite estimate based only on admissible prior data.
+    funding_expected_cost_bps: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    # Caller-provided observed depth; caller must validate L2 provenance/freshness.
+    orderbook_depth_usdc: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    # This tuning object contains cost assumptions; it is not itself evidence
+    # that the expected move or the realized execution costs were achieved.
 
 
 class CopySignalDetectionReport(BaseModel):
@@ -92,7 +101,11 @@ def detect_copy_signals_from_deltas(
 
     for delta in deltas:
         wallet_address = str(delta.wallet_address).lower()
-        if allowed_wallets and wallet_address not in allowed_wallets:
+        # An empty eligible set means no wallet is authorized for this pass.
+        # Do not treat an empty filter as "allow all": callers may have no
+        # followed wallets or only rejected wallets, and paper candidates must
+        # remain fail-closed in both cases.
+        if wallet_address not in allowed_wallets:
             _count(no_trade, "wallet_not_followed")
             continue
         signal_type = signal_type_from_delta(delta)
@@ -106,6 +119,42 @@ def detect_copy_signals_from_deltas(
             continue
         if delta.price is None or delta.price <= 0:
             _count(no_trade, "price_missing")
+            continue
+        if not math.isfinite(cfg.leader_expected_move_bps) or cfg.leader_expected_move_bps <= 0:
+            _count(no_trade, "leader_expected_move_unmeasured")
+            continue
+        orderbook_depth_usdc = cfg.orderbook_depth_usdc
+        if (
+            orderbook_depth_usdc is None
+            or not math.isfinite(orderbook_depth_usdc)
+            or orderbook_depth_usdc <= 0
+        ):
+            _count(no_trade, "orderbook_depth_unmeasured")
+            continue
+        if cfg.funding_expected_cost_bps is None:
+            _count(no_trade, "funding_cost_unmeasured")
+            continue
+        if not math.isfinite(cfg.funding_expected_cost_bps):
+            _count(no_trade, "funding_cost_invalid")
+            continue
+        cost_inputs = (
+            cfg.taker_fee_bps,
+            cfg.spread_cost_bps,
+            cfg.estimated_slippage_bps,
+            cfg.latency_decay_bps,
+            cfg.adverse_selection_bps,
+            cfg.funding_expected_cost_bps,
+        )
+        forecast_inputs = (
+            cfg.cluster_confirmation_bps,
+            cfg.orderbook_confirmation_bps,
+            cfg.regime_bonus_bps,
+        )
+        if any(not math.isfinite(value) or value < 0 for value in cost_inputs):
+            _count(no_trade, "edge_cost_input_invalid")
+            continue
+        if any(not math.isfinite(value) for value in forecast_inputs):
+            _count(no_trade, "edge_forecast_input_invalid")
             continue
         edge = compute_edge_remaining(
             EdgeRemainingInputs(
@@ -140,7 +189,7 @@ def detect_copy_signals_from_deltas(
             estimated_spread_bps=cfg.spread_cost_bps,
             estimated_slippage_bps=cfg.estimated_slippage_bps,
             estimated_latency_decay_bps=cfg.latency_decay_bps,
-            orderbook_depth_usdc=cfg.orderbook_depth_usdc,
+            orderbook_depth_usdc=orderbook_depth_usdc,
             crowding_score=0.0,
             exit_plan_id=f"exit:{wallet_address}:{delta.coin}",
             decision=edge.decision,
@@ -151,7 +200,7 @@ def detect_copy_signals_from_deltas(
             RiskContext(
                 spread_bps=cfg.spread_cost_bps,
                 estimated_slippage_bps=cfg.estimated_slippage_bps,
-                orderbook_depth_usdc=cfg.orderbook_depth_usdc,
+                orderbook_depth_usdc=orderbook_depth_usdc,
                 wallet_score=signal.wallet_score,
                 signal_score=scored.score,
                 edge_remaining_bps=edge.edge_remaining_bps,

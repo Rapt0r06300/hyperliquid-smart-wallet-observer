@@ -38,8 +38,10 @@ def _fixture(tmp_path, monkeypatch):
     monkeypatch.setattr(module, "INDEX", index)
     monkeypatch.setattr(module, "CATALOG", data_catalog)
     monkeypatch.setattr(module, "REGISTRY", registry)
-    monkeypatch.setattr(module, "_publish_canonical_index",
-                        lambda path, data: path.write_text(json.dumps(data)))
+    monkeypatch.setattr(
+        module, "_publish_canonical_index",
+        lambda path, data, **_kwargs: path.write_text(json.dumps(data)),
+    )
     return safe, index, data_catalog, registry
 
 
@@ -72,11 +74,37 @@ def test_migration_preserves_old_safe_receipt_by_sha256(tmp_path, monkeypatch):
     assert active_dataset["source_index_sha256"] == hashlib.sha256(index.read_bytes()).hexdigest()
 
 
+def test_migration_refuses_to_overwrite_concurrent_index_change(tmp_path, monkeypatch):
+    safe, index, _, _ = _fixture(tmp_path, monkeypatch)
+    original_safe = safe.read_bytes()
+    source_sha256 = module.index_file_sha256(index)
+
+    def race_before_publish(path, data, *, expected_source_sha256=None):
+        current = json.loads(path.read_text())
+        current["collector_generation"] = "newer"
+        path.write_text(json.dumps(current))
+        assert expected_source_sha256 == source_sha256
+        if module.index_file_sha256(path) != expected_source_sha256:
+            raise ValueError("CANONICAL_INDEX_SOURCE_CHANGED_BEFORE_PUBLISH")
+        path.write_text(json.dumps(data))
+
+    monkeypatch.setattr(module, "_publish_canonical_index", race_before_publish)
+    with pytest.raises(ValueError, match="CANONICAL_INDEX_SOURCE_CHANGED_BEFORE_PUBLISH"):
+        module.migrate()
+
+    saved = json.loads(index.read_text())
+    assert saved["collector_generation"] == "newer"
+    assert saved["shards"][0]["quality_status"] == "SAFE"
+    assert safe.read_bytes() == original_safe
+
+
 def test_failed_index_publication_keeps_original_safe_evidence(tmp_path, monkeypatch):
     safe, index, _, _ = _fixture(tmp_path, monkeypatch)
     original = safe.read_bytes()
-    monkeypatch.setattr(module, "_publish_canonical_index",
-                        lambda *_args: (_ for _ in ()).throw(ValueError("test index limit")))
+    monkeypatch.setattr(
+        module, "_publish_canonical_index",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("test index limit")),
+    )
     with pytest.raises(ValueError, match="test index limit"):
         module.migrate()
     assert safe.read_bytes() == original

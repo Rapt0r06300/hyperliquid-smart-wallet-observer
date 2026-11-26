@@ -568,6 +568,7 @@ def save_index(
     *,
     max_inline_bytes: int = 85 * 1024 * 1024,
     max_partition_bytes: int = MAX_PARTITION_BYTES,
+    expected_source_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Write complete index in small inline form or SHA-verified partitions.
 
@@ -585,6 +586,10 @@ def save_index(
     current_partitioned = False
     existing: dict[str, Any] = {}
     original_root_bytes = index_path.read_bytes() if index_path.is_file() else None
+    if (expected_source_sha256 is not None
+            and (original_root_bytes is None
+                 or hashlib.sha256(original_root_bytes).hexdigest() != expected_source_sha256)):
+        raise ValueError("PARTITION_PARITY_SOURCE_ROOT_CHANGED")
     if index_path.is_file():
         existing = json.loads(original_root_bytes)
         if not isinstance(existing, dict):
@@ -609,6 +614,8 @@ def save_index(
                 handle.write(inline)
                 handle.flush()
                 os.fsync(handle.fileno())
+            if index_path.is_file() and index_path.read_bytes() != original_root_bytes:
+                raise ValueError("PARTITION_PARITY_CONCURRENT_ROOT_CHANGE")
             os.replace(temporary, index_path)
         finally:
             temporary.unlink(missing_ok=True)

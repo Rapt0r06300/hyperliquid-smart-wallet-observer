@@ -113,3 +113,36 @@ def test_la_verification_sha256_parallele_ecarte_toujours_un_shard_modifie(tmp_p
     assert len(choisis["bbo"]) == 4
     assert [e["reason"] for e in ecartes] == ["sha256_different_de_l_index"]
     assert ecartes[0]["shard"] == index[2]["shard"]
+
+
+def _funding(dossier: Path, nom: str, lignes: list[dict]) -> dict:
+    return _shard(dossier, nom, lignes)
+
+
+def test_le_cache_du_funding_rend_exactement_les_memes_tuples(tmp_path):
+    """25/11/2026 : 102 s de JSON (12,5 M lignes) refaites par 4 etudes. Memes tuples, memes types, meme ordre."""
+    exact = [{"coin": "BTC", "ts_ms": 1_795_000_000_000 + i, "funding": 1e-5 * i} for i in range(50)]
+    exact.append({"coin": "ETH", "ts_ms": 1_795_000_000_500, "funding": None})          # ignoree
+    melange = [{"coin": "SOL", "ts_ms": 1_795_000_000_000, "funding": 0},                 # int : shard relu
+               {"coin": "", "ts_ms": None, "funding": "0.0001"},                          # str et ts absent
+               {"funding": 2e-6}]                                                         # coin absent
+    shards = [_funding(tmp_path / "f", "asset_ctx_a", exact), _funding(tmp_path / "f", "asset_ctx_b", melange)]
+    direct = list(E.load_funding(shards))
+    for workers in (1, 2):
+        cache = tmp_path / f"cache{workers}"
+        premier = list(E.load_funding(shards, cache_dir=cache, workers=workers))
+        relu = list(E.load_funding(shards, cache_dir=cache, workers=workers))
+        assert premier == direct and relu == direct
+        assert [tuple(map(type, x)) for x in relu] == [tuple(map(type, x)) for x in direct]
+
+
+def test_le_funding_n_est_relu_que_pour_un_shard_marque_a_relire(tmp_path, monkeypatch):
+    exact = [{"coin": "BTC", "ts_ms": 1_795_000_000_000 + i, "funding": 1e-5} for i in range(5)]
+    melange = [{"coin": "SOL", "ts_ms": 1_795_000_000_000, "funding": 0}]
+    shards = [_funding(tmp_path / "f", "a", exact), _funding(tmp_path / "f", "b", melange)]
+    list(E.load_funding(shards, cache_dir=tmp_path / "cache", workers=1))
+    lus: list[str] = []
+    vraie = E._lire_funding
+    monkeypatch.setattr(E, "_lire_funding", lambda path: (lus.append(Path(path).name), vraie(path))[1])
+    list(E.load_funding(shards, cache_dir=tmp_path / "cache", workers=1))
+    assert lus == ["b.jsonl.gz"]                                  # seul le shard non exact est relu

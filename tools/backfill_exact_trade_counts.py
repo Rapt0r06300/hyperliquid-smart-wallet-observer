@@ -13,24 +13,29 @@ import gzip
 import hashlib
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
-import threading
 import tempfile
+import threading
 import zipfile
-from typing import Any, Mapping
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any
 from urllib.parse import quote
 
 try:
     from tools.index_run_manifest import (
-        hydrate_default_release_repository, compact_index_rows,
-        CANONICAL_DATA_REPOSITORY, _publish_canonical_index,
+        CANONICAL_DATA_REPOSITORY,
+        _publish_canonical_index,
+        compact_index_rows,
+        hydrate_default_release_repository,
     )
 except ModuleNotFoundError:
     from index_run_manifest import (
-        hydrate_default_release_repository, compact_index_rows,
-        CANONICAL_DATA_REPOSITORY, _publish_canonical_index,
+        CANONICAL_DATA_REPOSITORY,
+        _publish_canonical_index,
+        compact_index_rows,
+        hydrate_default_release_repository,
     )
 
 try:
@@ -510,14 +515,27 @@ def _download(row: Mapping[str, Any], destination: Path) -> Path:
 
 
 def _persist_manifest_counts(row: Mapping[str, Any], result: Mapping[str, Any]) -> None:
-    manifest_path = ROOT / str(row.get("manifest_path") or "")
-    if not manifest_path.is_file():
+    manifest_candidate = ROOT / str(row.get("manifest_path") or "")
+    if manifest_candidate.is_symlink():
+        return
+    manifest_path = manifest_candidate.resolve()
+    if not manifest_path.is_relative_to(ROOT.resolve()) or not manifest_path.is_file():
         return
     try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        original_manifest_bytes = manifest_path.read_bytes()
+        manifest = json.loads(original_manifest_bytes)
     except (OSError, ValueError):
         return
     if not isinstance(manifest, dict):
+        return
+    expected_sha = str(row.get("sha256") or "").lower()
+    result_sha = str(result.get("asset_sha256") or "").lower()
+    manifest_sha = str(manifest.get("sha256") or "").lower()
+    if len(expected_sha) != 64 or result_sha != expected_sha or manifest_sha != expected_sha:
+        return
+    manifest_dataset_id = manifest.get("dataset_id")
+    row_dataset_id = str(row.get("dataset_id") or "")
+    if manifest_dataset_id is not None and str(manifest_dataset_id) != row_dataset_id:
         return
     for key in (
         "trade_count",
@@ -530,12 +548,22 @@ def _persist_manifest_counts(row: Mapping[str, Any], result: Mapping[str, Any]) 
     ):
         if key in result:
             manifest[key] = result[key]
-    temporary = manifest_path.with_suffix(manifest_path.suffix + ".tmp")
-    temporary.write_text(
-        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{manifest_path.name}.trade-count-",
+        suffix=".tmp",
+        dir=manifest_path.parent,
     )
-    os.replace(temporary, manifest_path)
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        if manifest_path.read_bytes() != original_manifest_bytes:
+            return
+        os.replace(temporary, manifest_path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _load_patch() -> dict[str, Any]:
@@ -605,13 +633,16 @@ def _candidate(row: Mapping[str, Any], counts: Mapping[str, Any]) -> bool:
         if not needs_bybit_v3:
             return False
 
-    if row.get("trade_count_exact") is True and int(row.get("trade_count") or 0) > 0:
-        if not (
+    if (
+        row.get("trade_count_exact") is True
+        and int(row.get("trade_count") or 0) > 0
+        and not (
             str(row.get("venue") or "").lower() == "bybit"
             and isinstance(existing, Mapping)
             and str(existing.get("unique_identity_method") or "") != IDENTITY_VERSION
-        ):
-            return False
+        )
+    ):
+        return False
 
     return bool(
         row.get("release_repository")
@@ -644,7 +675,11 @@ def _candidate_priority(row: Mapping[str, Any]) -> tuple[int, int, str]:
 
 
 def backfill(limit: int) -> dict[str, Any]:
+    source_root_bytes = INDEX_PATH.read_bytes()
+    source_index_sha256 = hashlib.sha256(source_root_bytes).hexdigest()
     index = read_index(INDEX_PATH)
+    if INDEX_PATH.read_bytes() != source_root_bytes:
+        raise BackfillError("DATA_INDEX_CHANGED_DURING_READ")
     rows = hydrate_default_release_repository(index)
     index["shards"] = rows
     patch_doc = _load_patch()
@@ -706,13 +741,18 @@ def backfill(limit: int) -> dict[str, Any]:
     if updated or restored_from_patch:
         index["release_repository_default"] = CANONICAL_DATA_REPOSITORY
         index["shards"] = compact_index_rows(index, rows)
-        _publish_canonical_index(INDEX_PATH, index)
+        _publish_canonical_index(
+            INDEX_PATH,
+            index,
+            expected_source_sha256=source_index_sha256,
+        )
     return {
         "updated": updated,
         "restored_from_patch": restored_from_patch,
         "attempted": len(candidates),
         "failed": failed,
         "remaining_candidate_shards": patch_doc["remaining_candidate_shards"],
+        "source_index_sha256": source_index_sha256,
     }
 
 

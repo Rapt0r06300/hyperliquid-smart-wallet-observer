@@ -12,9 +12,11 @@ REPLAY/PAPER uniquement : aucune donnée réseau, aucun ordre réel.
 from __future__ import annotations
 
 import json
+import math
 import time
+from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any
 
 from hl_observer.backtesting.ab_flag_replay import DEFAULT_COST_BPS, marks_by_coin, net_baseline_seul
 from hl_observer.backtesting.boucle_objectif_replay import boucle_objectif
@@ -37,11 +39,26 @@ STRICT_STATE_RELPATH = Path("runtime") / "replay" / "recherche_adaptative_strict
 STRICT_REPORT_RELPATH = Path("runtime") / "replay" / "RECHERCHE_ADAPTATIVE_STRICTE.json"
 
 
-def _net_arm_a(payload: dict[str, Any]) -> float:
+def _finite_number(value: Any) -> float | None:
     try:
-        return float((payload.get("arm_a") or {}).get("net_total_usd") or 0.0)
-    except (TypeError, ValueError):
-        return 0.0
+        number = None if value is None or isinstance(value, bool) else float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if number is not None and math.isfinite(number) else None
+
+
+def _net_arm_a(payload: dict[str, Any]) -> float | None:
+    arm_a = payload.get("arm_a")
+    return _finite_number(arm_a.get("net_total_usd")) if isinstance(arm_a, dict) else None
+
+
+def _measured_split_sum(row: dict[str, Any]) -> float | None:
+    nets = row.get("nets") or {}
+    if not isinstance(nets, dict):
+        return None
+    first = _finite_number(nets.get("moitie_1"))
+    second = _finite_number(nets.get("moitie_2"))
+    return first + second if first is not None and second is not None else None
 
 
 def cribler_train_only(
@@ -75,6 +92,7 @@ def cribler_train_only(
     retenues: list[dict[str, Any]] = []
     screened = 0
     failures_open = 0
+    unmeasurable_open = 0
     train_rows_max = 0
 
     for i, cfg in enumerate(liste, 1):
@@ -105,7 +123,12 @@ def cribler_train_only(
                 horizon_min=horizon,
                 cost_bps=DEFAULT_COST_BPS,
             )
-            if _net_arm_a(result) > 0.0:
+            net = _net_arm_a(result)
+            if net is None:
+                # Un résultat absent n'est pas une perte : le crible ne peut pas juger.
+                unmeasurable_open += 1
+                retenues.append(cfg)
+            elif net > 0.0:
                 retenues.append(cfg)
         except Exception:  # noqa: BLE001 - fail-open uniquement pour le crible, jamais la porte finale.
             failures_open += 1
@@ -113,8 +136,7 @@ def cribler_train_only(
 
         if i % 25 == 0:
             print(
-                "    crible TRAIN strict %d/%d (%d retenues)"
-                % (i, len(liste), len(retenues)),
+                f"    crible TRAIN strict {i}/{len(liste)} ({len(retenues)} retenues)",
                 flush=True,
             )
 
@@ -124,6 +146,7 @@ def cribler_train_only(
         "retained_configs": len(retenues),
         "screened_configs": screened,
         "screen_fail_open": failures_open,
+        "screen_unmeasurable_open": unmeasurable_open,
         "max_train_rows_used_per_bucket": train_rows_max,
         "validation_rows_seen": 0,
         "validation_used_for_selection": False,
@@ -159,8 +182,7 @@ def chercher_copy_strict(
     base_configs = list(configs if configs is not None else grille_large())
     survivors, scout = cribler_train_only(d, base_configs, screen=evaluer_ab)
     print(
-        "  crible TRAIN-only: %d/%d configs gardees; validation vue=0"
-        % (len(survivors), len(base_configs)),
+        f"  crible TRAIN-only: {len(survivors)}/{len(base_configs)} configs gardees; validation vue=0",
         flush=True,
     )
 
@@ -176,16 +198,13 @@ def chercher_copy_strict(
         vivants = 0
         for candidate in nearby:
             replay = evaluer_sur_moities(d, candidate, evaluer_ab=evaluer_ab)
-            net = float((replay["moitie_1"].get("net_total_usd") or 0.0)) + float(
-                (replay["moitie_2"].get("net_total_usd") or 0.0)
+            net = float(replay["moitie_1"].get("net_total_usd") or 0.0) + float(
+                replay["moitie_2"].get("net_total_usd") or 0.0
             )
             vivants += int(net > 0.0)
         stable = vivants / len(nearby) >= FRACTION_VOISINS_VIVANTS
         if not stable:
-            rapport["instabilite"] = "REJETE_INSTABLE: %d/%d voisins vivants" % (
-                vivants,
-                len(nearby),
-            )
+            rapport["instabilite"] = f"REJETE_INSTABLE: {vivants}/{len(nearby)} voisins vivants"
         return stable
 
     state = root_path / STRICT_STATE_RELPATH
@@ -201,22 +220,16 @@ def chercher_copy_strict(
     )
 
     if raffiner and result.get("essais"):
-        def net12(row: dict[str, Any]) -> float:
-            nets = row.get("nets") or {}
-            return float(nets.get("moitie_1") or 0.0) + float(nets.get("moitie_2") or 0.0)
-
         seeds = [row["config"] for row in result["essais"] if row.get("verdict") == "PROMU"]
+        measured_rejections = [
+            (row, score)
+            for row in result["essais"]
+            if row.get("verdict") == "REJETE"
+            if (score := _measured_split_sum(row)) is not None
+        ]
         seeds += [
             row["config"]
-            for row in sorted(
-                (
-                    row
-                    for row in result["essais"]
-                    if row.get("verdict") == "REJETE" and row.get("nets")
-                ),
-                key=net12,
-                reverse=True,
-            )[:3]
+            for row, _score in sorted(measured_rejections, key=lambda item: item[1], reverse=True)[:3]
         ]
         refined: list[dict[str, Any]] = []
         seen: set[str] = set()

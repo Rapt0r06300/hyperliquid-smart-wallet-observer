@@ -6,6 +6,7 @@ from hl_observer.cli import app
 from hl_observer.config.loader import load_settings
 from hl_observer.storage.database import create_session_factory, create_sqlite_engine, init_db
 from hl_observer.storage.models import MarketSnapshot, SourceHealth, TopWallet, WalletCandidateModel
+from hl_observer.utils.time import now_ms
 from hl_observer.wallets.public_trades_live import (
     ingest_public_trade_messages,
     normalize_coin_list,
@@ -13,12 +14,11 @@ from hl_observer.wallets.public_trades_live import (
     trade_payloads_from_message,
 )
 
-
 WALLET_A = "0x" + "a" * 40
 WALLET_B = "0x" + "b" * 40
 
 
-def _trade_message(coin="BTC", px="100", sz="2"):
+def _trade_message(coin="BTC", px="100", sz="2", event_time=1_700_000_000_000):
     return json.dumps(
         {
             "channel": "trades",
@@ -29,7 +29,7 @@ def _trade_message(coin="BTC", px="100", sz="2"):
                     "px": px,
                     "sz": sz,
                     "hash": "0xhash",
-                    "time": 1_700_000_000_000,
+                    "time": event_time,
                     "tid": 123,
                     "users": [WALLET_A, WALLET_B],
                 }
@@ -60,6 +60,16 @@ def test_public_trades_scan_discovers_wallets_without_info_api():
     assert result.wallet_stats[WALLET_A.lower()].coins == {"BTC", "ETH"}
 
 
+def test_public_trades_without_exchange_timestamp_are_not_counted_as_fresh_activity():
+    trade = json.loads(_trade_message())["data"][0]
+    trade.pop("time")
+    result = ingest_public_trade_messages([json.dumps({"channel": "trades", "data": [trade]})])
+
+    assert result.trades_seen == 1
+    assert not result.wallet_stats
+    assert "trade_event_timestamp_missing_or_invalid" in result.warnings
+
+
 def test_public_trades_scan_stores_candidates_and_top_wallets(tmp_path):
     db = tmp_path / "live.sqlite3"
     init_db(f"sqlite:///{db}")
@@ -74,6 +84,36 @@ def test_public_trades_scan_stores_candidates_and_top_wallets(tmp_path):
         top = session.query(TopWallet).first()
         assert top.source == "public_trades_ws"
         assert "requires_/info_confirmation" in (top.notes or "")
+        stored = session.query(WalletCandidateModel).first()
+        assert stored.raw_payload_json["activity_timestamps_verified"] is False
+        assert stored.raw_payload_json["activity_window_end_ms"] >= stored.raw_payload_json["activity_window_start_ms"]
+
+
+def test_public_trades_discovery_source_reads_latest_complete_scan(tmp_path):
+    from hl_observer.wallets.discovery_sources import PublicTradesWalletSource
+
+    db = tmp_path / "discovery_public_trades.sqlite3"
+    init_db(f"sqlite:///{db}")
+    session_factory = create_session_factory(create_sqlite_engine(f"sqlite:///{db}"))
+    observed_at = now_ms()
+    result = ingest_public_trade_messages([_trade_message(event_time=observed_at - 10_000)])
+    result.network_read = True
+    result.duration_seconds = 45
+    result.scan_started_at_ms = observed_at - 45_000
+    result.scan_finished_at_ms = observed_at
+
+    with session_factory() as session:
+        store_public_trade_scan(session, result, promote_top=2)
+        session.commit()
+        candidates = PublicTradesWalletSource().fetch_candidates(session=session, limit=10)
+
+    assert candidates.status == "ok"
+    assert len(candidates.candidates) == 2
+    candidate = candidates.candidates[0]
+    assert candidate.activity_evidence_verified is True
+    assert candidate.activity_trade_count == 1
+    assert candidate.activity_window_end_ms >= candidate.activity_window_start_ms
+    assert candidate.last_trade_event_ms == observed_at - 10_000
 
 
 def test_public_trades_scan_updates_promoted_top_wallets_without_duplicate_rows(tmp_path):

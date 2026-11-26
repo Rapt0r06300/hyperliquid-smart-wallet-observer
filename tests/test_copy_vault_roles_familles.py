@@ -211,7 +211,10 @@ def test_le_simulateur_publie_son_volume_PAR_COIN_sans_changer_le_resultat():
     panel = cop.build_mid_panel(instantanes, stale_ms=120_000)
     portefeuille = [(t0 + i * 60_000, 1_000.0, {"BTC": 2.0, "ETH": 4.0}) for i in range(0, 600, 10)]
     config = rep.ReplicationConfig()
-    resultat = rep.run_replication(portefeuille, panel, {"BTC": 1.0, "ETH": 1.0}, config)
+    # Fixture explicite : les taux neutres sont mesurés, pas déduits de leur absence.
+    funding_rates = {coin: np.zeros(len(panel.ts)) for coin in panel.coins}
+    resultat = rep.run_replication(portefeuille, panel, {"BTC": 1.0, "ETH": 1.0}, config,
+                                   funding_rates=funding_rates)
     par_coin = resultat["volume_usd_par_coin"]
     assert set(par_coin) <= {"BTC", "ETH"} and par_coin, "au moins un ordre doit avoir ete traite"
     duree_jours = max(1e-9, (resultat["steps"] - 1) * config.rebalance_ms / 86_400_000)

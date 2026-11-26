@@ -157,6 +157,9 @@ def test_leaderboard_model_to_candidate_preserves_fields() -> None:
     assert candidate.wallet_address == "0xabc"
     assert candidate.rank == 1
     assert candidate.pnl_usdc == 2.0
+    assert candidate.leaderboard_score != row.leaderboard_score
+    changed_rank = SimpleNamespace(**{**row.__dict__, "rank": 500})
+    assert cli._leaderboard_model_to_candidate(changed_rank).leaderboard_score == candidate.leaderboard_score
     assert candidate.source_confidence == 0.95
     assert candidate.selected_for_revalidation is True
     assert candidate.selected_for_backfill is False
@@ -277,12 +280,12 @@ def test_resolve_public_trade_scan_coins_auto_merges_active_perps(monkeypatch) -
     assert result.count("BTC") == 1
 
 
-def test_apply_leader_quality_gate_empty_disabled_and_fail_open(monkeypatch) -> None:
+def test_observation_quality_filter_keeps_streaming_when_gate_is_unavailable(monkeypatch) -> None:
     rows = [SimpleNamespace(wallet_address="0xa")]
     assert cli._apply_leader_quality_gate(object(), [], limit=1) == []
 
     monkeypatch.setenv("HYPERSMART_LEADER_QUALITY_GATE", "0")
-    assert cli._apply_leader_quality_gate(object(), rows, limit=1) is rows
+    assert cli._apply_leader_quality_gate(object(), rows, limit=1) == rows
 
     monkeypatch.setenv("HYPERSMART_LEADER_QUALITY_GATE", "1")
     import builtins
@@ -295,7 +298,7 @@ def test_apply_leader_quality_gate_empty_disabled_and_fail_open(monkeypatch) -> 
         return original_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", guarded_import)
-    assert cli._apply_leader_quality_gate(object(), rows, limit=1) is rows
+    assert cli._apply_leader_quality_gate(object(), rows, limit=1) == rows
 
 
 def test_selected_top_wallet_rows_prefers_active_then_falls_back(monkeypatch) -> None:

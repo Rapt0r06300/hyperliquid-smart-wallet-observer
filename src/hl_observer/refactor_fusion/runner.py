@@ -380,6 +380,7 @@ def _fixture_wallet_mirror(log_dir: Path, *, session_context: SessionEntryRiskCo
         fee_bps=2.0,
         slippage_bps=1.8,
         latency_penalty_bps=0.8,
+        funding_estimate_bps=0.0,  # fixture-only smoke path; not an economic forecast
         logs_dir=log_dir,
         leader_expected_edge_bps=72.0,
         session_risk_context=session_context,

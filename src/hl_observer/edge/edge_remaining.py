@@ -14,10 +14,13 @@ def compute_edge_remaining(
         + inputs.orderbook_confirmation_bps
         + inputs.regime_bonus_bps
     )
+    # The forecast is for a completed copy cycle. Fee and slippage inputs are
+    # per execution leg; ReplayConfig uses the same 2-fee + full-spread +
+    # 2-slippage convention. Spread is already the full crossing cost.
     costs_bps = (
-        inputs.taker_fee_bps
+        2.0 * inputs.taker_fee_bps
         + inputs.spread_cost_bps
-        + inputs.estimated_slippage_bps
+        + 2.0 * inputs.estimated_slippage_bps
         + inputs.latency_decay_bps
         + inputs.adverse_selection_bps
         + inputs.funding_expected_cost_bps

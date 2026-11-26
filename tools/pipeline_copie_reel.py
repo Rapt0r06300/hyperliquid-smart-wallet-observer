@@ -346,6 +346,12 @@ def _reconstruire_episodes_canoniques(
             heuristique_secours=VB.marquer_retraits,
         )
         source = "vault_fills_deduped_reconstructed"
+    elif fenetre is not None:
+        # Une fenetre explicite porte sur les fills canoniques. Reprendre ici le fichier
+        # historique complet d'episodes ferait sortir silencieusement les donnees de la
+        # fenetre et invaliderait le bornage du replay.
+        episodes = []
+        source = "no_canonical_fills_in_window"
     else:
         fills = []
         episodes = _charger_jsonl(root / EPISODES)

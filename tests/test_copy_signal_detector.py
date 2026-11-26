@@ -1,5 +1,9 @@
 from hl_observer.config.loader import load_settings
-from hl_observer.copying.signal_detector import CopySignalTuning, detect_copy_signals_from_deltas, signal_type_from_delta
+from hl_observer.copying.signal_detector import (
+    CopySignalTuning,
+    detect_copy_signals_from_deltas,
+    signal_type_from_delta,
+)
 from hl_observer.hyperliquid.schemas import SignalDecision
 from hl_observer.storage.models import PositionDeltaModel, TopWallet
 
@@ -49,6 +53,17 @@ def _leader(address: str = "0x" + "1" * 40) -> TopWallet:
     return TopWallet(wallet_address=address, rank=1, source="leaderboard", score=88.0, selected_at_ms=1_000, status="selected")
 
 
+def _test_tuning(expected_move_bps: float) -> CopySignalTuning:
+    # Synthetic, explicit depth used only to exercise the detector's mechanics.
+    return CopySignalTuning(
+        leader_expected_move_bps=expected_move_bps,
+        # Explicit zero is a test fixture only; production must provide a
+        # funding estimate derived from admissible prior observations.
+        funding_expected_cost_bps=0.0,
+        orderbook_depth_usdc=25_000.0,
+    )
+
+
 def test_delta_detector_supports_open_and_add_only_for_copy_entries():
     assert signal_type_from_delta(_delta("open_long")) == "open"
     assert signal_type_from_delta(_delta("open_short")) == "open"
@@ -63,7 +78,7 @@ def test_copy_signal_detector_creates_paper_candidate_from_open_long():
         settings=_settings(),
         followed_wallets=[_leader()],
         now_timestamp_ms=1_000,
-        tuning=CopySignalTuning(leader_expected_move_bps=70.0),
+        tuning=_test_tuning(70.0),
     )
 
     assert report.dry_run is True
@@ -72,6 +87,83 @@ def test_copy_signal_detector_creates_paper_candidate_from_open_long():
     assert report.signals[0].side == "long"
     assert report.signals[0].edge_remaining_bps > 0
     assert report.signals[0].decision in {SignalDecision.PAPER_TRADE, SignalDecision.PAPER_CANDIDATE}
+
+
+def test_copy_signal_detector_does_not_invent_expected_move_by_default():
+    report = detect_copy_signals_from_deltas(
+        [_delta("open_long")],
+        settings=_settings(),
+        followed_wallets=[_leader()],
+        now_timestamp_ms=1_000,
+    )
+
+    assert CopySignalTuning().leader_expected_move_bps == 0.0
+    assert report.signals_created == 0
+    assert report.paper_candidates == 0
+    assert report.no_trade_reasons["leader_expected_move_unmeasured"] == 1
+
+
+def test_copy_signal_detector_requires_observed_depth_instead_of_static_default():
+    report = detect_copy_signals_from_deltas(
+        [_delta("open_long")],
+        settings=_settings(),
+        followed_wallets=[_leader()],
+        now_timestamp_ms=1_000,
+        tuning=CopySignalTuning(leader_expected_move_bps=70.0),
+    )
+
+    assert report.signals_created == 0
+    assert report.paper_candidates == 0
+    assert report.no_trade_reasons["orderbook_depth_unmeasured"] == 1
+
+
+def test_copy_signal_detector_refuses_when_funding_cost_is_unmeasured():
+    report = detect_copy_signals_from_deltas(
+        [_delta("open_long")],
+        settings=_settings(),
+        followed_wallets=[_leader()],
+        now_timestamp_ms=1_000,
+        tuning=CopySignalTuning(
+            leader_expected_move_bps=70.0,
+            orderbook_depth_usdc=25_000.0,
+        ),
+    )
+
+    assert report.signals_created == 0
+    assert report.paper_candidates == 0
+    assert report.no_trade_reasons["funding_cost_unmeasured"] == 1
+
+
+def test_copy_signal_detector_refuses_non_finite_funding_cost():
+    tuning = _test_tuning(70.0)
+    tuning.funding_expected_cost_bps = float("nan")
+    report = detect_copy_signals_from_deltas(
+        [_delta("open_long")],
+        settings=_settings(),
+        followed_wallets=[_leader()],
+        now_timestamp_ms=1_000,
+        tuning=tuning,
+    )
+
+    assert report.signals_created == 0
+    assert report.paper_candidates == 0
+    assert report.no_trade_reasons["funding_cost_invalid"] == 1
+
+
+def test_copy_signal_detector_refuses_negative_execution_cost_even_after_mutation():
+    tuning = _test_tuning(70.0)
+    tuning.estimated_slippage_bps = -1.0
+    report = detect_copy_signals_from_deltas(
+        [_delta("open_long")],
+        settings=_settings(),
+        followed_wallets=[_leader()],
+        now_timestamp_ms=1_000,
+        tuning=tuning,
+    )
+
+    assert report.signals_created == 0
+    assert report.paper_candidates == 0
+    assert report.no_trade_reasons["edge_cost_input_invalid"] == 1
 
 
 def test_copy_signal_detector_rejects_reduce_close_as_no_trade():
@@ -92,7 +184,7 @@ def test_copy_signal_detector_requires_positive_edge_remaining():
         settings=_settings(),
         followed_wallets=[_leader()],
         now_timestamp_ms=1_000,
-        tuning=CopySignalTuning(leader_expected_move_bps=5.0),
+        tuning=_test_tuning(5.0),
     )
 
     assert report.signals_created == 1
@@ -113,15 +205,15 @@ def test_copy_signal_detector_uses_v9_simulation_defaults_without_env(monkeypatc
         settings=settings,
         followed_wallets=[_leader()],
         now_timestamp_ms=11_000,
-        tuning=CopySignalTuning(leader_expected_move_bps=31.0),
+        tuning=_test_tuning(31.0),
     )
 
     # Frais taker lus à la source unique (4,5 bps, et non plus 4,0 recopiés) :
-    # 31 − 4,5 − 3 − 5 − 2 − 2 = 14,5 bps (15,0 avec l'ancienne valeur optimiste).
-    assert round(accepted_with_v9_defaults.signals[0].edge_remaining_bps, 6) == 14.5
+    # Cycle complet : 31 − 2×4,5 − 3 − 2×5 − 2 − 2 = 5 bps.
+    assert round(accepted_with_v9_defaults.signals[0].edge_remaining_bps, 6) == 5.0
     # Durcissement délibéré (snapshot 5e49646): DEFAULT_SIMULATION_MIN_EDGE_BPS
     # relevé à 28 (plancher effectif = min(settings=25, 28) = 25 bps sans env).
-    # Un edge net de 14,5 bps est donc CORRECTEMENT refusé.
+    # Un edge net de 5 bps est donc CORRECTEMENT refusé.
     assert (
         accepted_with_v9_defaults.signals[0].decision
         == SignalDecision.REJECT_EDGE_TOO_SMALL
@@ -137,7 +229,7 @@ def test_copy_signal_detector_uses_live_simulation_age_window_override(monkeypat
         settings=settings,
         followed_wallets=[_leader()],
         now_timestamp_ms=11_000,
-        tuning=CopySignalTuning(leader_expected_move_bps=70.0),
+        tuning=_test_tuning(70.0),
     )
 
     assert accepted_with_override.signals[0].decision in {
@@ -166,7 +258,7 @@ def test_copy_signal_detector_uses_live_ws_detection_time_for_freshness(monkeypa
         settings=settings,
         followed_wallets=[_leader()],
         now_timestamp_ms=21_000,
-        tuning=CopySignalTuning(leader_expected_move_bps=70.0),
+        tuning=_test_tuning(70.0),
     )
 
     assert report.signals[0].timestamp_ms == 20_000
@@ -187,4 +279,34 @@ def test_copy_signal_detector_ignores_unfollowed_wallet():
     )
 
     assert report.signals_created == 0
+    assert report.no_trade_reasons["wallet_not_followed"] == 1
+
+
+def test_copy_signal_detector_fails_closed_when_followed_list_is_empty():
+    report = detect_copy_signals_from_deltas(
+        [_delta("open_long")],
+        settings=_settings(),
+        followed_wallets=[],
+        now_timestamp_ms=1_000,
+        tuning=CopySignalTuning(leader_expected_move_bps=70.0),
+    )
+
+    assert report.signals_created == 0
+    assert report.paper_candidates == 0
+    assert report.no_trade_reasons["wallet_not_followed"] == 1
+
+
+def test_copy_signal_detector_fails_closed_when_all_followed_wallets_are_rejected():
+    rejected = _leader()
+    rejected.status = "rejected"
+    report = detect_copy_signals_from_deltas(
+        [_delta("open_long")],
+        settings=_settings(),
+        followed_wallets=[rejected],
+        now_timestamp_ms=1_000,
+        tuning=CopySignalTuning(leader_expected_move_bps=70.0),
+    )
+
+    assert report.signals_created == 0
+    assert report.paper_candidates == 0
     assert report.no_trade_reasons["wallet_not_followed"] == 1

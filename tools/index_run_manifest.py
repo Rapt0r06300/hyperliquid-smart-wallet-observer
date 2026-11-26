@@ -5,8 +5,10 @@ import argparse
 import hashlib
 import json
 import os
+import tempfile
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 try:
     from tools.manifest_policy import classify_manifest
@@ -120,30 +122,64 @@ def _receipt_destination(
     return base / "datasets" / stage / f"{dataset_id}.manifest.json"
 
 
-def _atomic_json(path: Path, payload: Mapping[str, Any]) -> None:
+def _atomic_json(
+    path: Path,
+    payload: Mapping[str, Any],
+    *,
+    expected_source_sha256: str | None = None,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(
-        (json.dumps(dict(payload), ensure_ascii=False, sort_keys=True, separators=(",", ":")) if path.name == "DATA_INDEX.json" else json.dumps(dict(payload), ensure_ascii=False, indent=2, sort_keys=True)) + "\n",
-        encoding="utf-8",
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent,
     )
-    if path.name == "DATA_INDEX.json" and temporary.stat().st_size >= 85 * 1024 * 1024:
+    temporary = Path(temporary_name)
+    try:
+        rendered = (
+            json.dumps(dict(payload), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            if path.name == "DATA_INDEX.json"
+            else json.dumps(dict(payload), ensure_ascii=False, indent=2, sort_keys=True)
+        ) + "\n"
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(rendered)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if path.name == "DATA_INDEX.json" and temporary.stat().st_size >= 85 * 1024 * 1024:
+            raise ValueError("DATA_INDEX_TOO_LARGE: index mutation not published")
+        if (expected_source_sha256 is not None
+                and (not path.is_file() or index_file_sha256(path) != expected_source_sha256)):
+            raise ValueError("CANONICAL_INDEX_SOURCE_CHANGED_BEFORE_PUBLISH")
+        os.replace(temporary, path)
+    finally:
         temporary.unlink(missing_ok=True)
-        raise ValueError("DATA_INDEX_TOO_LARGE: index mutation not published")
-    os.replace(temporary, path)
 
 
-def _publish_canonical_index(path: Path, payload: Mapping[str, Any]) -> None:
+def _publish_canonical_index(
+    path: Path,
+    payload: Mapping[str, Any],
+    *,
+    expected_source_sha256: str | None = None,
+) -> None:
     # Partition activation remains opt-in until full consumer parity is
     # proven on GitHub-hosted runners. Never downgrade an activated index.
-    existing = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    existing_bytes = path.read_bytes() if path.is_file() else None
+    if (expected_source_sha256 is not None
+            and (existing_bytes is None
+                 or hashlib.sha256(existing_bytes).hexdigest() != expected_source_sha256)):
+        raise ValueError("CANONICAL_INDEX_SOURCE_CHANGED_BEFORE_PUBLISH")
+    existing = json.loads(existing_bytes) if existing_bytes is not None else {}
     enabled = os.environ.get("ALINA_CATALOG_PARTITION_ACTIVATE") == "true"
     if isinstance(existing, Mapping) and existing.get("schema") == PARTITION_SCHEMA:
         enabled = True
     if enabled:
-        save_index(path, payload)
+        if expected_source_sha256 is None:
+            save_index(path, payload)
+        else:
+            save_index(path, payload, expected_source_sha256=expected_source_sha256)
     else:
-        _atomic_json(path, payload)
+        if expected_source_sha256 is None:
+            _atomic_json(path, payload)
+        else:
+            _atomic_json(path, payload, expected_source_sha256=expected_source_sha256)
 
 
 def _load_replay_patch_results(root: Path) -> dict[str, Mapping[str, Any]]:
@@ -580,7 +616,10 @@ def index_run_manifests(
     registry_path = base / "catalog" / "DATA_QUALITY_REGISTRY.json"
     catalog_path = base / "catalog" / "DATA_CATALOG.json"
 
+    source_index_sha256 = index_file_sha256(index_path)
     index = read_index(index_path)
+    if index_file_sha256(index_path) != source_index_sha256:
+        raise ValueError("CANONICAL_INDEX_SOURCE_CHANGED_DURING_READ")
     registry = json.loads(registry_path.read_text(encoding="utf-8"))
     catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
     replay_patch_results = _load_replay_patch_results(base)
@@ -706,7 +745,9 @@ def index_run_manifests(
     index["shards"] = compact_index_rows(index, shards)
     index["active_data_status"] = active
     # Fail before attempting a GitHub push past its 100 MiB blob limit.
-    _publish_canonical_index(index_path, index)
+    _publish_canonical_index(
+        index_path, index, expected_source_sha256=source_index_sha256
+    )
     if index_path.stat().st_size >= 85 * 1024 * 1024:
         raise ValueError("DATA_INDEX_TOO_LARGE: shard the catalogue before publication; no SAFE evidence dropped")
 
@@ -768,7 +809,10 @@ def compact_existing_index(root: str | Path = ROOT) -> dict[str, Any]:
     """
     base = Path(root)
     path = base / INDEX_PATH.relative_to(ROOT) if INDEX_PATH.is_absolute() else base / INDEX_PATH
+    source_index_sha256 = index_file_sha256(path)
     index = read_index(path)
+    if index_file_sha256(path) != source_index_sha256:
+        raise ValueError("CANONICAL_INDEX_SOURCE_CHANGED_DURING_READ")
     expanded = hydrate_default_release_repository(index)
     for row in expanded:
         if str(row.get("release_repository") or "") != CANONICAL_DATA_REPOSITORY:
@@ -781,7 +825,9 @@ def compact_existing_index(root: str | Path = ROOT) -> dict[str, Any]:
     if hydrate_default_release_repository(index) != expected:
         raise ValueError("COMPACTION_PARITY_MISMATCH")
     before_size = path.stat().st_size
-    _publish_canonical_index(path, index)
+    _publish_canonical_index(
+        path, index, expected_source_sha256=source_index_sha256
+    )
     return {"shards": len(expanded), "before_bytes": before_size,
             "after_bytes": path.stat().st_size,
             "saved_bytes": before_size - path.stat().st_size}

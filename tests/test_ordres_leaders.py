@@ -33,6 +33,12 @@ AUTRE = "0x654016a8c9fcf0c4cb7ed6078aba21f7f399f7b7"
 
 
 def _outil(nom: str):
+    # 25/11/2026 : ne jamais REMPLACER un outil deja importe dans sys.modules. Ses fonctions, deja tenues
+    # par d'autres modules de test, ne seraient plus « le meme objet » pour pickle : tout ProcessPool
+    # lance ensuite par ces tests echouait (PicklingError), selon l'ordre des fichiers sur le worker.
+    deja = sys.modules.get(nom)
+    if deja is not None and Path(getattr(deja, "__file__", "") or "").resolve() == (RACINE / "tools" / f"{nom}.py").resolve():
+        return deja
     spec = importlib.util.spec_from_file_location(nom, RACINE / "tools" / f"{nom}.py")
     module = importlib.util.module_from_spec(spec)
     sys.modules[nom] = module

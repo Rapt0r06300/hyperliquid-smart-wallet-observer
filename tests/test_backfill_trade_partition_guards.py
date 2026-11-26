@@ -4,9 +4,9 @@ import sys
 
 import pytest
 
-from tools.partitioned_data_index import partition_index
 from tools import backfill_exact_trade_counts as exact
 from tools import backfill_global_unique_trade_counts as global_unique
+from tools.partitioned_data_index import partition_index
 
 
 def _corrupt_partition(tmp_path):
