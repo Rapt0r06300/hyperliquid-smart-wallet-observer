@@ -454,7 +454,15 @@ def _safe_float(value: Any) -> float | None:
 
 
 def _safe_int(value: Any) -> int | None:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
+    if isinstance(value, bool):
         return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value) if value.is_integer() else None
+    if isinstance(value, str) and re.fullmatch(r"[+-]?\d+", value.strip()):
+        try:
+            return int(value.strip())
+        except ValueError:
+            return None
+    return None

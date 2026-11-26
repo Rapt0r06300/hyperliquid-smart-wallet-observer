@@ -146,10 +146,8 @@ def score_discovery_candidate(
         # on the candidate record; never let it rank a wallet for backfill.
         reasons.append("reported_win_rate_not_used_as_activity_or_copy_edge")
     source_score = clamp(source_reliability_score * 100.0, 0.0, 100.0)
-    # Historical activity-forward weights are retained, but this API currently
-    # has no measured trade-count or trade-age inputs. Their scores therefore
-    # remain neutral (or penalized when incomplete data are disallowed); this
-    # ranking is not evidence of freshness or follower profitability.
+    # Intake ranking only: observed activity is not trade direction, net PnL,
+    # nor evidence of profitability for a follower with different execution.
     final_score = clamp(
         0.20 * pnl_score
         + 0.15 * roi_score

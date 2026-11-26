@@ -70,6 +70,15 @@ def test_public_trades_without_exchange_timestamp_are_not_counted_as_fresh_activ
     assert "trade_event_timestamp_missing_or_invalid" in result.warnings
 
 
+def test_public_trades_reject_nonintegral_or_boolean_exchange_timestamps():
+    for event_time in (1_700_000_000_000.5, True):
+        trade = json.loads(_trade_message(event_time=event_time))["data"][0]
+        result = ingest_public_trade_messages([json.dumps({"channel": "trades", "data": [trade]})])
+
+        assert not result.wallet_stats
+        assert "trade_event_timestamp_missing_or_invalid" in result.warnings
+
+
 def test_public_trades_scan_stores_candidates_and_top_wallets(tmp_path):
     db = tmp_path / "live.sqlite3"
     init_db(f"sqlite:///{db}")
@@ -90,6 +99,7 @@ def test_public_trades_scan_stores_candidates_and_top_wallets(tmp_path):
 
 
 def test_public_trades_discovery_source_reads_latest_complete_scan(tmp_path):
+    from hl_observer.wallets.discovery import WalletDiscoveryPlan, _score_and_select
     from hl_observer.wallets.discovery_sources import PublicTradesWalletSource
 
     db = tmp_path / "discovery_public_trades.sqlite3"
@@ -114,6 +124,20 @@ def test_public_trades_discovery_source_reads_latest_complete_scan(tmp_path):
     assert candidate.activity_trade_count == 1
     assert candidate.activity_window_end_ms >= candidate.activity_window_start_ms
     assert candidate.last_trade_event_ms == observed_at - 10_000
+    assert candidate.external_volume_usdc is None
+    scored = _score_and_select(WalletDiscoveryPlan(), candidates.candidates)
+    assert scored[0].score.activity_score == 100.0 / 15.0
+    assert "exchange_event_recency_measured_not_edge_proof" in scored[0].score.reasons
+    complete_run_id = candidate.raw_payload["run_id"]
+
+    partial = ingest_public_trade_messages([_trade_message()])
+    partial.stopped_reason = "SOURCE_UNAVAILABLE"
+    with session_factory() as session:
+        store_public_trade_scan(session, partial, promote_top=2)
+        session.commit()
+        latest_eligible = PublicTradesWalletSource().fetch_candidates(session=session, limit=10)
+
+    assert all(item.raw_payload["run_id"] == complete_run_id for item in latest_eligible.candidates)
 
 
 def test_public_trades_scan_updates_promoted_top_wallets_without_duplicate_rows(tmp_path):
