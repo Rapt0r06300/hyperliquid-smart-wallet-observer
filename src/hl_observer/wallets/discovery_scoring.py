@@ -112,15 +112,23 @@ def score_discovery_candidate(
         age_ms = effective_now_ms - last_trade_event_ms if valid_reference else -1
         if event_inside_window and valid_reference and age_ms >= -PUBLIC_TRADE_CLOCK_SKEW_TOLERANCE_MS:
             age_ms = max(0, age_ms)
-            recency_score = clamp(
-                (PUBLIC_TRADE_RECENCY_STALE_MS - age_ms)
-                / (PUBLIC_TRADE_RECENCY_STALE_MS - PUBLIC_TRADE_RECENCY_FRESH_MS)
-                * 100.0,
-                0.0,
-                100.0,
-            )
-            reasons.append("public_trade_activity_rate_measured_for_backfill_triage")
-            reasons.append("exchange_event_recency_measured_not_edge_proof")
+            if age_ms >= PUBLIC_TRADE_RECENCY_STALE_MS:
+                # A persisted scan can remain the latest completed run long
+                # after collection has stopped. Do not let its historical
+                # trade count keep earning activity points indefinitely.
+                activity_score = 0.0
+                recency_score = 0.0
+                reasons.append("public_trade_activity_stale_at_or_beyond_admission_window")
+            else:
+                recency_score = clamp(
+                    (PUBLIC_TRADE_RECENCY_STALE_MS - age_ms)
+                    / (PUBLIC_TRADE_RECENCY_STALE_MS - PUBLIC_TRADE_RECENCY_FRESH_MS)
+                    * 100.0,
+                    0.0,
+                    100.0,
+                )
+                reasons.append("public_trade_activity_rate_measured_for_backfill_triage")
+                reasons.append("exchange_event_recency_measured_not_edge_proof")
         else:
             reasons.append("activity_event_timestamp_invalid")
             if allow_incomplete_external_metrics:

@@ -767,6 +767,30 @@ def test_tape_copy_vault_refuse_bbo_non_lie_au_meilleur_l2(tmp_path, monkeypatch
     assert not (tmp_path / C.COPY_VAULT_L2_TAPE).exists()
 
 
+def test_l2_rejection_heartbeat_is_bounded_and_deterministic(monkeypatch):
+    monkeypatch.setattr(
+        C,
+        "_HEARTBEAT_WS",
+        {
+            "l2_reject_reasons": {
+                f"L2_REASON_{index:02d}": index for index in range(1, 26)
+            }
+        },
+    )
+
+    metrics = C._l2_rejection_heartbeat_metrics(max_codes=3)
+
+    assert metrics == {
+        "l2_reject_reasons": {
+            "L2_REASON_24": 24,
+            "L2_REASON_23": 23,
+            "L2_REASON_22": 22,
+        },
+        "l2_reject_reason_codes_omitted": 22,
+        "l2_reject_reason_counts_omitted": sum(range(1, 23)),
+    }
+
+
 def test_tape_copy_vault_refuse_overflow_capacite(tmp_path, monkeypatch):
     monkeypatch.setattr(C, "_COPY_VAULT_LAST_SAMPLE_MS", {})
     resume = {

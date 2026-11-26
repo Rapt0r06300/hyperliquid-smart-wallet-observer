@@ -5,11 +5,17 @@ from typer.testing import CliRunner
 from hl_observer.cli import app
 from hl_observer.config.loader import load_settings
 from hl_observer.storage.database import create_session_factory, create_sqlite_engine, init_db
-from hl_observer.storage.models import MarketSnapshot, SourceHealth, TopWallet, WalletCandidateModel
+from hl_observer.storage.models import (
+    MarketSnapshot,
+    SourceHealth,
+    TopWallet,
+    WalletCandidateModel,
+    WalletDiscoveryRun,
+)
 from hl_observer.utils.time import now_ms
 from hl_observer.wallets.public_trades_live import (
-    ingest_public_trade_messages,
     format_public_trade_scan_report,
+    ingest_public_trade_messages,
     normalize_coin_list,
     store_public_trade_scan,
     trade_payloads_from_message,
@@ -37,6 +43,17 @@ def _trade_message(coin="BTC", px="100", sz="2", event_time=1_700_000_000_000):
             ],
         }
     )
+
+
+def _verified_live_scan(messages, *, observed_at=None):
+    observed_at = observed_at or now_ms()
+    result = ingest_public_trade_messages(messages)
+    result.network_read = True
+    result.duration_seconds = 45
+    result.stopped_reason = "duration_elapsed"
+    result.scan_started_at_ms = observed_at - 45_000
+    result.scan_finished_at_ms = observed_at
+    return result
 
 
 def test_public_trades_parser_extracts_ws_trades_users():
@@ -98,7 +115,7 @@ def test_public_trades_reject_nonintegral_or_boolean_exchange_timestamps():
         assert "trade_event_timestamp_missing_or_invalid" in result.warnings
 
 
-def test_public_trades_scan_stores_candidates_and_top_wallets(tmp_path):
+def test_offline_public_trade_observations_are_not_promoted_to_live_wallets(tmp_path):
     db = tmp_path / "live.sqlite3"
     init_db(f"sqlite:///{db}")
     session_factory = create_session_factory(create_sqlite_engine(f"sqlite:///{db}"))
@@ -108,13 +125,28 @@ def test_public_trades_scan_stores_candidates_and_top_wallets(tmp_path):
         store_public_trade_scan(session, result, promote_top=2)
         session.commit()
         assert session.query(WalletCandidateModel).count() == 2
-        assert session.query(TopWallet).count() == 2
-        top = session.query(TopWallet).first()
-        assert top.source == "public_trades_ws"
-        assert "requires_/info_confirmation" in (top.notes or "")
+        assert session.query(TopWallet).count() == 0
         stored = session.query(WalletCandidateModel).first()
         assert stored.raw_payload_json["activity_timestamps_verified"] is False
+        assert stored.selected_for_backfill is False
         assert stored.raw_payload_json["activity_window_end_ms"] >= stored.raw_payload_json["activity_window_start_ms"]
+
+
+def test_stale_exchange_events_are_not_promoted_as_fresh_wallets(tmp_path):
+    db = tmp_path / "stale_public_trades.sqlite3"
+    init_db(f"sqlite:///{db}")
+    session_factory = create_session_factory(create_sqlite_engine(f"sqlite:///{db}"))
+    observed_at = now_ms()
+    result = _verified_live_scan(
+        [_trade_message(event_time=observed_at - 10 * 60_000)],
+        observed_at=observed_at,
+    )
+
+    with session_factory() as session:
+        store_public_trade_scan(session, result, promote_top=2)
+        session.commit()
+        assert session.query(TopWallet).count() == 0
+        assert session.query(WalletCandidateModel).filter_by(selected_for_backfill=True).count() == 0
 
 
 def test_public_trades_discovery_source_reads_latest_complete_scan(tmp_path):
@@ -125,11 +157,7 @@ def test_public_trades_discovery_source_reads_latest_complete_scan(tmp_path):
     init_db(f"sqlite:///{db}")
     session_factory = create_session_factory(create_sqlite_engine(f"sqlite:///{db}"))
     observed_at = now_ms()
-    result = ingest_public_trade_messages([_trade_message(event_time=observed_at - 10_000)])
-    result.network_read = True
-    result.duration_seconds = 45
-    result.scan_started_at_ms = observed_at - 45_000
-    result.scan_finished_at_ms = observed_at
+    result = _verified_live_scan([_trade_message(event_time=observed_at - 10_000)], observed_at=observed_at)
 
     with session_factory() as session:
         store_public_trade_scan(session, result, promote_top=2)
@@ -159,6 +187,43 @@ def test_public_trades_discovery_source_reads_latest_complete_scan(tmp_path):
     assert all(item.raw_payload["run_id"] == complete_run_id for item in latest_eligible.candidates)
 
 
+def test_public_trade_source_skips_legacy_selected_rows_without_timestamp_proof(tmp_path):
+    from hl_observer.wallets.discovery_sources import PublicTradesWalletSource
+
+    db = tmp_path / "legacy_unverified_public_trades.sqlite3"
+    init_db(f"sqlite:///{db}")
+    session_factory = create_session_factory(create_sqlite_engine(f"sqlite:///{db}"))
+    with session_factory() as session:
+        run = WalletDiscoveryRun(
+            started_at_ms=1_700_000_000_000,
+            finished_at_ms=1_700_000_045_000,
+            status="COMPLETED",
+            notes="public_trades_ws;legacy_scan",
+        )
+        session.add(run)
+        session.flush()
+        session.add(
+            WalletCandidateModel(
+                run_id=run.id,
+                address=WALLET_A,
+                coin="BTC",
+                source_name="public_trades_ws",
+                source_type="websocket_read_only",
+                first_seen_ms=1_700_000_000_000,
+                last_seen_ms=1_700_000_000_000,
+                raw_payload_json={"trades_count": 25},
+                confidence_score=95.0,
+                selected_for_backfill=True,
+            )
+        )
+        session.commit()
+        result = PublicTradesWalletSource().fetch_candidates(session=session)
+
+    assert result.status == "no_observations"
+    assert not result.candidates
+    assert result.raw_payload["unverified_rows_skipped"] == 1
+
+
 def test_discovery_uses_verified_trade_activity_only_for_backfill_triage(tmp_path):
     from hl_observer.wallets.discovery import WalletDiscoveryPlan, run_wallet_discovery
 
@@ -169,11 +234,10 @@ def test_discovery_uses_verified_trade_activity_only_for_backfill_triage(tmp_pat
     settings = load_settings()
     settings.database_url = db_url
     observed_at = now_ms()
-    scan = ingest_public_trade_messages([_trade_message(event_time=observed_at - 10_000)])
-    scan.network_read = True
-    scan.duration_seconds = 45
-    scan.scan_started_at_ms = observed_at - 45_000
-    scan.scan_finished_at_ms = observed_at
+    scan = _verified_live_scan(
+        [_trade_message(event_time=observed_at - 10_000)],
+        observed_at=observed_at,
+    )
 
     with session_factory() as session:
         store_public_trade_scan(session, scan, promote_top=2)
@@ -198,7 +262,10 @@ def test_public_trades_scan_updates_promoted_top_wallets_without_duplicate_rows(
     db = tmp_path / "live_upsert.sqlite3"
     init_db(f"sqlite:///{db}")
     session_factory = create_session_factory(create_sqlite_engine(f"sqlite:///{db}"))
-    result = ingest_public_trade_messages([_trade_message()], max_wallets=10)
+    observed_at = now_ms()
+    result = _verified_live_scan(
+        [_trade_message(event_time=observed_at - 10_000)], observed_at=observed_at
+    )
 
     with session_factory() as session:
         store_public_trade_scan(session, result, promote_top=2)
@@ -212,12 +279,13 @@ def test_public_trades_scan_stores_market_marks_for_live_simulation(tmp_path):
     db = tmp_path / "live_marks.sqlite3"
     init_db(f"sqlite:///{db}")
     session_factory = create_session_factory(create_sqlite_engine(f"sqlite:///{db}"))
-    result = ingest_public_trade_messages(
+    observed_at = now_ms()
+    result = _verified_live_scan(
         [
-            _trade_message(coin="ETH", px="2010", sz="1"),
-            _trade_message(coin="ETH", px="2020", sz="1"),
+            _trade_message(coin="ETH", px="2010", sz="1", event_time=observed_at - 20_000),
+            _trade_message(coin="ETH", px="2020", sz="1", event_time=observed_at - 10_000),
         ],
-        max_wallets=10,
+        observed_at=observed_at,
     )
 
     with session_factory() as session:

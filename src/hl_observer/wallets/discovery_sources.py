@@ -283,11 +283,13 @@ class PublicTradesWalletSource(WalletDiscoverySource):
             .where(
                 WalletCandidateModel.run_id == run.id,
                 WalletCandidateModel.source_name == self.name,
+                WalletCandidateModel.selected_for_backfill.is_(True),
             )
             .order_by(WalletCandidateModel.confidence_score.desc(), WalletCandidateModel.id.asc())
             .limit(limit)
         ).all()
         candidates: list[WalletDiscoveryCandidate] = []
+        unverified_rows_skipped = 0
         for row in rows:
             if not is_valid_discovery_address(row.address):
                 continue
@@ -305,6 +307,9 @@ class PublicTradesWalletSource(WalletDiscoverySource):
                 and 0 < window_end - window_start <= 300_000
                 and window_start - 60_000 <= last_trade <= window_end + 60_000
             )
+            if not verified:
+                unverified_rows_skipped += 1
+                continue
             candidates.append(
                 WalletDiscoveryCandidate(
                     address=row.address,
@@ -315,14 +320,14 @@ class PublicTradesWalletSource(WalletDiscoverySource):
                     first_seen_ms=row.first_seen_ms,
                     last_seen_ms=row.last_seen_ms,
                     activity_evidence_verified=verified,
-                    activity_trade_count=count if verified else None,
-                    activity_window_start_ms=window_start if verified else None,
-                    activity_window_end_ms=window_end if verified else None,
-                    last_trade_event_ms=last_trade if verified else None,
+                    activity_trade_count=count,
+                    activity_window_start_ms=window_start,
+                    activity_window_end_ms=window_end,
+                    last_trade_event_ms=last_trade,
                     raw_payload={
                         "run_id": run.id,
-                        "exchange_activity_verified": verified,
-                        "activity_timestamps_verified": payload.get("activity_timestamps_verified") is True,
+                        "exchange_activity_verified": True,
+                        "activity_timestamps_verified": True,
                         "trades_count": count,
                         "observed_notional_usdc": row.external_volume_usdc,
                         "coins": payload.get("coins", []),
@@ -339,7 +344,11 @@ class PublicTradesWalletSource(WalletDiscoverySource):
             reliability_score=self.reliability_score,
             status="ok" if candidates else "no_observations",
             candidates=candidates,
-            raw_payload={"run_id": run.id, "candidate_count": len(candidates)},
+            raw_payload={
+                "run_id": run.id,
+                "candidate_count": len(candidates),
+                "unverified_rows_skipped": unverified_rows_skipped,
+            },
         )
 
 

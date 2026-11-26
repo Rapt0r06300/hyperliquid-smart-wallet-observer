@@ -124,6 +124,26 @@ def _record_l2_validation_rejection(reason: str) -> None:
         )
 
 
+def _l2_rejection_heartbeat_metrics(*, max_codes: int = 20) -> dict[str, object]:
+    """Return a bounded, deterministic view of L2 rejection causes for the heartbeat."""
+    raw = _HEARTBEAT_WS.get("l2_reject_reasons")
+    if not isinstance(raw, dict):
+        raw = {}
+    counts = [
+        (str(code)[:80], value)
+        for code, value in raw.items()
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0
+    ]
+    counts.sort(key=lambda item: (-item[1], item[0]))
+    visible = counts[:max(0, max_codes)]
+    omitted = counts[len(visible):]
+    return {
+        "l2_reject_reasons": dict(visible),
+        "l2_reject_reason_codes_omitted": len(omitted),
+        "l2_reject_reason_counts_omitted": sum(count for _, count in omitted),
+    }
+
+
 def _strict_positive_timestamp_ms(value) -> int | None:
     if isinstance(value, bool):
         return None
@@ -1878,6 +1898,7 @@ async def _heartbeat(root: Path, info: dict, *, intervalle_s: float = 10.0) -> N
                 "l2_validation_rejections": int(
                     _HEARTBEAT_WS.get("l2_validation_rejections") or 0
                 ),
+                **_l2_rejection_heartbeat_metrics(),
                 "reconnects": int(_HEARTBEAT_WS["reconnects"]),
                 "stale": False,
             },

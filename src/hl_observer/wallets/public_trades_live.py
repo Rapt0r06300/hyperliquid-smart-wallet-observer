@@ -251,27 +251,31 @@ def store_public_trade_scan(
     result.wallets_stored = 0
     result.raw_events_stored = 0
     repo = CollectionRepository(session)
+    stored_at_ms = now_ms()
     last_event_ms = max(
         (stats.last_seen_ms or 0 for stats in result.wallet_stats.values()),
         default=0,
     )
-    repo.update_source_health(
-        result.source,
-        is_success=result.stopped_reason != "SOURCE_UNAVAILABLE",
-        is_heartbeat=True,
-        event_timestamp_ms=last_event_ms if last_event_ms > 0 else None,
-        error_message="; ".join(result.warnings) if result.warnings else None,
-    )
+    if result.network_read:
+        repo.update_source_health(
+            result.source,
+            is_success=result.stopped_reason != "SOURCE_UNAVAILABLE",
+            is_heartbeat=True,
+            event_timestamp_ms=last_event_ms if last_event_ms > 0 else None,
+            error_message="; ".join(result.warnings) if result.warnings else None,
+        )
+
+    run_completed = result.network_read is True and result.stopped_reason == "duration_elapsed"
 
     run = WalletDiscoveryRun(
         started_at_ms=result.scan_started_at_ms,
-        finished_at_ms=result.scan_finished_at_ms or now_ms(),
-        status="COMPLETED" if result.stopped_reason != "SOURCE_UNAVAILABLE" else "PARTIAL",
+        finished_at_ms=result.scan_finished_at_ms or stored_at_ms,
+        status="COMPLETED" if run_completed else "PARTIAL",
         sources_attempted=1,
         candidates_found=len(result.wallet_stats),
         candidates_after_filter=len(result.wallet_stats),
         wallets_selected=min(len(result.wallet_stats), max(0, promote_top)),
-        errors_count=1 if result.stopped_reason == "SOURCE_UNAVAILABLE" else 0,
+        errors_count=0 if run_completed else 1,
         notes=f"public_trades_ws;stopped_reason={result.stopped_reason}",
     )
     session.add(run)
@@ -301,19 +305,19 @@ def store_public_trade_scan(
                 request_payload_json={"subscriptions": [{"type": "trades", "coin": coin} for coin in result.coins]},
                 response_payload_json=result.raw_trade_samples,
                 response_hash=payload_hash,
-                fetched_at_ms=now_ms(),
-                success=result.stopped_reason != "SOURCE_UNAVAILABLE",
+                fetched_at_ms=stored_at_ms,
+                success=result.network_read is True and result.stopped_reason != "SOURCE_UNAVAILABLE",
                 error_message="; ".join(result.warnings) if result.warnings else None,
                 event_type="public_trades_ws",
                 wallet=None,
                 exchange_ts=None,
-                local_received_ts=now_ms(),
-                payload_json={"trades": result.raw_trade_samples},
+                local_received_ts=stored_at_ms,
+                payload_json={"trades": result.raw_trade_samples, "network_read": result.network_read},
                 payload_hash=payload_hash,
             )
         )
         result.raw_events_stored += 1
-        if latest_prices_by_coin:
+        if result.network_read is True and latest_prices_by_coin:
             session.add(
                 MarketSnapshot(
                     source="publicTradesWS",
@@ -340,21 +344,29 @@ def store_public_trade_scan(
         else 0
     )
     scan_bounds_verified = (
-        result.network_read is True
+        run_completed
         and isinstance(result.duration_seconds, int)
         and not isinstance(result.duration_seconds, bool)
         and 0 < result.duration_seconds <= 300
         and 0 < scan_window_ms <= result.duration_seconds * 1000 + 5_000
     )
+    verification_now_ms = now_ms()
     for index, stats in enumerate(ranked, start=1):
+        event_age_ms = verification_now_ms - stats.last_seen_ms if stats.last_seen_ms is not None else None
+        event_fresh = (
+            event_age_ms is not None
+            and -60_000 <= event_age_ms <= result.duration_seconds * 1000 + 60_000
+        )
         timestamps_verified = (
             scan_bounds_verified
             and stats.first_seen_ms is not None
             and stats.last_seen_ms is not None
+            and event_fresh
             and result.scan_started_at_ms - 60_000
             <= stats.last_seen_ms
             <= (result.scan_finished_at_ms or 0) + 60_000
         )
+        selected_for_backfill = index <= promote_top and timestamps_verified
         confidence = min(95.0, 35.0 + stats.score)
         session.add(
             WalletCandidateModel(
@@ -385,11 +397,17 @@ def store_public_trade_scan(
                     "warning": "public trades identify active wallets but do not prove open/close direction",
                 },
                 confidence_score=confidence,
-                selected_for_backfill=index <= promote_top,
-                rejection_reason=None if index <= promote_top else "OUTSIDE_PROMOTION_LIMIT",
+                selected_for_backfill=selected_for_backfill,
+                rejection_reason=(
+                    None
+                    if selected_for_backfill
+                    else "UNVERIFIED_OR_STALE_TRADE_TIMESTAMP"
+                    if index <= promote_top
+                    else "OUTSIDE_PROMOTION_LIMIT"
+                ),
             )
         )
-        if index <= promote_top:
+        if selected_for_backfill:
             existing_top = (
                 session.query(TopWallet)
                 .filter(TopWallet.wallet_address == stats.wallet_address)
