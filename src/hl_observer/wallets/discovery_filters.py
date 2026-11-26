@@ -25,6 +25,7 @@ def dedupe_candidates(
             continue
         if normalized in seen:
             existing = by_address[normalized]
+            merged_activity = False
             if (
                 candidate.source_name == "public_trades_ws"
                 and candidate.activity_evidence_verified
@@ -36,7 +37,9 @@ def dedupe_candidates(
                 existing.activity_window_end_ms = candidate.activity_window_end_ms
                 existing.last_trade_event_ms = candidate.last_trade_event_ms
                 existing.raw_payload.setdefault("public_trade_activity", candidate.raw_payload)
-            rejected[candidate.address] = WalletDiscoveryDecision.REJECT_DUPLICATE
+                merged_activity = True
+            if not merged_activity:
+                rejected[candidate.address] = WalletDiscoveryDecision.REJECT_DUPLICATE
             continue
         seen.add(normalized)
         by_address[normalized] = candidate

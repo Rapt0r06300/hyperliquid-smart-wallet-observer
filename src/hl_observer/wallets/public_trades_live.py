@@ -49,6 +49,8 @@ class PublicTradeScanResult:
     duration_seconds: int
     messages_seen: int = 0
     trades_seen: int = 0
+    timestamped_trades_seen: int = 0
+    trades_missing_timestamp: int = 0
     wallets_seen: int = 0
     wallets_stored: int = 0
     raw_events_stored: int = 0
@@ -208,9 +210,11 @@ def _ingest_trade(
 ) -> None:
     trade_time = _safe_int(trade.get("time"))
     if trade_time is None or trade_time <= 0:
+        result.trades_missing_timestamp += 1
         if "trade_event_timestamp_missing_or_invalid" not in result.warnings:
             result.warnings.append("trade_event_timestamp_missing_or_invalid")
         return
+    result.timestamped_trades_seen += 1
     coin = str(trade.get("coin") or "").upper()
     price = _safe_float(trade.get("px"))
     size = _safe_float(trade.get("sz"))
@@ -420,6 +424,11 @@ def store_public_trade_scan(
 
 
 def format_public_trade_scan_report(result: PublicTradeScanResult) -> str:
+    observed_window_ms = (
+        result.scan_finished_at_ms - result.scan_started_at_ms
+        if result.scan_finished_at_ms is not None
+        else None
+    )
     lines = [
         "public-trades live scan report",
         f"source: {result.source}",
@@ -428,6 +437,9 @@ def format_public_trade_scan_report(result: PublicTradeScanResult) -> str:
         f"network_read: {result.network_read}",
         f"messages_seen: {result.messages_seen}",
         f"trades_seen: {result.trades_seen}",
+        f"timestamped_trades_seen: {result.timestamped_trades_seen}",
+        f"trades_missing_timestamp: {result.trades_missing_timestamp}",
+        f"observed_window_ms: {observed_window_ms if observed_window_ms is not None else 'unknown'}",
         f"wallets_seen: {len(result.wallet_stats)}",
         f"wallets_promoted_for_followup: {result.wallets_stored}",
         f"raw_events_stored: {result.raw_events_stored}",

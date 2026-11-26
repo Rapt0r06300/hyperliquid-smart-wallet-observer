@@ -103,4 +103,4 @@ def test_deduplication_merges_only_verified_public_activity_without_replacing_le
     assert unique[0].activity_evidence_verified is True
     assert unique[0].activity_trade_count == 12
     assert unique[0].raw_payload["public_trade_activity"]["run_id"] == 12
-    assert rejected[public_trade.address].value == "REJECT_DUPLICATE"
+    assert public_trade.address not in rejected

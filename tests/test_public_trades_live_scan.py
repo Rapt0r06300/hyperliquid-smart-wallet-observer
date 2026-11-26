@@ -9,6 +9,7 @@ from hl_observer.storage.models import MarketSnapshot, SourceHealth, TopWallet, 
 from hl_observer.utils.time import now_ms
 from hl_observer.wallets.public_trades_live import (
     ingest_public_trade_messages,
+    format_public_trade_scan_report,
     normalize_coin_list,
     store_public_trade_scan,
     trade_payloads_from_message,
@@ -66,8 +67,26 @@ def test_public_trades_without_exchange_timestamp_are_not_counted_as_fresh_activ
     result = ingest_public_trade_messages([json.dumps({"channel": "trades", "data": [trade]})])
 
     assert result.trades_seen == 1
+    assert result.timestamped_trades_seen == 0
+    assert result.trades_missing_timestamp == 1
     assert not result.wallet_stats
     assert "trade_event_timestamp_missing_or_invalid" in result.warnings
+
+
+def test_public_trades_report_exposes_timestamp_quality_counts():
+    valid_trade = _trade_message()
+    invalid_trade = json.loads(_trade_message())["data"][0]
+    invalid_trade.pop("time")
+    result = ingest_public_trade_messages(
+        [valid_trade, json.dumps({"channel": "trades", "data": [invalid_trade]})]
+    )
+
+    report = format_public_trade_scan_report(result)
+
+    assert "trades_seen: 2" in report
+    assert "timestamped_trades_seen: 1" in report
+    assert "trades_missing_timestamp: 1" in report
+    assert "observed_window_ms:" in report
 
 
 def test_public_trades_reject_nonintegral_or_boolean_exchange_timestamps():
@@ -138,6 +157,41 @@ def test_public_trades_discovery_source_reads_latest_complete_scan(tmp_path):
         latest_eligible = PublicTradesWalletSource().fetch_candidates(session=session, limit=10)
 
     assert all(item.raw_payload["run_id"] == complete_run_id for item in latest_eligible.candidates)
+
+
+def test_discovery_uses_verified_trade_activity_only_for_backfill_triage(tmp_path):
+    from hl_observer.wallets.discovery import WalletDiscoveryPlan, run_wallet_discovery
+
+    db = tmp_path / "public_trades_discovery_pipeline.sqlite3"
+    db_url = f"sqlite:///{db}"
+    init_db(db_url)
+    session_factory = create_session_factory(create_sqlite_engine(db_url))
+    settings = load_settings()
+    settings.database_url = db_url
+    observed_at = now_ms()
+    scan = ingest_public_trade_messages([_trade_message(event_time=observed_at - 10_000)])
+    scan.network_read = True
+    scan.duration_seconds = 45
+    scan.scan_started_at_ms = observed_at - 45_000
+    scan.scan_finished_at_ms = observed_at
+
+    with session_factory() as session:
+        store_public_trade_scan(session, scan, promote_top=2)
+        session.commit()
+
+    result = run_wallet_discovery(
+        WalletDiscoveryPlan(sources=["public_trades_ws"], min_discovery_score=50, dry_run=True),
+        settings,
+        session_factory=session_factory,
+    )
+
+    assert result.selected_wallets
+    selected = result.selected_wallets[0]
+    assert selected.score.activity_score == 100.0 / 15.0
+    assert selected.candidate.external_pnl_usdc is None
+    assert selected.candidate.external_volume_usdc is None
+    assert "public_trade_activity_rate_measured_for_backfill_triage" in selected.score.reasons
+    assert "exchange_event_recency_measured_not_edge_proof" in selected.score.reasons
 
 
 def test_public_trades_scan_updates_promoted_top_wallets_without_duplicate_rows(tmp_path):
