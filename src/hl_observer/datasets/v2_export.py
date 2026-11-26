@@ -4,6 +4,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import math
 import os
 from collections.abc import Iterable, Mapping
 from pathlib import Path
@@ -15,6 +16,7 @@ _RECEIVE_ONLY_CHANNELS = {
     "copy_vault_active_asset_ctx",
     "copy_vault_funding",
     "copy_vault_ledger",
+    "copy_vault_broad_state",
     "copy_vault_positions",
     "copy_vault_selection",
     "external_events",
@@ -68,6 +70,7 @@ _REPLAYABLE_CHANNELS = {
     "copy_vault_fills",
     "copy_vault_active_asset_ctx",
     "copy_vault_bbo",
+    "copy_vault_broad_state",
     "copy_vault_funding",
     "copy_vault_ledger",
     "copy_vault_l2",
@@ -93,6 +96,87 @@ _REPLAYABLE_CHANNELS = {
     "user_fills",
     "userfills",
 }
+
+
+def _valid_broad_state_record(record: Mapping[str, Any]) -> bool:
+    """Require an exact receive-time proof before exporting broad NAV state."""
+    receive = record.get("received_ts_ms")
+    monotonic = record.get("local_monotonic_ns")
+    provenance = record.get("provenance")
+    raw = record.get("raw_payload")
+    if (
+        record.get("source_id") != "hyperliquid_public_info"
+        or record.get("channel") != "copy_vault_broad_state"
+        or record.get("instrument") != "*"
+        or str(record.get("event_kind") or "").upper() != "SNAPSHOT"
+        or record.get("exchange_ts_ms") is not None
+        or record.get("read_only") is not True
+        or record.get("real_execution") is not False
+        or type(receive) is not int or receive <= 0
+        or type(monotonic) is not int or monotonic <= 0
+        or not isinstance(provenance, Mapping)
+        or provenance.get("url") != "https://api.hyperliquid.xyz/info"
+        or provenance.get("network") != "mainnet"
+        or provenance.get("access") != "read_only"
+        or provenance.get("transport") != "https"
+        or provenance.get("authenticated") is not False
+        or provenance.get("request_type") != "clearinghouseState"
+        or provenance.get("broad_sweep") is not True
+        or provenance.get("timestamp_semantics") != "receive_observation_time_only"
+    ):
+        return False
+    send = provenance.get("request_send_wall_ms")
+    request_receive = provenance.get("request_receive_wall_ms")
+    if (
+        type(send) is not int or send <= 0
+        or type(request_receive) is not int
+        or request_receive < send or request_receive != receive
+    ):
+        return False
+    if not isinstance(raw, str) or not raw:
+        return False
+    if record.get("raw_sha256") != hashlib.sha256(raw.encode("utf-8")).hexdigest():
+        return False
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return False
+    if not isinstance(payload, Mapping):
+        return False
+    vault = payload.get("vault")
+    if (
+        not isinstance(vault, str) or len(vault) != 42 or not vault.startswith("0x")
+        or any(char not in "0123456789abcdef" for char in vault[2:].lower())
+        or payload.get("phase") not in {"START", "END"}
+    ):
+        return False
+    state = payload.get("clearinghouseState")
+    if not isinstance(state, Mapping) or not isinstance(state.get("assetPositions"), list):
+        return False
+    margin = state.get("marginSummary")
+    nav_raw = margin.get("accountValue") if isinstance(margin, Mapping) else None
+    if isinstance(nav_raw, bool) or not isinstance(nav_raw, (str, int, float)):
+        return False
+    try:
+        nav = float(nav_raw)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    summary = record.get("parsed_summary")
+    summary_nav = summary.get("nav_usd") if isinstance(summary, Mapping) else None
+    if isinstance(summary_nav, bool) or not isinstance(summary_nav, (int, float)):
+        return False
+    try:
+        summary_nav_value = float(summary_nav)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return bool(
+        isinstance(summary, Mapping)
+        and summary.get("vault") == vault.lower()
+        and summary.get("phase") == payload.get("phase")
+        and math.isfinite(nav) and nav > 0
+        and math.isfinite(summary_nav_value)
+        and math.isclose(summary_nav_value, nav, rel_tol=1e-12, abs_tol=1e-9)
+    )
 
 
 def build_manifest_from_tick_shard(
@@ -174,6 +258,8 @@ def build_manifest_from_tick_shard(
             source = str(record.get("source_id") or "")
             channel = str(record.get("channel") or "")
             instrument = str(record.get("instrument") or "")
+            if channel == "copy_vault_broad_state" and not _valid_broad_state_record(record):
+                invalid_record_count += 1
             record_trade_count = 0
             if channel in _TRADE_CHANNELS:
                 parsed = record.get("parsed_summary")

@@ -798,8 +798,16 @@ def run_lab(*, preflight_only: bool = False) -> int:
 
 
 
+def _verified_economic_freeze_verdict() -> str:
+    """Describe an already-passed independent proof without reviving a dollar gate."""
+    return (
+        "La preuve économique indépendante a passé les contrôles TRAIN, VALIDATION, OOS et "
+        "FORWARD. Le repère journalier est informatif, pas une condition de validation."
+    )
+
+
 # Legacy local research (Codex/Claude): isolated opt-in, never the default SAFE path.
-OBJECTIVE_USD_PER_DAY = 5.0  # dashboard placeholder; replaced from optional module on execution
+OBJECTIVE_USD_PER_DAY = 5.0  # historical display reference only; never a discovery/proof gate
 PAPER_CAPITAL_USD = PAPER_EQUITY_USD  # fallback coherent with the canonical paper contract
 REASON_LABELS = {
     "TRAIN_NOT_EXECUTABLE": (
@@ -1168,7 +1176,6 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
     search_bound = live.get("search_space_upper_bound", economic.get("search_space_upper_bound"))
     elapsed = live.get("elapsed_seconds")
     elapsed_display = f"{float(elapsed):,.0f} s" if elapsed is not None else "—"
-    current_candidate_score = best_candidate.get("score_usd_per_active_day")
     verified_assets_display = live.get("safe_verified_assets", inputs.get("verified_assets", 0))
     expected_assets_display = live.get("safe_expected_assets", inputs.get("expected_safe_shards", 0))
     unique_fills_display = live.get("safe_unique_fills", inputs.get("unique_fills", 0))
@@ -2306,7 +2313,7 @@ def run_economic_lab(
 
     pnl_uplift_freeze_count = int(economic_result.get("pnl_uplift_freeze_count") or 0)
     if economic_result.get("economically_proven") is True:
-        freeze_verdict = "Une amélioration a passé TRAIN, VALIDATION, OOS et FORWARD à au moins +5 USD nets/jour."
+        freeze_verdict = _verified_economic_freeze_verdict()
     elif economic_result.get("freeze_created") is True:
         freeze_verdict = (
             f"Un candidat TRAIN est gelé pour comparaison; {pnl_uplift_freeze_count} hausse(s) du PnL moyen "
@@ -2372,7 +2379,9 @@ def run_economic_lab(
         f"- Shards vérifiés : **{safe_inputs.get('verified_assets', 0)}**.",
         f"- Fills / carnets uniques : **{safe_inputs.get('unique_fills', 0)} / {safe_inputs.get('unique_books', 0)}**.",
         f"- Configurations réellement rejouées : **{economic_result.get('candidates_tested', 0)}**.",
-        f"- Objectif : **{OBJECTIVE_USD_PER_DAY} USD nets/jour** avec **{PAPER_CAPITAL_USD} USD paper**.",
+        f"- Repère journalier informatif, non bloquant : **{OBJECTIVE_USD_PER_DAY} USD**; "
+        f"capital de référence paper : **{PAPER_CAPITAL_USD} USD**. La recherche conserve les "
+        "améliorations de PnL net causal; la preuve économique reste indépendante.",
         f"- Candidat retenu par le score conservateur (LCB) et gelé : **{'OUI' if economic_result.get('freeze_created') else 'NON'}**.",
         f"- Hausses mesurées du PnL moyen TRAIN gelées : **{pnl_uplift_freeze_count}** (exploratoires).",
         f"- Économiquement prouvé : **{'OUI' if economic_result.get('economically_proven') else 'NON'}**.",

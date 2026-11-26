@@ -12,8 +12,10 @@ import tempfile
 from pathlib import Path
 
 RACINE = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(RACINE / "src"))
 sys.path.insert(0, str(RACINE / "tools"))
 
+from hl_observer.collection.collecte_fiable import ajouter_atomique  # noqa: E402
 from telecharger_fills_lanes_github import _gh_reel, gh_disponible, telecharger_runs  # noqa: E402
 
 WORKFLOW = "explorer-collecte.yml"
@@ -40,36 +42,73 @@ def _lire_jsonl(path: Path) -> list[dict]:
     return rows
 
 
+# 26/11/2026 -- AJOUT SEUL, JAMAIS DE REECRITURE DU RUBAN VIVANT. Cette fusion reecrivait le ruban local (tri +
+# renommage) pendant que son collecteur l'alimentait. Mesure le 26/11 a 04:13 : `WinError 32` (le ruban etait ouvert
+# par un autre processus), et meme quand le renommage passait, les lignes ajoutees par le collecteur pendant la
+# fusion partaient dans le `.bak`, efface a la fusion suivante ; les lecteurs par decalage (explorer_autonome) et le
+# scelleur (suivi par prefixe) voyaient un fichier change sous eux. Desormais : le ruban local n'est QUE lu, les
+# lignes des lanes absentes sont AJOUTEES par `ajouter_atomique` (une ecriture que Windows place lui-meme en fin de
+# fichier ; le collecteur passe par la meme fonction).
+
+
+def _iter_jsonl(path: Path):
+    """Les objets JSON d'un fichier, un par un (le ruban local pese plus d'un Go : jamais tout en memoire)."""
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except (ValueError, TypeError):
+                    continue
+                if isinstance(obj, dict):
+                    yield obj
+    except OSError:
+        return
+
+
+def _instant(row: dict) -> int:
+    try:
+        return int(row.get("time") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def fusionner_explorer(root: Path, artefacts: Path) -> dict:
     cible = root / CIBLE
-    sources = ([cible] if cible.exists() else []) + sorted(
-        p for p in artefacts.rglob(MOTIF) if p.resolve() != cible.resolve())
-    par_hash: dict[str, dict] = {}
-    sans_hash: list[dict] = []
+    connus: set[str] = set()
+    sans_hash: set[str] = set()
+    locales = 0
+    for row in _iter_jsonl(cible):
+        locales += 1
+        h = row.get("hash")
+        if isinstance(h, str) and h:
+            connus.add(h)
+        else:
+            sans_hash.add(json.dumps(row, sort_keys=True, ensure_ascii=False))
+    nouvelles: list[dict] = []
     entrees = 0
-    for src in sources:
-        for row in _lire_jsonl(src):
+    for src in sorted(p for p in artefacts.rglob(MOTIF) if p.resolve() != cible.resolve()):
+        for row in _iter_jsonl(src):
             entrees += 1
             h = row.get("hash")
             if isinstance(h, str) and h:
-                par_hash.setdefault(h, row)
+                if h in connus:
+                    continue
+                connus.add(h)
             else:
-                sans_hash.append(row)
-    fusionnes = sorted(par_hash.values(),
-                       key=lambda r: (int(r.get("time") or 0), str(r.get("hash")))) + sans_hash
-    cible.parent.mkdir(parents=True, exist_ok=True)
-    tmp = cible.with_suffix(".jsonl.fusion.tmp")
-    with tmp.open("w", encoding="utf-8") as fh:
-        for row in fusionnes:
-            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
-    if cible.exists():
-        bak = cible.with_suffix(".jsonl.avant-fusion.bak")
-        if bak.exists():
-            bak.unlink()
-        cible.rename(bak)
-    tmp.rename(cible)
-    return {"entrees": entrees, "doublons_retires": max(0, entrees - len(fusionnes)),
-            "total_final": len(fusionnes)}
+                cle = json.dumps(row, sort_keys=True, ensure_ascii=False)
+                if cle in sans_hash:
+                    continue
+                sans_hash.add(cle)
+            nouvelles.append(row)
+    nouvelles.sort(key=lambda r: (_instant(r), str(r.get("hash"))))
+    if nouvelles:
+        ajouter_atomique(cible, "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in nouvelles), fsync=True)
+    return {"mode": "AJOUT_SEUL", "entrees": entrees, "locales": locales, "ajoutees": len(nouvelles),
+            "doublons_retires": entrees - len(nouvelles), "total_final": locales + len(nouvelles)}
 
 
 def _lister_runs(gh, cwd: Path, limite: int) -> list[str]:

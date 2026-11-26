@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from hl_observer.collection import collecte_fiable as CF
+from hl_observer.collection.copy_vault_checkpoint_socle import copy_vault_fill_writer_lock
 from hl_observer.ops import budget_rest as _BUDGET  # noqa: E402  (n° 22 : poids REST réel, sans bloquer)
 from hl_observer.collection.forward_poll_fills import (
     LIVE_POLL_SOURCE,
@@ -176,13 +177,14 @@ def _save_state(path: Path, state: dict[str, LeaderWatermark]) -> None:
     tmp.replace(path)
 
 
-def _append_fills(path: Path, rows: list[dict[str, Any]]) -> None:
+def _append_fills(root: Path, path: Path, rows: list[dict[str, Any]]) -> None:
     if not rows:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
-        for row in rows:
-            handle.write(json.dumps({**row, "source_id": POLL_SOURCE_ID}, ensure_ascii=False) + "\n")
+    with copy_vault_fill_writer_lock(root, wait_s=5.0):
+        with path.open("a", encoding="utf-8") as handle:
+            for row in rows:
+                handle.write(json.dumps({**row, "source_id": POLL_SOURCE_ID}, ensure_ascii=False) + "\n")
 
 
 def poll_once(
@@ -253,7 +255,7 @@ def poll_once(
                 fill.setdefault("vault", vault)
         causal, new_wm = partition_forward_fills(wm, fills, observed_at_ms=now_ms)
         state[vault] = new_wm
-        _append_fills(root / OUT_FILLS, causal)
+        _append_fills(root, root / OUT_FILLS, causal)
         _LAST_FILL_COUNT[vault] = len(causal)
         emitted += len(causal)
     # Log GROUPÉ et propre : un 429 géré par l'AIMD est un THROTTLE (flow control),

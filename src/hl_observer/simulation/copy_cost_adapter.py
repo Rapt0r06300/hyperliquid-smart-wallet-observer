@@ -29,13 +29,13 @@ def _number(value: object) -> float | None:
 
 def _at_or_before(
     rows: list[dict[str, Any]],
+    times: list[int],
     target_ms: float,
     *,
     freshness_ms: float,
 ) -> tuple[dict[str, Any] | None, float | None]:
     if not rows:
         return None, None
-    times = [int(row["_ts_ms"]) for row in rows]
     index = bisect.bisect_right(times, int(target_ms)) - 1
     if index < 0:
         return None, None
@@ -70,37 +70,45 @@ def measure_copy_cost_components(
     causal entry+exit depth and enough top-level capacity. Spread uses the 95th
     percentile of observed round-trip half-spread sums. Additional slippage is
     then measured as zero because no deeper level is crossed at the requested
-    notional. Missing evidence remains explicit and non-liquidatable.
+    notional. Missing evidence remains explicit and non-liquidatable. Events are
+    processed as an iterator, and the depth rows/time index are cached once per
+    instrument for this call so large candidate sets do not copy the same book.
     """
-    selected = [
-        dict(event)
-        for event in events
-        if _number(event.get("move_frac")) is not None
-        and float(event.get("move_frac")) >= float(threshold)
-    ]
     spreads: list[float] = []
     failures: dict[str, int] = {}
+    selected_count = 0
     matched = 0
     min_capacity = float("inf")
-    ages: list[float] = []
+    max_depth_age: float | None = None
+    rows_by_coin: dict[str, list[dict[str, Any]]] = {}
+    times_by_coin: dict[str, list[int]] = {}
 
     def fail(reason: str) -> None:
         failures[reason] = failures.get(reason, 0) + 1
 
-    for event in selected:
+    for event in events:
+        move_frac = _number(event.get("move_frac"))
+        if move_frac is None or move_frac < float(threshold):
+            continue
+        selected_count += 1
         coin = preserve_native_instrument_symbol(event.get("coin"))
         ts = _number(event.get("ts_ms"))
-        rows = list(depth_snapshots.get(coin) or [])
         if ts is None:
             fail("EVENT_TIMESTAMP_MISSING")
             continue
+        if coin not in rows_by_coin:
+            rows = list(depth_snapshots.get(coin) or [])
+            rows_by_coin[coin] = rows
+            times_by_coin[coin] = [int(row["_ts_ms"]) for row in rows]
+        rows = rows_by_coin[coin]
+        times = times_by_coin[coin]
         if not rows:
             fail("DEPTH_MISSING")
             continue
         entry_target = ts + float(copy_delay_ms)
         exit_target = entry_target + float(horizon_ms)
-        entry, entry_age = _at_or_before(rows, entry_target, freshness_ms=freshness_ms)
-        exit_, exit_age = _at_or_before(rows, exit_target, freshness_ms=freshness_ms)
+        entry, entry_age = _at_or_before(rows, times, entry_target, freshness_ms=freshness_ms)
+        exit_, exit_age = _at_or_before(rows, times, exit_target, freshness_ms=freshness_ms)
         if entry is None:
             fail("ENTRY_DEPTH_STALE_OR_FUTURE_ONLY")
             continue
@@ -123,9 +131,10 @@ def measure_copy_cost_components(
         matched += 1
         spreads.append(entry_half + exit_half)
         min_capacity = min(min_capacity, entry_capacity, exit_capacity)
-        ages.extend([float(entry_age or 0.0), float(exit_age or 0.0)])
+        event_max_age = max(float(entry_age or 0.0), float(exit_age or 0.0))
+        max_depth_age = event_max_age if max_depth_age is None else max(max_depth_age, event_max_age)
 
-    complete = bool(selected) and matched == len(selected) and not failures
+    complete = selected_count > 0 and matched == selected_count and not failures
     components = None
     if complete:
         components = {
@@ -138,7 +147,7 @@ def measure_copy_cost_components(
         }
     return {
         "schema_version": "hypersmart.copy_cost_evidence.v1",
-        "selected_events": len(selected),
+        "selected_events": selected_count,
         "matched_events": matched,
         "complete": complete,
         "components_bps": components,
@@ -149,7 +158,7 @@ def measure_copy_cost_components(
         "threshold": float(threshold),
         "depth_freshness_ms": float(freshness_ms),
         "min_observed_top_capacity_usd": None if matched == 0 else round(min_capacity, 6),
-        "max_depth_age_ms": max(ages) if ages else None,
+        "max_depth_age_ms": max_depth_age,
         "spread_rule": "P95_ENTRY_HALF_PLUS_EXIT_HALF",
         "slippage_rule": "ZERO_ONLY_WHEN_TOP_CAPACITY_COVERS_NOTIONAL",
         "latency_rule": "EMBEDDED_IN_DELAYED_ENTRY_GROSS",

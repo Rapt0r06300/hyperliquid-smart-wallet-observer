@@ -24,6 +24,13 @@ from hl_observer.backtesting.copy_vault_local_lab import (
     record_frozen_candidate,
     run_historical_trade_replay,
 )
+from hl_observer.backtesting.copy_vault_v21_frozen import NO_PROFIT_CEILING_USD
+
+
+def test_local_search_has_no_active_daily_profit_ceiling() -> None:
+    assert dict(local_lab._PARAMETER_DOMAINS)["daily_profit_lock_usd"] == (
+        NO_PROFIT_CEILING_USD,
+    )
 
 
 def test_chargeurs_de_signaux_lisent_les_rubans_materialises_et_excluent_local(tmp_path: Path) -> None:
@@ -59,7 +66,9 @@ def test_chargeurs_de_signaux_lisent_les_rubans_materialises_et_excluent_local(t
     from hl_observer.backtesting.leader_quality_signal import build_leader_quality_index, leader_prior_pnl_at
     index = build_leader_quality_index(local_lab._charger_leader_fills_safe(tmp_path))
     assert leader_prior_pnl_at(index, "0xSAFE", 1499) is None
-    assert leader_prior_pnl_at(index, "0xSAFE", 1500) == 2.5
+    # Equal receive-time is not enough to prove the leader fill preceded the signal.
+    assert leader_prior_pnl_at(index, "0xSAFE", 1500) is None
+    assert leader_prior_pnl_at(index, "0xSAFE", 1501) == 2.5
 
 
 def test_train_active_day_mean_uses_exact_daily_pnl_values() -> None:
@@ -323,6 +332,18 @@ def test_local_campaign_resume_preserves_reserved_attempt_without_reusing_candid
     monkeypatch.setattr(
         local_lab.cv, "load_observed_books", lambda *_args, **_kwargs: (books, {})
     )
+    from hl_observer.backtesting import copy_vault_labo_deux_phases as labo_two_phases
+
+    complete_days = [day * 86_400_000 for day in range(10, 20)]
+    monkeypatch.setattr(
+        labo_two_phases,
+        "entrees_de_phase_2",
+        lambda *_args, **_kwargs: (
+            metaorders, books,
+            {"complete_utc_day_starts_ms": complete_days,
+             "calendar_coverage_status": "PROVEN_FROM_VERIFIED_PHASE1_MANIFESTS"},
+        ),
+    )
     ledger = repository_root / "runtime" / "codex_research" / "HYPOTHESIS_LEDGER.jsonl"
     ledger.parent.mkdir(parents=True)
     ledger.write_text("", encoding="utf-8")
@@ -340,10 +361,15 @@ def test_local_campaign_resume_preserves_reserved_attempt_without_reusing_candid
     calls = {"count": 0, "interrupt_trial_once": True}
     evaluated_segments = []
     evaluated_input_counts = []
+    evaluated_complete_days = []
 
-    def evaluate(_metaorders, _books, _freeze, *, segment, **_kwargs):
+    def evaluate(
+        _metaorders, _books, _freeze, *, segment,
+        complete_utc_day_starts_ms=None, **_kwargs,
+    ):
         evaluated_segments.append(segment)
         evaluated_input_counts.append(len(_metaorders))
+        evaluated_complete_days.append(complete_utc_day_starts_ms)
         calls["count"] += 1
         if calls["count"] == 2 and calls["interrupt_trial_once"]:
             raise KeyboardInterrupt
@@ -354,6 +380,31 @@ def test_local_campaign_resume_preserves_reserved_attempt_without_reusing_candid
             "candidate_count": 0,
             "daily_mean_net_pnl_usd": pnl_mean,
             "active_day_mean_net_pnl_usd": pnl_mean,
+            "calendar_day_statistics": {
+                "status": "UNMEASURABLE",
+                "reason": "CALENDAR_PNL_UNMEASURABLE",
+                "calendar_day_count": 10,
+                "zero_trade_days": 2,
+                "daily_rows": [{"day": index} for index in range(10)],
+            },
+            "funding_receipt": {
+                "status": "UNMEASURABLE",
+                "reason": "FUNDING_PNL_UNMEASURABLE",
+                "trade_count": 10,
+                "settlement_crossing_count": 3,
+                "settlement_interval_hours": 1,
+                "economic_proof_allowed": False,
+                "trade_receipts": [{"large_payload": "must not be copied"}],
+            },
+            "placebo_funding_receipt": {
+                "status": "MEASURED_ZERO_NO_SETTLEMENT_CROSSED",
+                "reason": None,
+                "trade_count": 10,
+                "settlement_crossing_count": 0,
+                "settlement_interval_hours": 1,
+                "economic_proof_allowed": False,
+                "trade_receipts": [{"large_payload": "must not be copied"}],
+            },
             "statistics": {
                 "sample_count": 1,
                 "distinct_days": 1,
@@ -366,8 +417,10 @@ def test_local_campaign_resume_preserves_reserved_attempt_without_reusing_candid
 
     interrupted = local_lab.run_local_campaign(
         workspace, repository_root=repository_root, max_trials=1,
+        corpus_prepare=tmp_path / "prepared",
     )
     assert interrupted["status"] == "INTERRUPTED"
+    assert evaluated_complete_days[:2] == [complete_days, complete_days]
     campaign_root = (
         repository_root / "runtime" / "codex_research"
         / "copy_vault_continuous_lab" / manifest["selection_digest"]
@@ -395,6 +448,7 @@ def test_local_campaign_resume_preserves_reserved_attempt_without_reusing_candid
         workspace,
         repository_root=repository_root,
         continuous=True,
+        corpus_prepare=tmp_path / "prepared",
         on_update=stop_continuous_search_after_three_trials,
     )
     assert resumed["status"] == "INTERRUPTED"
@@ -412,8 +466,48 @@ def test_local_campaign_resume_preserves_reserved_attempt_without_reusing_candid
     checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
     assert len(trials) == 3
     assert len(attempts) == 4
+    assert all(
+        row["calendar_coverage_status"] == "PROVEN_FROM_VERIFIED_PHASE1_MANIFESTS"
+        and row["complete_utc_day_count"] == len(complete_days)
+        and row["calendar_coverage"]["complete_utc_days_sha256"]
+        for row in trials
+    )
+    assert all(row["calendar_pnl_summary"] == {
+        "status": "UNMEASURABLE",
+        "reason": "CALENDAR_PNL_UNMEASURABLE",
+        "calendar_day_count": 10,
+        "zero_trade_days": 2,
+    } for row in trials)
+    assert all(row["funding_receipt_summary"] == {
+        "ambiguous_boundary_trade_count": None,
+        "status": "UNMEASURABLE",
+        "reason": "FUNDING_PNL_UNMEASURABLE",
+        "trade_count": 10,
+        "settlement_crossing_count": 3,
+        "settlement_interval_hours": 1,
+        "expected_settlement_count": None,
+        "observed_settlement_count": None,
+        "settlement_valuation_basis": None,
+        "settlement_oracle_bound": None,
+        "economic_proof_allowed": False,
+    } for row in trials)
+    assert all(row["placebo_funding_receipt_summary"] == {
+        "ambiguous_boundary_trade_count": None,
+        "status": "MEASURED_ZERO_NO_SETTLEMENT_CROSSED",
+        "reason": None,
+        "trade_count": 10,
+        "settlement_crossing_count": 0,
+        "settlement_interval_hours": 1,
+        "expected_settlement_count": None,
+        "observed_settlement_count": None,
+        "settlement_valuation_basis": None,
+        "settlement_oracle_bound": None,
+        "economic_proof_allowed": False,
+    } for row in trials)
+    assert checkpoint["calendar_coverage"]["complete_utc_day_count"] == len(complete_days)
     assert resumed["freeze_created"] is False
     assert resumed["pnl_uplift_freeze_count"] == 3
+    assert all(days == complete_days for days in evaluated_complete_days)
     # DES PROPRIETES, pas des valeurs figees. `_candidate_parameters` saute les combinaisons dont
     # `core + probe` depasse le capital : sur 350 USD les 144 paires etaient finançables et les
     # index retenus etaient 2, 3, 4 ; sur 100 USD la recherche en saute et retient 3, 5, 9. Figer
@@ -1662,6 +1756,11 @@ def test_materialize_safe_workspace_unwraps_verified_copy_vault_assets(
     assert result["source_asset_inventory_count"] == 2
     assert result["source_asset_inventory_complete"] is True
     assert len(result["source_asset_inventory_sha256"]) == 64
+    funding_diagnostic = result["leader_realized_funding_diagnostic"]
+    assert funding_diagnostic["status"] == "UNMEASURABLE"
+    assert funding_diagnostic["coverage_status"] == "OBSERVED_EVENTS_ONLY_NOT_PROVEN_COMPLETE"
+    assert funding_diagnostic["copy_vault_follower_pnl_input"] is False
+    assert funding_diagnostic["zero_cashflow_proven"] is False
     fill = json.loads((tmp_path / "workspace/runtime/data/vault_fills.jsonl").read_text())
     assert fill["vault"] == "0xabc" and fill["signe"] == 1 and fill["source"] == "REST_BACKFILL"
     book = json.loads((tmp_path / "workspace/runtime/data/copy_vault_l2_tape.jsonl").read_text())
@@ -2255,6 +2354,7 @@ def test_historical_train_proxy_scales_to_contract_capital_without_claiming_proo
     proxy = _historical_train_proxy(tmp_path, {"train_report": relative})
 
     assert proxy is not None
+    assert proxy["method"] == f"LINEAR_SCALE_OF_LAST_V21_TRAIN_RESULT_TO_{PAPER_CAPITAL_USD:g}_USD"
     # LA RELATION, pas une valeur calculee a la main. Le proxy met a l'echelle du capital :
     # `scale = PAPER_CAPITAL_USD / exposure`, ou l'exposition vient de la fixture (cœur +
     # sonde). Figer 3.5 revenait a tester le capital d'hier ; recalculer 100/100 revenait a

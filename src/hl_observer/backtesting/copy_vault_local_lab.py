@@ -48,6 +48,7 @@ from hl_observer.backtesting.copy_vault_identite_campagne import (
 )
 from hl_observer.backtesting.copy_vault_protocol import (
     PAPER_EQUITY_USD,
+    PAPER_LEVERAGE,
     PAPER_TARGET_NET_USD_PER_DAY,
     canonical_copy_vault_coin,
 )
@@ -58,6 +59,7 @@ from hl_observer.backtesting.copy_vault_tier_local import (
 )
 from hl_observer.backtesting.copy_vault_train_executability import resume_lisible, sonder_train
 from hl_observer.backtesting.copy_vault_v21_frozen import (
+    NO_PROFIT_CEILING_USD,
     evaluate_frozen_v21,
     evaluate_frozen_v21_segment,
 )
@@ -101,9 +103,13 @@ from .copy_vault_preuve_journaliere import (  # noqa: F401
 
 OBJECTIVE_USD_PER_DAY = PAPER_TARGET_NET_USD_PER_DAY
 PAPER_CAPITAL_USD = PAPER_EQUITY_USD
+BASELINE_COMPARISON_BASIS = (
+    f"CURRENT_COPY_VAULT_SETTINGS_NORMALIZED_TO_{PAPER_CAPITAL_USD:g}_USD"
+)
 _SAFE_AUDIT_CACHE_SCHEMA = "hypersmart.copy_vault_local_safe_hash_cache.v1"
 _SAFE_FAMILIES = {
     "copy_vault_fills", "copy_vault_l2", "copy_vault_snapshot",
+    "copy_vault_broad_state",
     "copy_vault_bbo", "copy_vault_trades", "copy_vault_active_asset_ctx",
     "copy_vault_funding", "copy_vault_ledger",
 }
@@ -153,8 +159,8 @@ _PARAMETER_DOMAINS: tuple[tuple[str, tuple[Any, ...]], ...] = (
     ("signed_depth_imbalance_minimum", tuple(round(-0.3 + i * 0.05, 2) for i in range(13))),
     ("stop_loss_bps", tuple(float(value) for value in range(30, 341, 10))),
     ("take_profit_bps", tuple(float(value) for value in range(30, 541, 10))),
-    # #4 — l'option 1_000_000 = "sans plafond journalier" (jamais atteint sur ce capital) :
-    # laisse la recherche découvrir des stratégies qui gagnent plus les bons jours. La
+    # #4 — 1_000_000 est le marqueur de protocole « sans plafond journalier » ;
+    # l'évaluateur le désactive explicitement, même si un replay dépasse cette valeur. La
     # rigueur anti-overfit décide si c'est vraiment mieux (sinon une valeur plafonnée gagne).
     # PLAFOND DE PROFIT RETIRE DES REGLES ACTIVES (contrat du 18/11/2026). Ce parametre arrete la
     # journee des que `realized_today >= daily_profit_lock_usd` : le domaine proposait 2, 5, 10 et
@@ -165,7 +171,7 @@ _PARAMETER_DOMAINS: tuple[tuple[str, tuple[Any, ...]], ...] = (
     # Le parametre SURVIT avec sa valeur « sans plafond » : les gels deja ecrits le portent, et le
     # code qui le lit continue de fonctionner. Seul le CHOIX d'un plafond disparait.
     # `daily_loss_cap_usd`, le plafond de PERTE, reste entier : c'est une contrainte de risque.
-    ("daily_profit_lock_usd", (1_000_000.0,)),
+    ("daily_profit_lock_usd", (NO_PROFIT_CEILING_USD,)),
     ("horizon_ms", (30_000, 60_000, 120_000, 180_000, 300_000, 900_000, 1_800_000, 3_600_000)),
     ("vault_daily_limit", (2, 3, 4)),
     ("coin_daily_limit", (2, 3, 4)),
@@ -187,9 +193,10 @@ _PARAMETER_DOMAINS: tuple[tuple[str, tuple[Any, ...]], ...] = (
     ("max_coin_trade_share", (0.65, 0.80, 1.0)),
     ("max_vault_trade_share", (0.60, 0.80, 1.0)),
     ("max_top_positive_share", (0.60, 0.80, 1.0)),
-    # #3 — levier cherchable : 1.0 = v21 pur (preuve conservatrice) ; 10.0 = levier moteur
-    # (preuve = déploiement). Le plafond d'exposition brute monte en conséquence.
-    ("paper_leverage", (1.0, 2.0, 5.0, 10.0)),
+    # Le levier est une contrainte du contrat paper, pas un axe d'optimisation.
+    # Chercher une valeur supérieure ferait paraître plus rentables des candidats
+    # qui violent le profil demandé et gonflerait artificiellement l'exposition.
+    ("paper_leverage", (PAPER_LEVERAGE,)),
     # #5 — fenêtre causale (lag L2) cherchable : 30_000 ms = v21 pur ; valeurs plus larges
     # admettent un carnet de référence plus ancien (toujours <= signal) quand le L2 frais
     # manque -> moins de fills jetés par manque de données, sans fuite look-ahead.
@@ -292,6 +299,18 @@ def _canonical_json_sha256(value: object) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def _compact_gate_receipt(value: object, *, keys: Sequence[str]) -> dict[str, Any] | None:
+    """Keep rejection causes in trial receipts without copying per-trade payloads."""
+    if not isinstance(value, Mapping):
+        return None
+    compact: dict[str, Any] = {}
+    for key in keys:
+        item = value.get(key)
+        if item is None or type(item) in {str, int, bool}:
+            compact[key] = item
+    return compact
+
+
 def _campaign_engine_source_sha256(pipeline: object) -> str:
     """Bind a trial to the source files that define its active scoring path."""
     entry_loader = getattr(pipeline, "charger_entrees_alpha_notional_fixe_avec_audit", None)
@@ -304,6 +323,7 @@ def _campaign_engine_source_sha256(pipeline: object) -> str:
         "train_statistics": Path(summarize_daily_values.__code__.co_filename),
         "numeric_bounds": Path(float_not_above.__code__.co_filename),
         "l2_normalization": Path(normalize_l2_levels.__code__.co_filename),
+        "phase2_corpus": Path(__file__).with_name("copy_vault_labo_deux_phases.py"),
         "freeze_identity": Path(parameter_hash.__code__.co_filename),
         "safe_release_catalog": Path(load_release_history_audits.__code__.co_filename),
         "entry_reconstruction": Path(entry_loader.__code__.co_filename),
@@ -1519,9 +1539,7 @@ def _ecrire_les_rubans_lourds(
                 locales = _LOURDS.lignes_locales(
                     repository_root, shards_locaux, famille=_LOURDS.FAMILLE_LOCALE_CARNETS,
                     depuis_ms=depuis_ms, compteurs=cpt)
-            lues = 0
-            for ligne in itertools.chain(safe, locales):
-                lues += 1
+            for lues, ligne in enumerate(itertools.chain(safe, locales), start=1):
                 if progress is not None and lues % 500_000 == 0:
                     progress(f"Rubans en flux · {quoi} · passe {passes[quoi]} · {lues:,} lignes")
                 yield ligne
@@ -1692,6 +1710,11 @@ def materialize_safe_workspace(
         funding_rows.values(),
         key=lambda row: (row.get("exchange_ts_ms") or row["received_at_ms"], row["vault"]),
     )
+    from hl_observer.backtesting.copy_vault_funding_realise import (
+        resume_funding_reel_leaders,
+    )
+
+    leader_funding_diagnostic = resume_funding_reel_leaders(funding_tape_rows)
     ledger_tape_rows = sorted(
         ledger_rows.values(),
         key=lambda row: (row.get("exchange_ts_ms") or row["received_at_ms"], row["vault"]),
@@ -1818,6 +1841,7 @@ def materialize_safe_workspace(
         "unique_market_trades": len(market_trade_tape_rows),
         "unique_active_asset_contexts": len(active_context_tape_rows),
         "unique_leader_funding_events": len(funding_tape_rows),
+        "leader_realized_funding_diagnostic": leader_funding_diagnostic,
         "unique_leader_ledger_events": len(ledger_tape_rows),
         "leader_accounting_tapes_are_follower_pnl_inputs": False,
         "market_context_tapes_are_pnl_inputs": False,
@@ -2573,12 +2597,26 @@ def run_local_campaign(
             "real_execution": False,
         }
     pipeline = _load_pipeline()   # LES DEUX branches : sert a l'empreinte du MOTEUR
+    complete_utc_day_starts_ms: list[int] | None = None
+    calendar_coverage_status = "NOT_PROVIDED_BY_PREPARED_PHASE1_CORPUS"
+    phase2_coverage_windows_ms: list[Any] = []
     if corpus_prepare is not None:
         from hl_observer.backtesting.copy_vault_labo_deux_phases import entrees_de_phase_2
         metaorders, books, corpus_audit = entrees_de_phase_2(
             corpus_prepare, tranche=tranche, dire=say,
             max_leaders=int(input_manifest.get("max_leaders") or 0) or None,
             min_notionnel_leader=float(input_manifest.get("min_notionnel_leader_usd") or 0) or None)
+        raw_complete_days = corpus_audit.get("complete_utc_day_starts_ms")
+        complete_utc_day_starts_ms = (
+            list(raw_complete_days) if isinstance(raw_complete_days, list) else []
+        )
+        calendar_coverage_status = str(
+            corpus_audit.get("calendar_coverage_status")
+            or "UNMEASURABLE_PHASE1_COVERAGE_NOT_PROVEN"
+        )
+        raw_coverage_windows = corpus_audit.get("coverage_windows_ms")
+        if isinstance(raw_coverage_windows, list):
+            phase2_coverage_windows_ms = raw_coverage_windows
         entries_audit = {"status": "NOT_RECONSTRUCTED_PHASE_2", "corpus_prepare": corpus_audit}
         meta_audit = books_audit = {"status": "NOT_RECONSTRUCTED_PHASE_2"}
         entries = len(metaorders)
@@ -2897,7 +2935,21 @@ def run_local_campaign(
         if repository_root is not None
         else Path(__file__).resolve().parents[3]
     )
-    campaign_config, campaign_config_sha = _campaign_search_config(bounds)
+    campaign_config, _ = _campaign_search_config(bounds)
+    calendar_coverage = {
+        "status": calendar_coverage_status,
+        "complete_utc_day_count": len(complete_utc_day_starts_ms or []),
+        "complete_utc_days_sha256": (
+            _canonical_json_sha256(complete_utc_day_starts_ms)
+            if complete_utc_day_starts_ms is not None else None
+        ),
+        "phase1_windows_sha256": (
+            _canonical_json_sha256(phase2_coverage_windows_ms)
+            if corpus_prepare is not None else None
+        ),
+    }
+    campaign_config["calendar_coverage"] = calendar_coverage
+    campaign_config_sha = _canonical_json_sha256(campaign_config)
     engine_source_sha = _campaign_engine_source_sha256(pipeline)
     campaign_root = Path(campaign_root) if campaign_root else (
         repository_root / "runtime" / "codex_research" / "copy_vault_continuous_lab"
@@ -3020,7 +3072,7 @@ def run_local_campaign(
         prior_count_known = prior_trial_count is not None
         prior_trial_count = int(prior_trial_count or 0)
         baseline_train: dict[str, Any] | None = None
-        baseline_comparison_basis = "CURRENT_COPY_VAULT_SETTINGS_NORMALIZED_TO_200_USD"
+        baseline_comparison_basis = BASELINE_COMPARISON_BASIS
         freeze_path = repository_root / "runtime" / "codex_research" / "COPY_V21_PHYSICAL_FREEZE.json"
         try:
             current_freeze = json.loads(freeze_path.read_text(encoding="utf-8"))
@@ -3034,9 +3086,9 @@ def run_local_campaign(
             if sizing_scale < 1.0:
                 params["core_notional_usd"] = core_notional * sizing_scale
                 params["probe_notional_usd"] = probe_notional * sizing_scale
-                # Verrou NEUTRALISE comme les challengers (contrat : aucun plafond de profit)
-                params["daily_profit_lock_usd"] = max(
-                    dict(_PARAMETER_DOMAINS)["daily_profit_lock_usd"])
+            # Always normalize the incumbent to the current no-ceiling rule,
+            # even when no notional scaling is needed.
+            params["daily_profit_lock_usd"] = NO_PROFIT_CEILING_USD
             params["bounds"] = dict(bounds)
             params["bonferroni_trial_count"] = max(1, prior_trial_count + len(history_rows) + 1)
             rebased = dict(current_freeze.get("freeze", current_freeze))
@@ -3048,6 +3100,7 @@ def run_local_campaign(
             baseline_train = evaluate_frozen_v21_segment(
                 metaorders, books, {"freeze": rebased}, segment="train",
                 taux_funding_par_coin=taux_funding_scoring,
+                complete_utc_day_starts_ms=complete_utc_day_starts_ms,
             )
         except (OSError, ValueError, TypeError, KeyError, RuntimeError):
             baseline_train = None
@@ -3060,6 +3113,7 @@ def run_local_campaign(
                 incumbent_train = evaluate_frozen_v21_segment(
                     metaorders, books, best["candidate"], segment="train",
                     taux_funding_par_coin=taux_funding_scoring,
+                    complete_utc_day_starts_ms=complete_utc_day_starts_ms,
                 )
                 best["train"] = incumbent_train
                 incumbent_statistics = incumbent_train.get("statistics") or {}
@@ -3139,6 +3193,7 @@ def run_local_campaign(
                 "engine_source_sha256": engine_source_sha,
                 "campaign_config_sha256": campaign_config_sha,
                 "campaign_config": campaign_config,
+                "calendar_coverage": calendar_coverage,
                 "next_sequence_index": sequence_index,
                 "campaign_trials": len(history_rows),
                 "campaign_attempts": campaign_attempts,
@@ -3224,7 +3279,7 @@ def run_local_campaign(
             # Un sous-ensemble filtré N'UTILISE JAMAIS le cache partagé (clé (start,end),
             # pas par-metaorder) : cache dédié None, recalcul propre (pas de fuite).
             # #10 — pré-filtre qualité leader GELABLE : n'écarte un metaorder que si le
-            # track-record causal du leader (closedPnl cumulé <= signal) est < seuil. Seuil
+            # track-record causal du leader (closedPnl reçu strictement avant le signal) est < seuil. Seuil
             # "off" (SEUIL_LEADER_OFF_USD) ne filtre rien => identique à v21 pur.
             _seuil_ov = params.get("overshoot_seuil_bps", 1_000_000.0)
             _seuil_leader = params.get("leader_min_prior_closed_pnl_usd", SEUIL_LEADER_OFF_USD)
@@ -3245,6 +3300,7 @@ def run_local_campaign(
                 _mo_scored, books, freeze, segment="train",
                 prepared_cache=_cache_scored,
                 taux_funding_par_coin=taux_funding_scoring,
+                complete_utc_day_starts_ms=complete_utc_day_starts_ms,
             )
             stats = train.get("statistics") if isinstance(train.get("statistics"), Mapping) else {}
             daily_values = list(stats.get("daily_net_pnl_usd") or [])
@@ -3373,6 +3429,33 @@ def run_local_campaign(
                 "attempt_receipt_sha256": attempt["attempt_receipt_sha256"],
                 "engine_source_sha256": engine_source_sha,
                 "campaign_config_sha256": campaign_config_sha,
+                "calendar_coverage_status": calendar_coverage_status,
+                "complete_utc_day_count": len(complete_utc_day_starts_ms or []),
+                "calendar_coverage": calendar_coverage,
+                "calendar_pnl_summary": _compact_gate_receipt(
+                    train.get("calendar_day_statistics"),
+                    keys=("status", "reason", "calendar_day_count", "zero_trade_days"),
+                ),
+                "funding_receipt_summary": _compact_gate_receipt(
+                    train.get("funding_receipt"),
+                    keys=(
+                        "status", "reason", "trade_count", "settlement_crossing_count",
+                        "settlement_interval_hours", "ambiguous_boundary_trade_count",
+                        "expected_settlement_count", "observed_settlement_count",
+                        "settlement_valuation_basis", "settlement_oracle_bound",
+                        "economic_proof_allowed",
+                    ),
+                ),
+                "placebo_funding_receipt_summary": _compact_gate_receipt(
+                    train.get("placebo_funding_receipt"),
+                    keys=(
+                        "status", "reason", "trade_count", "settlement_crossing_count",
+                        "settlement_interval_hours", "ambiguous_boundary_trade_count",
+                        "expected_settlement_count", "observed_settlement_count",
+                        "settlement_valuation_basis", "settlement_oracle_bound",
+                        "economic_proof_allowed",
+                    ),
+                ),
                 "proposal_method": campaign_config["proposal_method"],
                 "proposal_seed": campaign_config["proposal_seed"],
                 "temporal_windows": dict(bounds),
@@ -3438,6 +3521,9 @@ def run_local_campaign(
                 ),
                 "exploratory_scoreable_only_family": "CETTE_CAMPAGNE_SEULEMENT_PAS_LE_VERDICT",
                 "data_complete": input_manifest.get("data_complete") is True,
+                "calendar_coverage_status": calendar_coverage_status,
+                "complete_utc_day_count": len(complete_utc_day_starts_ms or []),
+                "calendar_coverage": calendar_coverage,
                 "paper_read_only": True,
                 "real_execution": False,
             }
@@ -3590,6 +3676,7 @@ def run_local_campaign(
                 "best_candidate": best,
                 "baseline_train": baseline_train,
                 "last_trial": trial,
+                "calendar_coverage": calendar_coverage,
                 "last_attempt_receipt_sha256": trial["attempt_receipt_sha256"],
                 "freeze_created": best is not None,
                 "pnl_uplift_freeze_count": _pnl_uplift_freeze_count(history_rows),
@@ -3661,6 +3748,9 @@ def run_local_campaign(
             "engine_source_sha256": engine_source_sha,
             "campaign_config_sha256": campaign_config_sha,
             "data_complete": input_manifest.get("data_complete") is True,
+            "calendar_coverage_status": calendar_coverage_status,
+            "complete_utc_day_count": len(complete_utc_day_starts_ms or []),
+            "calendar_coverage": calendar_coverage,
             "paper_read_only": True,
             "real_execution": False,
         }
@@ -3719,6 +3809,7 @@ def run_local_campaign(
             "engine_source_sha256": engine_source_sha,
             "campaign_config_sha256": campaign_config_sha,
             "campaign_config": campaign_config,
+            "calendar_coverage": calendar_coverage,
             "next_sequence_index": next_sequence,
             "campaign_trials": len(durable_rows),
             "campaign_attempts": durable_state["campaign_attempts"],
@@ -3730,6 +3821,7 @@ def run_local_campaign(
             "best_candidate": best,
             "status": "INTERRUPTED",
             "updated_at_utc": datetime.now(UTC).isoformat(),
+            "calendar_coverage": calendar_coverage,
             "paper_read_only": True,
             "real_execution": False,
         })
@@ -3750,6 +3842,7 @@ def run_local_campaign(
             "candidate_history_path": str(trial_path),
             "attempt_history_path": str(attempt_path),
             "checkpoint_path": str(checkpoint_path),
+            "calendar_coverage": calendar_coverage,
             "paper_read_only": True,
             "real_execution": False,
         }
@@ -3850,7 +3943,7 @@ def evaluate_current_copy_vault(
 
 
 def _historical_train_proxy(root: Path, freeze: Mapping[str, Any]) -> dict[str, Any] | None:
-    """Scale the last immutable TRAIN result to 350 USD as an explicit rough proxy."""
+    """Scale the historical TRAIN result to current paper capital as a rough proxy."""
     relative = str(freeze.get("train_report") or "")
     path = root / relative if relative else (
         root / "runtime" / "reports" / "economic_campaigns" / "research_vnext"
@@ -3880,7 +3973,7 @@ def _historical_train_proxy(root: Path, freeze: Mapping[str, Any]) -> dict[str, 
         return None
     scale = PAPER_CAPITAL_USD / exposure
     return {
-        "method": "LINEAR_SCALE_OF_LAST_V21_TRAIN_RESULT_TO_200_USD",
+        "method": f"LINEAR_SCALE_OF_LAST_V21_TRAIN_RESULT_TO_{PAPER_CAPITAL_USD:g}_USD",
         "daily_net_usd": round(daily * scale, 8),
         "conservative_lcb_usd_per_day": round(lcb * scale, 8),
         "original_daily_net_usd": daily,
@@ -4356,7 +4449,7 @@ def record_frozen_candidate(
         _segment_commun_le_plus_profond(current_copy_vault, economic_result))
     comparable = segment_commun is not None
     if comparable:
-        baseline_segment = candidate_segment = segment_commun
+        candidate_segment = segment_commun
         baseline_daily, candidate_daily = commun_baseline, commun_candidat
     improvement = candidate_daily - baseline_daily if comparable else None
     comparison = (
@@ -4867,7 +4960,11 @@ def run_historical_trade_replay(
 
 
 def evaluate_objective_independent(net_usd_per_day: object, *, target_usd_per_day: object = OBJECTIVE_USD_PER_DAY) -> dict[str, Any]:
-    """Record small measured gains without using the target as a discovery filter."""
+    """Report net-PnL sign; the historical daily reference is informational only.
+
+    This helper does not certify an economic result. Certification remains the
+    responsibility of the independent evidence gates elsewhere in the lab.
+    """
     if (
         isinstance(net_usd_per_day, bool)
         or not isinstance(net_usd_per_day, (int, float))
@@ -4875,15 +4972,18 @@ def evaluate_objective_independent(net_usd_per_day: object, *, target_usd_per_da
         or isinstance(target_usd_per_day, bool)
         or not isinstance(target_usd_per_day, (int, float))
         or not math.isfinite(float(target_usd_per_day))
+        or float(target_usd_per_day) < 0.0
     ):
-        return {"status": "UNMEASURABLE", "reason": "NON_FINITE_OBJECTIVE_INPUT", "paper_read_only": True, "real_execution": False}
+        return {"status": "UNMEASURABLE", "reason": "INVALID_OBJECTIVE_REFERENCE", "paper_read_only": True, "real_execution": False}
     value = float(net_usd_per_day)
     target = float(target_usd_per_day)
     return {
-        "status": "PROVEN" if value >= target else "PROMISING" if value > 0 else "REJECTED",
+        "status": "PROMISING" if value > 0 else "REJECTED",
         "net_usd_per_day": value,
         "target_usd_per_day": target,
         "target_reached": value >= target,
+        "target_is_terminal": False,
+        "economic_proof_required": True,
         "discovery_filter_applied": False,
         "paper_read_only": True,
         "real_execution": False,

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from pathlib import Path
 import sys
 
@@ -281,6 +280,33 @@ def test_copy_vault_snapshot_without_receive_semantics_is_not_safe():
     value["provenance"]["timestamp_semantics"] = []
     status, _reasons = classify_manifest(value)
     assert status != "SAFE"
+
+
+def test_copy_vault_broad_state_requires_official_receive_only_nav_contract():
+    value = manifest()
+    value.update({
+        "family": "copy_vault_broad_state",
+        "venue": "hyperliquid",
+        "source": "hyperliquid_public_info",
+        "proof_of_pnl_allowed": False,
+        "reconciliation": {"status": "SNAPSHOT_VERIFIED"},
+    })
+    value["provenance"].update({
+        "transports": ["https"],
+        "timestamp_semantics": ["receive_observation_time_only"],
+    })
+    assert classify_manifest(value) == ("SAFE", [])
+
+    value["source"] = "unverified_source"
+    status, reasons = classify_manifest(value)
+    assert status != "SAFE"
+    assert "BROAD_STATE_SOURCE_NOT_OFFICIAL" in reasons
+
+    value["source"] = "hyperliquid_public_info"
+    value["proof_of_pnl_allowed"] = True
+    status, reasons = classify_manifest(value)
+    assert status != "SAFE"
+    assert "BROAD_STATE_CANNOT_PROVE_PNL" in reasons
 
 
 

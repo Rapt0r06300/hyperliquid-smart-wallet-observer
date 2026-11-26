@@ -11,7 +11,7 @@ import argparse
 import importlib.util
 import json
 import sys
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from types import FunctionType
 from typing import Any
@@ -19,9 +19,15 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from hl_observer.backtesting.copy_vault_v21_frozen import SCHEMA_VERSION as COPY_V21_EVALUATION_SCHEMA  # noqa: E402
+from hl_observer.backtesting import copy_vault_funding_realise as _FUNDING_REEL  # noqa: E402
+from hl_observer.backtesting.copy_vault_v21_frozen import (  # noqa: E402
+    SCHEMA_VERSION as COPY_V21_EVALUATION_SCHEMA,
+)
 from hl_observer.backtesting.copy_vault_v21_frozen import evaluate_frozen_v21  # noqa: E402
 from hl_observer.backtesting.economic_vnext_pack import run_economic_vnext_pack  # noqa: E402
+from hl_observer.backtesting.lead_lag_causal_diagnostics import (  # noqa: E402
+    diagnose_causal_book_coverage,
+)
 from hl_observer.datasets.economic_multi_source import (  # noqa: E402
     install_copy_vault_adapter,
     write_economic_source_coverage,
@@ -30,9 +36,6 @@ from hl_observer.datasets.source_discovery import (  # noqa: E402
     is_dataset_workspace,
     load_family_source_paths,
     write_family_source_manifest,
-)
-from hl_observer.backtesting.lead_lag_causal_diagnostics import (  # noqa: E402
-    diagnose_causal_book_coverage,
 )
 
 
@@ -86,6 +89,91 @@ def _copy_original_sources(root: Path) -> list[Path]:
         if path.name.casefold() == "carnet_venues.jsonl"
     ]
     return _unique_paths([*copy, *shared_books])
+
+
+def _load_copy_v21_funding(
+    data_root: Path,
+    metaorders: Iterable[Mapping[str, Any]],
+    books_by_coin: Mapping[str, list[dict[str, Any]]],
+    freeze_payload: Mapping[str, Any],
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    """Read only hash-verified funding rows needed by the frozen evaluation window."""
+    freeze = freeze_payload.get("freeze") or {}
+    if not isinstance(freeze, Mapping):
+        return None, {"status": "FREEZE_BOUNDS_UNMEASURABLE", "economic_proof_allowed": False}
+    parameters = freeze.get("parameters") or {}
+    if not isinstance(parameters, Mapping):
+        return None, {"status": "FREEZE_BOUNDS_UNMEASURABLE", "economic_proof_allowed": False}
+    bounds = parameters.get("bounds") or {}
+    if not isinstance(bounds, Mapping):
+        return None, {"status": "FREEZE_BOUNDS_UNMEASURABLE", "economic_proof_allowed": False}
+    start_ms = bounds.get("validation_start_ms")
+    if isinstance(start_ms, bool) or not isinstance(start_ms, int) or start_ms < 0:
+        return None, {"status": "FREEZE_BOUNDS_UNMEASURABLE", "economic_proof_allowed": False}
+    frozen_at_ms = freeze.get("frozen_at_ms")
+    if (
+        isinstance(frozen_at_ms, bool)
+        or not isinstance(frozen_at_ms, int)
+        or frozen_at_ms < 0
+    ):
+        return None, {"status": "FREEZE_BOUNDS_UNMEASURABLE", "economic_proof_allowed": False}
+
+    coins = sorted(
+        {
+            str(row.get("coin"))
+            for row in metaorders
+            if isinstance(row, Mapping) and row.get("coin")
+        }
+    )
+    end_ms = frozen_at_ms
+    for rows in books_by_coin.values():
+        for row in rows:
+            if not isinstance(row, Mapping):
+                continue
+            timestamp = row.get("ts_ms")
+            if (
+                isinstance(timestamp, int)
+                and not isinstance(timestamp, bool)
+                and timestamp >= 0
+            ):
+                end_ms = max(end_ms, timestamp)
+    if not coins or end_ms < start_ms:
+        return None, {
+            "status": "NO_ELIGIBLE_FUNDING_WINDOW",
+            "requested_coin_count": len(coins),
+            "requested_start_ms": start_ms,
+            "requested_end_ms": end_ms,
+            "economic_proof_allowed": False,
+        }
+    try:
+        rates, audit = _FUNDING_REEL.taux_du_coffre(
+            data_root,
+            coins=coins,
+            debut_ms=start_ms,
+            fin_ms=end_ms,
+        )
+    except (OSError, ValueError, TypeError, KeyError, ArithmeticError) as exc:
+        return None, {
+            "status": "LECTURE_IMPOSSIBLE",
+            "error_type": type(exc).__name__,
+            "requested_coin_count": len(coins),
+            "requested_start_ms": start_ms,
+            "requested_end_ms": end_ms,
+            "economic_proof_allowed": False,
+        }
+    return (rates or None), {
+        **audit,
+        "dataset_family": "funding_history",
+        "requested_coin_count": len(coins),
+        "requested_start_ms": start_ms,
+        "requested_end_ms": end_ms,
+        "economic_proof_allowed": audit.get("economic_proof_allowed") is True,
+        "all_selected_shards_sha256_verified": (
+            audit.get("status") == "LU_DEPUIS_LE_COFFRE"
+            and not audit.get("shards_refuses")
+        ),
+        "paper_read_only": True,
+    }
 
 
 def _looks_like_copy_provenance(paths: Iterable[str | Path]) -> bool:
@@ -242,16 +330,24 @@ def run_dataset_campaigns(
         continuous_books = {
             coin: rows for coin, rows in continuous_books.items() if rows
         }
+        taux_funding, audit_funding = _load_copy_v21_funding(
+            data_root,
+            causal_metaorders,
+            continuous_books,
+            freeze_payload,
+        )
         try:
             copy_v21 = evaluate_frozen_v21(
                 causal_metaorders,
                 continuous_books,
                 freeze_payload,
+                taux_funding_par_coin=taux_funding,
                 input_audit={
                     "entries": entries_audit,
                     "metaorders": metaorder_audit,
                     "books": books_audit,
                     "protocol": protocol_audit,
+                    "funding": audit_funding,
                     "continuous_causal_rows": sum(
                         len(rows) for rows in continuous_books.values()
                     ),
@@ -332,7 +428,7 @@ def main(argv: list[str] | None = None) -> int:
         net = row.get("net_pnl_usd")
         exact = "NON_MESURABLE" if net is None else f"{float(net):+.6f} USD"
         print(
-            f"{row['family']}: OBJECTIF +5 USD {row['objective_status']} | net={exact}",
+            f"{row['family']}: preuve={row['objective_status']} | PnL_net={exact}",
             flush=True,
         )
     coverage = result.get("source_coverage") or {}

@@ -25,6 +25,7 @@ from typing import Any
 
 RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
+from hl_observer.collection.collecte_fiable import ajouter_atomique  # noqa: E402
 
 from hl_observer.collection.forward_poll_fills import shard_leaders  # noqa: E402
 from hl_observer.collection.ordres_leader import construire_instantane_ordres, signature_ordres  # noqa: E402
@@ -181,8 +182,8 @@ class LaneContexte:
                 return False
         self._dernier_portefeuille[cle] = (snap["ts_ms"], tailles)
         async with self._lock:
-            with self.snap_out.open("a", encoding="utf-8") as h:
-                h.write(json.dumps(snap, ensure_ascii=False) + "\n")
+            # 26/11/2026 : ajout ATOMIQUE -- ce ruban a un autre ecrivain (AlinaSync et/ou un autre collecteur) ; deux ajouts "a" simultanes perdent des lignes sous Windows (mesure). Memes octets qu'avant.
+            ajouter_atomique(self.snap_out, json.dumps(snap, ensure_ascii=False) + "\n")
             self.portefeuilles += 1
         return True
 
@@ -213,8 +214,7 @@ class LaneContexte:
         snap = {**snap, "cadence_ms": cadence}
         self._derniers_ordres[cle] = (snap["ts_ms"], signature)
         async with self._lock:
-            with self.ordres_out.open("a", encoding="utf-8") as h:
-                h.write(json.dumps(snap, ensure_ascii=False) + "\n")
+            ajouter_atomique(self.ordres_out, json.dumps(snap, ensure_ascii=False) + "\n")   # 26/11 : atomique
             self.ordres += 1
         return True
 
@@ -222,9 +222,7 @@ class LaneContexte:
         if not rows:
             return
         async with self._lock:
-            with self.pos_out.open("a", encoding="utf-8") as h:
-                for r in rows:
-                    h.write(json.dumps(r, ensure_ascii=False) + "\n")
+            ajouter_atomique(self.pos_out, "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows))
             self.positions += len(rows)
 
     async def ecrire_twap(self, rows: list[dict[str, Any]]) -> None:
@@ -238,9 +236,7 @@ class LaneContexte:
         if not nouveaux:
             return
         async with self._lock:
-            with self.twap_out.open("a", encoding="utf-8") as h:
-                for r in nouveaux:
-                    h.write(json.dumps(r, ensure_ascii=False) + "\n")
+            ajouter_atomique(self.twap_out, "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in nouveaux))
             self.twap += len(nouveaux)
 
 

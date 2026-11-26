@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+from decimal import Decimal
 
 import pytest
 
@@ -73,6 +74,44 @@ def _segment(name: str, eligible: bool) -> dict:
             "settlement_crossing_count": 0,
         },
     }
+
+
+def test_frozen_replay_neutralizes_legacy_profit_ceiling_without_rewriting_freeze(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    freeze = _freeze()
+    frozen_parameters = copy.deepcopy(freeze["freeze"]["parameters"])
+    observed: dict[str, object] = {}
+
+    monkeypatch.setattr(V21, "_segment_candidates", lambda *args, **kwargs: ([], {}))
+
+    def settle(_candidates, _books, *, params, **_kwargs):
+        observed.update(params)
+        return [], [], {}
+
+    monkeypatch.setattr(V21, "_settle", settle)
+    monkeypatch.setattr(
+        V21,
+        "assess_train_variant",
+        lambda *_args, **_kwargs: {
+            "reasons": [],
+            "statistics": {"daily_net_pnl_usd": []},
+        },
+    )
+
+    result = V21.evaluate_frozen_v21_segment(
+        [], {}, freeze, segment="train"
+    )
+
+    assert observed["daily_profit_lock_usd"] == V21.NO_PROFIT_CEILING_USD
+    assert result["daily_profit_ceiling_policy"] == "NEUTRALIZED_AT_EVALUATION_V1"
+    assert result["frozen_daily_profit_lock_usd"] == 4.0
+    assert result["effective_daily_profit_lock_base_usd"] == V21.NO_PROFIT_CEILING_USD
+    effective_parameters = copy.deepcopy(frozen_parameters)
+    effective_parameters["daily_profit_lock_usd"] = V21.NO_PROFIT_CEILING_USD
+    assert result["effective_parameters_sha256"] == parameter_hash(effective_parameters)
+    assert freeze["freeze"]["parameters"] == frozen_parameters
+    assert freeze["freeze"]["parameters_sha256"] == parameter_hash(frozen_parameters)
 
 
 def test_reference_depth_uses_only_the_latest_book_received_by_signal_time() -> None:
@@ -305,11 +344,11 @@ def test_segment_calendar_coverage_rejects_malformed_day_entries() -> None:
         result["calendar_day_statistics"]["reason"]
         == "INVALID_COMPLETE_UTC_DAY_COVERAGE"
     )
-    assert result["carry_pnl_usd"] is None
+    assert result["carry_pnl_usd"] == 0.0
     assert result["eligible"] is False
     assert "CALENDAR_PNL_UNMEASURABLE" in result["reasons"]
-    assert result["funding_receipt"]["status"] == "UNMEASURABLE"
-    assert result["funding_receipt"]["reason"] == "SEGMENT_COVERAGE_UNMEASURABLE"
+    assert result["funding_receipt"]["status"] == "MEASURED_ZERO_NO_SETTLEMENT_CROSSED"
+    assert result["funding_receipt"]["reason"] == "NO_EXECUTED_POSITIONS"
 
 
 def test_funding_zero_requires_explicit_complete_utc_day_coverage() -> None:
@@ -324,8 +363,8 @@ def test_funding_zero_requires_explicit_complete_utc_day_coverage() -> None:
     )
 
     assert result["calendar_day_statistics"]["status"] == "UNMEASURABLE"
-    assert result["funding_receipt"]["status"] == "UNMEASURABLE"
-    assert result["carry_pnl_usd"] is None
+    assert result["funding_receipt"]["status"] == "MEASURED_ZERO_NO_SETTLEMENT_CROSSED"
+    assert result["carry_pnl_usd"] == 0.0
     assert result["eligible"] is False
     assert "CALENDAR_PNL_UNMEASURABLE" in result["reasons"]
 
@@ -382,6 +421,73 @@ def test_short_executed_position_proves_zero_without_crossing_boundary(
     assert result["funding_receipt"]["trade_count"] == 1
     assert result["funding_receipt"]["settlement_crossing_count"] == 0
     assert result["carry_pnl_usd"] == 0.0
+
+
+def test_segment_uses_funding_adjusted_net_for_real_and_placebo_scores(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    day = 86_400_000
+    actual = {
+        "trade_id": "actual-1",
+        "vault": "0xA",
+        "coin": "BTC",
+        "direction": 1,
+        "entry_ts_ms": 3_000_000,
+        "exit_ts_ms": 8_000_000,
+        "notional_usd": 100.0,
+        "gross_pnl_usd": 0.11,
+        "fees_usd": 0.10,
+        "spread_cost_usd": 0.0,
+        "slippage_cost_usd": 0.0,
+        "latency_cost_usd": 0.0,
+        "net_pnl_usd": 0.01,
+        "liquidatable_net": True,
+    }
+    placebo = {
+        **actual,
+        "trade_id": "placebo-1",
+        "direction": -1,
+        "gross_pnl_usd": 0.10,
+        "net_pnl_usd": 0.0,
+    }
+    monkeypatch.setattr(V21, "_segment_candidates", lambda *_args, **_kwargs: ([], {}))
+    monkeypatch.setattr(V21, "_settle", lambda *_args, **_kwargs: ([actual], [placebo], {}))
+    rates = {
+        "BTC": [
+            (3_600_000, Decimal("0.0001")),
+            (7_200_000, Decimal("0.0001")),
+        ]
+    }
+
+    result = V21._evaluate_segment(
+        [],
+        {},
+        segment="validation",
+        start_ms=0,
+        end_ms=day - 1,
+        params=_freeze()["freeze"]["parameters"],
+        complete_utc_day_starts_ms=[0],
+        taux_funding_par_coin=rates,
+    )
+
+    assert result["trades"][0]["net_pnl_usd"] == 0.01
+    assert result["trades"][0]["funding_pnl_usd"] is None
+    assert Decimal(result["trades"][0]["funding_estimate_usd_exact_decimal"]) == Decimal("-0.02")
+    assert result["trades"][0]["net_after_funding_usd"] is None
+    assert Decimal(result["trades"][0]["net_after_funding_estimate_usd_exact_decimal"]) == Decimal("-0.01")
+    assert Decimal(result["placebos"][0]["net_after_funding_estimate_usd_exact_decimal"]) == Decimal("0.02")
+    assert Decimal(result["statistics"]["net_pnl_usd_exact_decimal"]) == Decimal("-0.01")
+    assert Decimal(result["placebo_statistics"]["net_pnl_usd_exact_decimal"]) == Decimal("0.02")
+    assert [Decimal(value) for value in result["calendar_day_statistics"]["calendar_day_net_pnl_usd_exact_decimal"]] == [Decimal("-0.01")]
+    assert result["funding_receipt"]["status"] == "ESTIMATED"
+    assert result["funding_receipt"]["carry_pnl_usd"] is None
+    assert Decimal(result["funding_receipt"]["estimated_carry_pnl_usd_exact_decimal"]) == Decimal("-0.02")
+    assert result["daily_mean_net_pnl_usd"] is None
+    assert result["daily_mean_net_pnl_status"] == "ESTIMATE_ONLY"
+    assert result["scoring_value_key"] == "net_after_funding_estimate_usd"
+    assert "FUNDING_SETTLEMENT_ORACLE_UNAVAILABLE" in result["reasons"]
+    assert result["placebo_funding_receipt"]["status"] == "ESTIMATED"
+    assert "PLACEBO_NOT_BEATEN" in result["reasons"]
 
 
 @pytest.mark.parametrize(
@@ -464,8 +570,42 @@ def test_funding_aggregate_rechecks_zero_receipt_against_segment_trades() -> Non
     assert receipt["carry_pnl_usd"] is None
     assert (
         receipt["segments"]["validation"]["reason"]
-        == "ACCEPTED_TRADE_CROSSES_FUNDING_BOUNDARY"
+        == "FUNDING_BOUNDARY_UNPRICED"
     )
+
+
+def test_funding_aggregate_ne_promotes_pas_le_proxy_taux_x_notionnel() -> None:
+    trade = {
+        "coin": "BTC",
+        "entry_ts_ms": 3_000_000,
+        "exit_ts_ms": 8_000_000,
+        "notional_usd": 100.0,
+        "direction": 1,
+    }
+    rates = {"BTC": [(3_600_000, "0.0001"), (7_200_000, "0.0001")]}
+    segments = {}
+    for name in ("validation", "oos", "forward"):
+        segment = _segment(name, True)
+        segment["trades"] = [trade]
+        segment["funding_receipt"] = V21._funding_receipt([trade], rates)
+        segment["carry_pnl_usd"] = segment["funding_receipt"]["carry_pnl_usd"]
+        segments[name] = segment
+
+    aggregate = V21._aggregate_funding_receipt(segments, rates)
+
+    assert aggregate["status"] == "UNMEASURABLE"
+    assert aggregate["carry_pnl_usd"] is None
+    assert aggregate["reason"] == "SETTLEMENT_ORACLE_PRICE_NOT_JOINED"
+    assert all(
+        aggregate["segments"][name]["status"] == "ESTIMATED"
+        for name in ("validation", "oos", "forward")
+    )
+
+    segments["validation"]["funding_receipt"]["carry_pnl_usd"] = 0.0
+    segments["validation"]["carry_pnl_usd"] = 0.0
+    tampered = V21._aggregate_funding_receipt(segments, rates)
+    assert tampered["status"] == "UNMEASURABLE"
+    assert tampered["carry_pnl_usd"] is None
 
 
 def test_calendar_pnl_is_attributed_to_trade_close_utc_day(
@@ -477,7 +617,15 @@ def test_calendar_pnl_is_attributed_to_trade_close_utc_day(
         V21,
         "_settle",
         lambda *_args, **_kwargs: (
-            [{"net_pnl_usd": 7.0, "entry_ts_ms": day - 1, "exit_ts_ms": day}],
+            [{
+                "trade_id": "midnight-close",
+                "coin": "BTC",
+                "direction": 1,
+                "notional_usd": 100.0,
+                "net_pnl_usd": 7.0,
+                "entry_ts_ms": day - 1,
+                "exit_ts_ms": day + 1,
+            }],
             [],
             {},
         ),
@@ -499,6 +647,7 @@ def test_calendar_pnl_is_attributed_to_trade_close_utc_day(
         end_ms=2 * day - 1,
         params=_freeze()["freeze"]["parameters"],
         complete_utc_day_starts_ms=[0, day],
+        taux_funding_par_coin={"BTC": [(day, Decimal("0"))]},
     )
 
     assert result["calendar_day_statistics"]["calendar_day_net_pnl_usd"] == [
@@ -561,11 +710,11 @@ def test_forward_eligible_evaluation_wires_capacity_and_stress_diagnostics(
         ({"exit_ts_ms": 10}, "FUNDING_TRADE_TIMESTAMPS_UNMEASURABLE"),
         (
             {"entry_ts_ms": 3_599_999, "exit_ts_ms": 3_600_000},
-            "ACCEPTED_TRADE_CROSSES_FUNDING_BOUNDARY",
+            "FUNDING_BOUNDARY_UNPRICED",
         ),
         (
             {"entry_ts_ms": 3_600_000, "exit_ts_ms": 3_600_001},
-            "ACCEPTED_TRADE_CROSSES_FUNDING_BOUNDARY",
+            "FUNDING_BOUNDARY_UNPRICED",
         ),
     ],
 )
@@ -713,6 +862,68 @@ def test_settle_rejects_overlapping_positions_above_paper_gross_limit(
     attendu = params["core_notional_usd"]
     assert calls == [attendu, attendu]
     assert audit["PAPER_GROSS_EXPOSURE_REJECTED"] == 1
+
+
+def test_settle_neutralized_legacy_profit_ceiling_never_brakes_replay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    notionals: list[float] = []
+
+    def execute(metaorder, _books, *, notional_usd: float, **_kwargs):
+        notionals.append(notional_usd)
+        signal_ms = int(metaorder["signal_ts_ms"])
+        return (
+            {
+                "entry_ts_ms": signal_ms,
+                "exit_ts_ms": signal_ms + 1,
+                "direction": 1,
+                "quantity": notional_usd / 100.0,
+                "entry_price": 100.0,
+                "notional_usd": notional_usd,
+                "net_pnl_usd": 1_000_001.0,
+            },
+            "LIQUIDATABLE_NET",
+        )
+
+    monkeypatch.setattr(V21.cv, "execute_metaorder", execute)
+    params = {
+        "horizon_ms": 30_000,
+        "vault_daily_limit": 10,
+        "coin_daily_limit": 10,
+        "max_open_positions": 2,
+        "daily_profit_lock_usd": V21.NO_PROFIT_CEILING_USD,
+        "core_notional_usd": 50.0,
+        "probe_notional_usd": 10.0,
+        "stop_loss_bps": 50.0,
+        "take_profit_bps": 100.0,
+    }
+    candidates = [
+        {
+            "signal_ts_ms": signal_ms,
+            "metaorder_id": f"legacy-lock-{signal_ms}",
+            "vault": f"vault-{signal_ms}",
+            "coin": "BTC",
+            "direction": 1,
+            "signed_reference_depth_imbalance": 0.2,
+            "reference_two_sided_capacity_usd": 1_000.0,
+        }
+        for signal_ms in (1_000, 2_000)
+    ]
+
+    trades, _placebos, _audit = V21._settle(
+        candidates, {"BTC": []}, segment="validation", params=params
+    )
+
+    assert notionals == [50.0, 50.0, 50.0, 50.0]
+    assert len(trades) == 2
+    assert all(trade["daily_profit_lock_active"] is False for trade in trades)
+
+
+def test_settle_refuses_leverage_outside_fixed_paper_contract() -> None:
+    with pytest.raises(ValueError, match="COPY_V21_PAPER_LEVERAGE_OUTSIDE_CONTRACT"):
+        V21._settle(
+            [], {}, segment="train", params={"paper_leverage": 2.0}
+        )
 
 
 def test_capacity_scenario_scales_frozen_sizing_but_remains_diagnostic_only(
@@ -988,3 +1199,89 @@ def test_reference_objective_uses_exact_calendar_net_not_display_float() -> None
 def test_reference_objective_is_unmeasurable_without_exact_daily_receipt() -> None:
     rows = [_segment(name, True) for name in ("validation", "oos", "forward")]
     assert V21._reference_objective_status(*rows) == "UNMEASURABLE"
+
+
+def test_evaluator_v21_transmet_les_taux_funding_aux_trois_segments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rates = {"BTC": [(3_600_000, "0.0001")]}
+    observed: dict[str, object] = {}
+
+    def evaluate_segment(*_args, segment: str, taux_funding_par_coin=None, **_kwargs):
+        observed[segment] = taux_funding_par_coin
+        return _segment(segment, True)
+
+    monkeypatch.setattr(V21, "_evaluate_segment", evaluate_segment)
+    monkeypatch.setattr(
+        V21,
+        "evaluate_capacity_scenarios",
+        lambda *_args, **_kwargs: {"status": "DIAGNOSTIC_ONLY"},
+    )
+    monkeypatch.setattr(
+        V21,
+        "evaluate_stress_matrix",
+        lambda *_args, **_kwargs: {"status": "DIAGNOSTIC_ONLY"},
+    )
+    funding_audit = {"status": "LU_DEPUIS_LE_COFFRE", "reglements_gardes": 1}
+
+    report = V21.evaluate_frozen_v21(
+        [],
+        {},
+        _freeze(),
+        taux_funding_par_coin=rates,
+        input_audit={"funding": funding_audit},
+    )
+
+    assert observed == {"validation": rates, "oos": rates, "forward": rates}
+    assert report["input_audit"]["funding"] == funding_audit
+
+
+def test_funding_local_exploratoire_ne_peut_pas_devenir_preuve_economique(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trade = {
+        "coin": "BTC",
+        "entry_ts_ms": 3_000_000,
+        "exit_ts_ms": 8_000_000,
+        "notional_usd": 100.0,
+        "direction": 1,
+    }
+    rates = {"BTC": [(3_600_000, "0.0001"), (7_200_000, "0.0001")]}
+
+    def evaluate_segment(*_args, segment: str, **_kwargs):
+        result = _segment(segment, True)
+        result["trades"] = [trade]
+        result["funding_receipt"] = V21._funding_receipt([trade], rates)
+        result["carry_pnl_usd"] = result["funding_receipt"]["carry_pnl_usd"]
+        return result
+
+    monkeypatch.setattr(V21, "_evaluate_segment", evaluate_segment)
+    monkeypatch.setattr(
+        V21,
+        "evaluate_capacity_scenarios",
+        lambda *_args, **_kwargs: {"status": "DIAGNOSTIC_ONLY"},
+    )
+    monkeypatch.setattr(
+        V21,
+        "evaluate_stress_matrix",
+        lambda *_args, **_kwargs: {"status": "DIAGNOSTIC_ONLY"},
+    )
+
+    report = V21.evaluate_frozen_v21(
+        [],
+        {},
+        _freeze(),
+        taux_funding_par_coin=rates,
+        input_audit={
+            "funding": {
+                "economic_proof_allowed": False,
+                "evidence_admission": "LOCAL_CERTIFIED_EXPLORATORY_ONLY",
+            }
+        },
+    )
+
+    assert report["funding_receipt"]["status"] == "UNMEASURABLE"
+    assert report["economically_proven"] is False
+    assert report["objective_status"] == "UNMEASURABLE"
+    assert report["funding_proof_admission"]["reason"] == "SETTLEMENT_ORACLE_PRICE_NOT_JOINED"
+    assert report["funding_proof_admission"]["funding_estimate_used"] is True

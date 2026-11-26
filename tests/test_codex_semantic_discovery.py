@@ -1,3 +1,4 @@
+import hashlib
 import json
 import subprocess
 import sys
@@ -313,7 +314,7 @@ def test_cross_venue_history_stays_readable_but_generation_is_disabled():
         generate_semantic_plans(catalog, "cross_venue_dislocation_v2", 2000, 0)
 
 
-def test_semantic_cli_combines_historical_memory_and_accepts_retest_evidence(tmp_path):
+def test_semantic_cli_marks_retest_evidence_as_an_unverified_assertion(tmp_path):
     catalog_path = tmp_path / "catalog.json"
     catalog_path.write_text(json.dumps(_catalog()), encoding="utf-8")
     plans = generate_semantic_plans(_catalog(), "copy_vault", 40, 3)
@@ -371,11 +372,14 @@ def test_semantic_cli_combines_historical_memory_and_accepts_retest_evidence(tmp
         return json.loads(output.read_text(encoding="utf-8"))
 
     without_retest = run([])
+    assert without_retest["retest_evidence_status"] == "NONE"
     assert failed_plan["semantic_key"] not in {
         plan["semantic_key"] for plan in without_retest["shortlist"]
     }
 
     with_retest = run(["--retest-evidence", "new-data"])
+    assert with_retest["retest_evidence_status"] == "UNVERIFIED_ASSERTION"
+    assert with_retest["certifying"] is False
     assert failed_plan["semantic_key"] in {
         plan["semantic_key"] for plan in with_retest["shortlist"]
     }
@@ -464,3 +468,93 @@ def test_semantic_cli_runs_from_clean_interpreter_without_touching_repo_runtime(
     assert payload["certifying"] is False
     family_status = accounting["families"]["copy_vault"]
     assert family_status["filtered_before_llm"] == family_status["generated"] - 5
+
+
+def test_semantic_cli_binds_shortlist_to_exact_inputs_without_changing_ranking(tmp_path):
+    catalog_path = tmp_path / "catalog.json"
+    catalog_bytes = json.dumps(_catalog(), sort_keys=True).encode("utf-8")
+    catalog_path.write_bytes(catalog_bytes)
+    input_paths = {
+        "catalog": catalog_path,
+        "hypothesis_ledger": tmp_path / "ledger.jsonl",
+        "runtime_process_memory": tmp_path / "runtime.jsonl",
+        "historical_process_memory": tmp_path / "historical.jsonl",
+    }
+    for name, path in input_paths.items():
+        if name not in {"catalog", "runtime_process_memory"}:
+            path.write_bytes(b"")
+
+    output = tmp_path / "shortlist.json"
+    status = tmp_path / "status.json"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            str(ROOT / "tools/codex_semantic_discovery.py"),
+            "--family",
+            "copy_vault",
+            "--pool-size",
+            "40",
+            "--shortlist",
+            "5",
+            "--seed",
+            "3",
+            "--catalog",
+            str(input_paths["catalog"]),
+            "--ledger",
+            str(input_paths["hypothesis_ledger"]),
+            "--process-memory",
+            str(input_paths["runtime_process_memory"]),
+            "--historical-process-memory",
+            str(input_paths["historical_process_memory"]),
+            "--out",
+            str(output),
+            "--status-out",
+            str(status),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    source_inputs = payload["source_inputs"]
+    for input_name, path in input_paths.items():
+        fingerprint = source_inputs[input_name]
+        if input_name == "runtime_process_memory":
+            assert fingerprint == {
+                "path": f"external/{path.name}",
+                "status": "MISSING",
+                "size_bytes": None,
+                "sha256": None,
+            }
+        else:
+            content = path.read_bytes()
+            assert fingerprint == {
+                "path": f"external/{path.name}",
+                "status": "VERIFIED",
+                "size_bytes": len(content),
+                "sha256": hashlib.sha256(content).hexdigest(),
+            }
+        assert str(tmp_path) not in fingerprint["path"]
+
+    assert (payload["pool_size"], payload["shortlist_limit"], payload["seed"]) == (40, 5, 3)
+    expected = rank_semantic_plans(
+        generate_semantic_plans(_catalog(), "copy_vault", 40, 3), [], [], 5
+    )
+    assert payload["shortlist"] == expected
+    assert json.loads(status.read_text(encoding="utf-8"))["families"]["copy_vault"][
+        "source_inputs"
+    ] == source_inputs
+    first_receipt = output.read_bytes()
+    repeated = subprocess.run(
+        result.args,
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert repeated.returncode == 0, repeated.stderr
+    assert output.read_bytes() == first_receipt

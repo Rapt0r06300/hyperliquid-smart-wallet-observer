@@ -7,6 +7,7 @@ tournent RÉELLEMENT ; TPE/CMA-ES/NSGA-II/Hyperband passent par Optuna (SQLite +
 from __future__ import annotations
 
 import itertools
+import math
 import random
 import time
 from pathlib import Path
@@ -88,7 +89,7 @@ def _halton(i: int, base: int) -> float:
     return r
 
 
-def _grille(espace: dict, n: int):
+def _iter_grille(espace: dict, n: int):
     axes = []
     for k, dom in espace.items():
         if isinstance(dom, (list, tuple)):
@@ -96,21 +97,53 @@ def _grille(espace: dict, n: int):
         elif isinstance(dom, dict):
             pas = 5
             axes.append([(k, dom["min"] + (dom["max"] - dom["min"]) * j / (pas - 1)) for j in range(pas)])
-    out = []
-    for combo in itertools.product(*axes):
-        out.append(dict(combo))
-        if len(out) >= n:
-            break
-    return out
+    for combo in itertools.islice(itertools.product(*axes), max(0, n)):
+        yield dict(combo)
 
 
-def optimiser(evaluer_params, espace: dict, *, outil: str = "random", n_trials: int = 24,
-              storage_dir: Path | None = None, seed: int = 0) -> dict:
+def _grille(espace: dict, n: int):
+    """Compatibilité historique : retourne la grille matérialisée à la demande."""
+    return list(_iter_grille(espace, n))
+
+
+def optimiser(
+    evaluer_params,
+    espace: dict,
+    *,
+    outil: str = "random",
+    n_trials: int = 24,
+    storage_dir: Path | None = None,
+    seed: int = 0,
+    max_wall_seconds: float | None = None,
+) -> dict:
     """Lance RÉELLEMENT `outil` : propose des paramètres, appelle `evaluer_params(params)->metriques`, calcule
     l'objectif multi-critères, suit le meilleur. Rend les compteurs réels. Optuna si dispo (SQLite + reprise)."""
+    if max_wall_seconds is not None:
+        try:
+            wall_budget = float(max_wall_seconds)
+        except (OverflowError, TypeError, ValueError) as exc:
+            raise ValueError("max_wall_seconds must be a finite positive number") from exc
+        if (
+            isinstance(max_wall_seconds, bool)
+            or not isinstance(max_wall_seconds, (int, float))
+            or not math.isfinite(wall_budget)
+            or wall_budget <= 0
+        ):
+            raise ValueError("max_wall_seconds must be a finite positive number")
+        max_wall_seconds = wall_budget
     t0 = time.time()
+    monotonic_start = time.monotonic()
+    deadline = (
+        monotonic_start + float(max_wall_seconds)
+        if max_wall_seconds is not None
+        else None
+    )
     base = {"outil": outil, "disponible": True, "lance": False, "trials_proposes": 0, "trials_termines": 0,
-            "trials_prunes": 0, "trials_echoues": 0, "meilleur": None, "meilleur_score": None, "cpu_s": 0.0}
+            "trials_prunes": 0, "trials_echoues": 0, "meilleur": None, "meilleur_score": None,
+            "cpu_s": 0.0, "wall_budget_seconds": max_wall_seconds,
+            "wall_budget_enforced": max_wall_seconds is not None,
+            "wall_budget_enforcement": "between_trials" if max_wall_seconds is not None else None,
+            "wall_budget_exhausted": False, "wall_budget_overrun": False}
     rng = random.Random(seed)
 
     def _eval(params, budget: float = 1.0):
@@ -129,16 +162,31 @@ def optimiser(evaluer_params, espace: dict, *, outil: str = "random", n_trials: 
     opt_present = _optuna() is not None
     if outil in ("grid", "random") or (outil == "qmc" and not opt_present):
         if outil == "grid":
-            props = _grille(espace, n_trials)
+            props = _iter_grille(espace, n_trials)
         elif outil == "qmc":
-            props = [{k: (dom[int(_halton(i, 2) * len(dom)) % len(dom)] if isinstance(dom, (list, tuple))
-                          else dom["min"] + (dom["max"] - dom["min"]) * _halton(i, 3))
-                      for k, dom in espace.items()} for i in range(n_trials)]
+            props = (
+                {
+                    k: (
+                        dom[int(_halton(i, 2) * len(dom)) % len(dom)]
+                        if isinstance(dom, (list, tuple))
+                        else dom["min"] + (dom["max"] - dom["min"]) * _halton(i, 3)
+                    )
+                    for k, dom in espace.items()
+                }
+                for i in range(n_trials)
+            )
             base["moteur"] = "halton_pur"
         else:
-            props = [_echantillon(espace, lambda n: rng.random() * n) for _ in range(n_trials)]
-        base["lance"] = True; base["trials_proposes"] = len(props)
+            props = (
+                _echantillon(espace, lambda n: rng.random() * n)
+                for _ in range(n_trials)
+            )
+        base["lance"] = True
         for params in props:
+            if deadline is not None and time.monotonic() >= deadline:
+                base["wall_budget_exhausted"] = True
+                break
+            base["trials_proposes"] += 1
             sc, m = _eval(params)
             if sc is None:
                 base["trials_echoues"] += 1
@@ -146,6 +194,8 @@ def optimiser(evaluer_params, espace: dict, *, outil: str = "random", n_trials: 
             base["trials_termines"] += 1
             if base["meilleur_score"] is None or sc > base["meilleur_score"]:
                 base["meilleur_score"], base["meilleur"] = round(sc, 4), {"params": params, "metriques": m}
+        if deadline is not None:
+            base["wall_budget_overrun"] = time.monotonic() >= deadline
         base["cpu_s"] = round(time.time() - t0, 4)
         return base
 
@@ -154,7 +204,14 @@ def optimiser(evaluer_params, espace: dict, *, outil: str = "random", n_trials: 
     if not opt:
         if outil == "qmc":                                   # qmc a un repli pur Python (déjà géré plus haut)
             return base
-        return {**base, "disponible": False, "lance": False, "raison": "optuna non installe"}
+        return {
+            **base,
+            "disponible": False,
+            "lance": False,
+            "wall_budget_enforced": False,
+            "wall_budget_enforcement": None,
+            "raison": "optuna non installe",
+        }
     try:
         storage = None
         if storage_dir is not None:
@@ -195,7 +252,12 @@ def optimiser(evaluer_params, espace: dict, *, outil: str = "random", n_trials: 
                     raise opt.TrialPruned()
                 return sc, float(m.get("pf", 1.0) or 1.0)    # deux objectifs distincts
 
-            study.optimize(_obj_multi, n_trials=n_trials, catch=(Exception,))
+            study.optimize(
+                _obj_multi,
+                n_trials=n_trials,
+                timeout=max_wall_seconds,
+                catch=(Exception,),
+            )
             etats = [t.state.name for t in study.trials]
             pareto = list(getattr(study, "best_trials", []) or [])
             base.update({"lance": True, "multi_objectif": True, "objectifs": ["net", "pf"],
@@ -204,6 +266,14 @@ def optimiser(evaluer_params, espace: dict, *, outil: str = "random", n_trials: 
                          "n_pareto": len(pareto), "meilleur": ({"n_solutions_pareto": len(pareto)} if pareto else None),
                          "cpu_s": round(time.time() - t0, 4), "storage": storage,
                          "sampler": nm, "pruner": pn})
+            base["wall_budget_exhausted"] = bool(
+                deadline is not None
+                and time.monotonic() >= deadline
+                and len(study.trials) < n_trials
+            )
+            base["wall_budget_overrun"] = bool(
+                deadline is not None and time.monotonic() >= deadline
+            )
             return base
 
         # 4) mono-objectif (tpe / cma_es / qmc / pruners). Les PRUNERS montent en RESSOURCE : chaque étape évalue
@@ -230,7 +300,12 @@ def optimiser(evaluer_params, espace: dict, *, outil: str = "random", n_trials: 
                 raise opt.TrialPruned()
             return sc
 
-        study.optimize(_obj, n_trials=n_trials, catch=(Exception,))
+        study.optimize(
+            _obj,
+            n_trials=n_trials,
+            timeout=max_wall_seconds,
+            catch=(Exception,),
+        )
         etats = [t.state.name for t in study.trials]
         base.update({"lance": True, "trials_proposes": len(study.trials),
                      "trials_termines": etats.count("COMPLETE"), "trials_prunes": etats.count("PRUNED"),
@@ -240,9 +315,24 @@ def optimiser(evaluer_params, espace: dict, *, outil: str = "random", n_trials: 
                      "cpu_s": round(time.time() - t0, 4), "storage": storage,
                      "sampler": nm, "pruner": pn,
                      "ressource_croissante": (list(RESSOURCE_LADDER) if pn else None)})
+        base["wall_budget_exhausted"] = bool(
+            deadline is not None
+            and time.monotonic() >= deadline
+            and len(study.trials) < n_trials
+        )
+        base["wall_budget_overrun"] = bool(
+            deadline is not None and time.monotonic() >= deadline
+        )
         return base
     except Exception as e:  # noqa: BLE001
-        return {**base, "disponible": True, "lance": False, "raison": "erreur optuna: %s" % str(e)[:120]}
+        return {
+            **base,
+            "disponible": True,
+            "lance": False,
+            "wall_budget_enforced": False,
+            "wall_budget_enforcement": None,
+            "raison": "erreur optuna: %s" % str(e)[:120],
+        }
 
 
 def lancer_registre(evaluer_params, espace: dict, *, n_trials: int = 16, storage_dir: Path | None = None,

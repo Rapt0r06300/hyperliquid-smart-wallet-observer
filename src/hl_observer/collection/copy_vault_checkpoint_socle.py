@@ -13,20 +13,118 @@ signature, aucune clé : la seule destination réseau est l'endpoint public ``/i
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
+import errno
 import hashlib
 import json
 import hashlib
 import os
+import time
 import urllib.request
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from hl_observer.collection.collecte_fiable import ajouter_atomique
 from hl_observer.instrument_identity import preserve_native_instrument_symbol
 from hl_observer.normalization.l2_book import normalize_l2_levels
 
 INFO_URL = "https://api.hyperliquid.xyz/info"
 MAX_TARGET_LAG_MS = 30_000
+CHECKPOINT_SOURCE_RELPATH = Path("runtime") / "data" / "vault_fills_live.jsonl"
+CHECKPOINT_SOURCE_LOCK_RELPATH = Path("runtime") / "locks" / "copy_vault_checkpoint_source.lock"
+FILL_WRITER_LOCK_RELPATH = Path("runtime") / "locks" / "copy_vault_fill_writer.lock"
+
+
+class InterprocessLockBusy(RuntimeError):
+    """A short-lived cooperative file lock is currently held by another process."""
+
+
+class CheckpointSourceBusy(InterprocessLockBusy):
+    """The forward-only checkpoint companion currently owns the shared source."""
+
+
+class FillWriterBusy(InterprocessLockBusy):
+    """An append is in progress at the fill-file replacement boundary."""
+
+
+class FillSourceChanged(RuntimeError):
+    """A live append arrived while a prepared fill merge was being computed."""
+
+
+def _lock_contention(error: OSError) -> bool:
+    return error.errno in {errno.EACCES, errno.EAGAIN, errno.EDEADLK} or getattr(
+        error, "winerror", None
+    ) == 33
+
+
+@contextmanager
+def _interprocess_file_lock(lock_path: Path, *, wait_s: float = 0.0,
+                            busy_type: type[RuntimeError] = InterprocessLockBusy):
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = lock_path.open("a+b")
+    locked = False
+    try:
+        handle.seek(0, os.SEEK_END)
+        if handle.tell() == 0:
+            handle.write(b"\0")
+            handle.flush()
+        deadline = time.monotonic() + max(0.0, float(wait_s))
+        while True:
+            handle.seek(0)
+            try:
+                if os.name == "nt":
+                    import msvcrt
+
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                locked = True
+                break
+            except OSError as error:
+                if not _lock_contention(error):
+                    raise
+                if time.monotonic() >= deadline:
+                    raise busy_type(f"cooperative lock is busy: {lock_path.name}") from error
+                time.sleep(min(0.05, max(0.001, deadline - time.monotonic())))
+        yield lock_path
+    finally:
+        try:
+            if locked:
+                handle.seek(0)
+                if os.name == "nt":
+                    import msvcrt
+
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            handle.close()
+
+
+@contextmanager
+def copy_vault_checkpoint_source_lock(root: Path, *, wait_s: float = 0.0):
+    """Coordinate lane replacement with the forward-only fills tailer.
+
+    The OS releases this advisory lock on process exit. The companion holds it
+    for its lifetime; lane merging takes it briefly. Append-only collectors use
+    a distinct short lock and continue while this lock is held.
+    """
+    lock_path = Path(root) / CHECKPOINT_SOURCE_LOCK_RELPATH
+    with _interprocess_file_lock(lock_path, wait_s=wait_s, busy_type=CheckpointSourceBusy):
+        yield lock_path
+
+
+@contextmanager
+def copy_vault_fill_writer_lock(root: Path, *, wait_s: float = 0.0):
+    """Serialize a single append against the final atomic fill-file replacement."""
+    lock_path = Path(root) / FILL_WRITER_LOCK_RELPATH
+    with _interprocess_file_lock(lock_path, wait_s=wait_s, busy_type=FillWriterBusy):
+        yield lock_path
 
 
 def _strict_int(value: Any, field: str) -> int:
@@ -48,11 +146,11 @@ def _exact_positive_timestamp(value: Any, field: str) -> int:
 
 
 def _append_jsonl(path: Path, payload: Mapping[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8", newline="\n") as handle:
-        handle.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n")
-        handle.flush()
-        os.fsync(handle.fileno())
+    # 26/11/2026 : ajout ATOMIQUE. `copy_vault_l2_tape.jsonl` a trois ecrivains (le collecteur userfills, ce socle via
+    # le tail des points de controle, et AlinaSync) ; deux ajouts "a" simultanes perdent des lignes sous Windows
+    # (mesure). Memes octets qu'avant : JSON compact, fin de ligne "\n", fsync.
+    ajouter_atomique(path, json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n",
+                     fins_texte=False, fsync=True)
 
 
 def fetch_hyperliquid_l2_book(coin: str, *, timeout_s: float = 2.0) -> dict[str, Any] | None:

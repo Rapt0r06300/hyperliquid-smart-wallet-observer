@@ -28,6 +28,7 @@ from typing import Any
 
 RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
+from hl_observer.collection.collecte_fiable import ajouter_atomique  # noqa: E402
 
 WS_URL = "wss://rpc.hyperliquid.xyz/ws"
 OUT_DEFAUT = Path("runtime") / "data" / "explorer_tx_tape.jsonl"
@@ -133,8 +134,8 @@ class CollecteExplorer:
             lignes.append(json.dumps(rec, ensure_ascii=False))
         if lignes:
             async with self._lock:
-                with self.out_path.open("a", encoding="utf-8") as h2:
-                    h2.write("\n".join(lignes) + "\n")
+                # 26/11/2026 : ajout ATOMIQUE -- ce ruban a un autre ecrivain (AlinaSync et/ou un autre collecteur) ; deux ajouts "a" simultanes perdent des lignes sous Windows (mesure). Memes octets qu'avant.
+                ajouter_atomique(self.out_path, "\n".join(lignes) + "\n")
                 self.ecrits += len(lignes)
 
     def ecrire_decouverte(self) -> None:

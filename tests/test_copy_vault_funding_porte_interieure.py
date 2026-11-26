@@ -1,28 +1,4 @@
-"""Chiffrer le funding au lieu de refuser l'épisode — sans jamais fabriquer de profit.
-
-CE QUE CE CHANTIER CORRIGE (feu vert opérateur du 22/11/2026). La porte d'exécutabilité
-refusait TOUT épisode franchissant une frontière de funding :
-
-    first_possible_funding_ms = next_funding_time_ms(entry_ts_ms - 1, interval_hours=1)
-    if first_possible_funding_ms <= int(exit_book["ts_ms"]):
-        return None, "FUNDING_BOUNDARY_UNPRICED"
-
-231 candidats sur 1 613 mouraient là. Et le refus était JUSTE tant que le moteur ne déduisait
-le funding nulle part : desserrer une porte derrière laquelle aucun coût n'est retiré, c'est
-sous-estimer les frais, donc **fabriquer du profit**.
-
-Le correctif respecte quatre contraintes, et chacune a son test :
-
-1. **L'équation de conservation reste intacte.** `net = gross - spread - fees - slippage -
-   latency` est réconcilié contre `executable_before_fees - fees`. Le funding n'y entre PAS :
-   il vit dans `carry_pnl_usd`, et `net_after_carry_usd` est la somme explicite. Mélanger
-   casserait la réconciliation et brouillerait la provenance.
-2. **Provenance séparée.** Les taux viennent de `REST_FUNDING_HISTORY`, un rattrapage :
-   `causal_forward_eligible: False`. Acceptable pour CHIFFRER après coup, jamais pour DÉCIDER.
-3. **Défaut inchangé.** Sans taux fournis, la porte refuse exactement comme avant.
-4. **Fail-closed.** Frontière ambiguë (à l'entrée ou à la sortie exacte) → refus. Taux
-   indisponibles → refus nommé, jamais un passage favorable.
-"""
+"""Fail-closed tests for funding settlements lacking exact point-in-time valuation."""
 from __future__ import annotations
 
 import sys
@@ -104,46 +80,38 @@ def test_SANS_taux_fournis_la_porte_refuse_comme_avant() -> None:
     assert raison == "FUNDING_BOUNDARY_UNPRICED"
 
 
-def test_AVEC_taux_une_frontiere_INTERIEURE_devient_chiffrable() -> None:
+def test_AVEC_taux_sans_valeur_exacte_le_reglement_reste_bloque() -> None:
     metaordre, livres = _episode(enjambe=True)
     trade, raison = execute_metaorder(
         metaordre, livres, horizon_ms=300_000,
         taux_funding=_taux(), couverture_funding_ms=(0, 4 * HEURE_MS),
     )
-    assert trade is not None, raison
-    assert trade["carry_status"] == "MEASURED"
-    assert trade["settlement_crossing_count"] == 1
+    assert trade is None
+    assert raison == "FUNDING_SETTLEMENT_VALUATION_UNAVAILABLE"
 
 
-def test_le_SIGNE_est_juste_un_long_PAIE_a_taux_positif() -> None:
-    """Le test qui compte le plus : une erreur de signe ferait d'un coût un revenu."""
+def test_taux_positif_ne_permet_pas_de_faire_passser_un_long_sans_oracle() -> None:
     metaordre, livres = _episode(enjambe=True, direction=1)
-    trade, _ = execute_metaorder(
+    trade, reason = execute_metaorder(
         metaordre, livres, horizon_ms=300_000,
         taux_funding=_taux("0.0001"), couverture_funding_ms=(0, 4 * HEURE_MS),
     )
-    assert trade is not None
-    assert trade["carry_pnl_usd"] < 0.0, "a taux positif, un LONG paie le funding"
-    assert trade["net_after_carry_usd"] < trade["net_pnl_usd"], "le cout doit REDUIRE le net"
+    assert trade is None
+    assert reason == "FUNDING_SETTLEMENT_VALUATION_UNAVAILABLE"
 
 
 def test_l_equation_de_conservation_du_net_reste_INTACTE() -> None:
     """Le funding ne doit JAMAIS entrer dans `net_pnl_usd` : la réconciliation en dépend."""
-    metaordre, livres = _episode(enjambe=True)
-    avec, _ = execute_metaorder(
-        metaordre, livres, horizon_ms=300_000,
-        taux_funding=_taux(), couverture_funding_ms=(0, 4 * HEURE_MS),
-    )
-    sans_metaordre, sans_livres = _episode(enjambe=False)
-    sans, _ = execute_metaorder(sans_metaordre, sans_livres, horizon_ms=300_000)
-    assert avec is not None and sans is not None
+    metaordre, livres = _episode(enjambe=False)
+    trade, _ = execute_metaorder(metaordre, livres, horizon_ms=300_000)
+    assert trade is not None
     # Le net reste la pure economie d'execution, reconciliee : gross - spread - fees -
     # slippage - latency. Il ne contient pas le portage.
-    recompose = (avec["gross_pnl_usd"] - avec["spread_cost_usd"] - avec["fees_usd"]
-                 - avec["slippage_cost_usd"] - avec["latency_cost_usd"])
-    assert abs(avec["net_pnl_usd"] - recompose) < 1e-8
-    assert abs(avec["net_after_carry_usd"]
-               - (avec["net_pnl_usd"] + avec["carry_pnl_usd"])) < 1e-8
+    recompose = (trade["gross_pnl_usd"] - trade["spread_cost_usd"] - trade["fees_usd"]
+                 - trade["slippage_cost_usd"] - trade["latency_cost_usd"])
+    assert abs(trade["net_pnl_usd"] - recompose) < 1e-8
+    assert trade["net_after_carry_usd"] == trade["net_pnl_usd"]
+    assert trade["carry_status"] == "MEASURED_ZERO_NO_SETTLEMENT_CROSSED"
 
 
 def test_des_taux_qui_NE_COUVRENT_PAS_l_episode_sont_REFUSES() -> None:

@@ -95,10 +95,16 @@ def _cle(coh: Cohorte, vault: str, coin: str) -> str:
 
 
 def charger_store(coh: Cohorte, root: Path) -> dict:
+    p = _p(coh, root, "positions.json")
     try:
-        store = json.loads(_p(coh, root, "positions.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        raw = p.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        # An absent first-run store is the only condition that may initialize
+        # an empty paper account. Permission and corruption errors must not
+        # silently erase open positions or realized PnL.
         store = {"cash": coh.budget_usd, "ouvertes": {}, "realise_total_usd": 0.0}
+    else:
+        store = json.loads(raw)
     store.setdefault("ouvertes", {})
     store.setdefault("realise_total_usd", 0.0)
     store["economic_source"] = ECONOMIC_SOURCE

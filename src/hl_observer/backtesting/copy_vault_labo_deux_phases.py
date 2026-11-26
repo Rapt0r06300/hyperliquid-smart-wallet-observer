@@ -56,6 +56,7 @@ FICHIER_CARNETS = "carnets.jsonl"
 #: Version du format. Une phase 2 qui lit une tranche d'une autre version REFUSE, plutot que de
 #: deviner : deux formats melanges donneraient un corpus dont personne ne connait la composition.
 FORMAT_VERSION = 1
+_MS_PER_UTC_DAY = 86_400_000
 
 
 def _empreinte(chemin: Path) -> str:
@@ -522,6 +523,47 @@ class TranchePreparéeInvalide(RuntimeError):
     """Une tranche preparee manque, est incomplete, ou ne correspond plus a son empreinte."""
 
 
+def jours_utc_complets_depuis_manifestes(
+    manifestes: Sequence[Mapping[str, Any]],
+) -> tuple[list[int], str]:
+    """Dérive les jours entièrement couverts de fenêtres phase 1 dont les octets sont vérifiés.
+
+    Les bornes de tranche sont inclusives dans le manifeste. Les intervalles sont donc convertis en
+    demi-ouvert avant fusion; un trou d'une seule milliseconde empêche de certifier le jour.
+    L'absence d'une borne dans n'importe quel manifeste rend la couverture globale inconnue.
+    """
+    fenetres: list[tuple[int, int]] = []
+    for manifeste in manifestes:
+        debut = manifeste.get("tranche_debut_ms")
+        fin = manifeste.get("tranche_fin_ms")
+        if (
+            type(debut) is not int
+            or type(fin) is not int
+            or debut < 0
+            or fin < debut
+        ):
+            return [], "UNMEASURABLE_MISSING_OR_INVALID_TRANCHE_WINDOWS"
+        fenetres.append((debut, fin + 1))
+    if not fenetres:
+        return [], "UNMEASURABLE_NO_VERIFIED_TRANCHE_WINDOWS"
+
+    fenetres.sort()
+    fusionnees: list[list[int]] = []
+    for debut, fin_exclusif in fenetres:
+        if fusionnees and debut <= fusionnees[-1][1]:
+            fusionnees[-1][1] = max(fusionnees[-1][1], fin_exclusif)
+        else:
+            fusionnees.append([debut, fin_exclusif])
+
+    jours: list[int] = []
+    for debut, fin_exclusif in fusionnees:
+        jour = ((debut + _MS_PER_UTC_DAY - 1) // _MS_PER_UTC_DAY) * _MS_PER_UTC_DAY
+        while jour + _MS_PER_UTC_DAY <= fin_exclusif:
+            jours.append(jour)
+            jour += _MS_PER_UTC_DAY
+    return jours, "PROVEN_FROM_VERIFIED_PHASE1_MANIFESTS"
+
+
 def charger_tranches_preparees(
     racine: Path,
     *,
@@ -637,6 +679,9 @@ def charger_tranches_preparees(
         liste.sort(key=lambda c: int(c["ts_ms"]))
 
     instants = [int(o["signal_ts_ms"]) for o in metaordres]
+    complete_utc_day_starts_ms, calendar_coverage_status = (
+        jours_utc_complets_depuis_manifestes(manifestes)
+    )
     audit = {
         "tranches_chargees": len(manifestes),
         "metaordres": len(metaordres),
@@ -646,5 +691,16 @@ def charger_tranches_preparees(
         "signal_ts_min_ms": min(instants) if instants else None,
         "signal_ts_max_ms": max(instants) if instants else None,
         "identites": [m.get("identite") for m in manifestes],
+        "coverage_windows_ms": [
+            [
+                m.get("tranche_debut_ms")
+                if type(m.get("tranche_debut_ms")) is int else None,
+                m.get("tranche_fin_ms")
+                if type(m.get("tranche_fin_ms")) is int else None,
+            ]
+            for m in manifestes
+        ],
+        "complete_utc_day_starts_ms": complete_utc_day_starts_ms,
+        "calendar_coverage_status": calendar_coverage_status,
     }
     return metaordres, carnets, audit

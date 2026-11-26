@@ -9,6 +9,7 @@ import pytest
 
 from hl_observer.control_plane.campaign_adapters import _collection_checkpoint_metrics
 from tools import collect_cloud_copy_vault as C
+from tools.copy_vault_safe_bridge import _book as bridge_book
 
 
 def test_write_selection_artifact_is_canonical_and_hash_bound(tmp_path: Path) -> None:
@@ -119,10 +120,12 @@ def test_cloud_l2_path_preserves_case_sensitive_native_coin() -> None:
         receive_wall_ms=1_700_000_000_001,
         receive_mono_ns=42,
         connection_id="case-sensitive-test",
+        l2_gap_epoch=7,
     )
 
     assert reason is None and parsed == message and coin == "kPEPE"
     assert envelope is not None and envelope.instrument == "kPEPE"
+    assert bridge_book(envelope.as_record(written_ts_ms=1_700_000_000_002))["l2_gap_epoch"] == 7
     assert C._subscription_identity({"type": "l2Book", "coin": "kPEPE"}) == (
         "l2Book", "kPEPE",
     )
@@ -2850,6 +2853,13 @@ def test_broad_sweep_covers_complete_universe_in_one_compact_family() -> None:
         assert len(sink.rows) == 4
         assert {row.instrument for row in sink.rows} == {"*"}
         assert {row.channel for row in sink.rows} == {"copy_vault_broad_state"}
+        assert all(row.exchange_ts_ms is None for row in sink.rows)
+        assert all(
+            row.provenance["timestamp_semantics"] == "receive_observation_time_only"
+            and row.provenance["request_send_wall_ms"] <= row.provenance["request_receive_wall_ms"]
+            and row.provenance["request_receive_wall_ms"] == row.received_ts_ms
+            for row in sink.rows
+        )
         assert all(
             row.parsed_summary["position_fingerprint"]
             for row in sink.rows

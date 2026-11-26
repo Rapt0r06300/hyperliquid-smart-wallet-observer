@@ -519,9 +519,14 @@ class _L2AdmissionRegistry:
                 ("run_started_at_ns", str(time.time_ns())),
             ))
 
-    def finalize(self, catalog_sha256, rows, *, details_sha256):
+    def finalize(
+        self, catalog_sha256, rows, *, details_sha256,
+        run_status="COMPLETE", scope_metadata=None,
+    ):
         if SHA.fullmatch(str(catalog_sha256)) is None or SHA.fullmatch(str(details_sha256)) is None:
             raise ValueError("INVALID_L2_FINALIZATION_SHA256")
+        if run_status not in {"COMPLETE", "PARTIAL_LOCAL", "LIMITED"}:
+            raise ValueError("INVALID_L2_FINALIZATION_STATUS")
         now = time.time_ns()
         values = []
         repaired_values = []
@@ -583,12 +588,16 @@ class _L2AdmissionRegistry:
                     proof_json, certified_at_ns
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, repaired_values)
+            metadata_rows = tuple(
+                (str(key), str(value))
+                for key, value in (scope_metadata or {}).items()
+            )
             self._meta((
                 ("active_catalog_sha256", str(catalog_sha256)),
                 ("details_sha256", str(details_sha256)),
                 ("run_completed_at_ns", str(now)),
-                ("run_status", "COMPLETE"),
-            ))
+                ("run_status", run_status),
+            ) + metadata_rows)
             self.connection.commit()
         except Exception:
             self.connection.rollback()
@@ -674,15 +683,19 @@ def run(root, destination, *, workers=4, limit=0, repair=False, resume=False, cr
     """Verify canonical partitioned index before examining local SAFE objects."""
     root, destination = Path(root).resolve(), Path(destination).resolve()
     try:
-        from tools.partitioned_data_index import read_index
+        from tools.partitioned_data_index import iter_index_rows
         from tools.restore_alina import _safe_component
     except ModuleNotFoundError:
-        from partitioned_data_index import read_index
+        from partitioned_data_index import iter_index_rows
         from restore_alina import _safe_component
     catalog = root / "catalog" / "DATA_INDEX.json"
-    index = read_index(catalog)
+
+    def catalog_progress(done, total):
+        print(f"ALINA_L2_CATALOG_PROGRESS {done}/{total}", flush=True)
+
     selected = []
-    for row in index["shards"]:
+    print("ALINA_L2_CATALOG_SCAN streaming verified partitions", flush=True)
+    for row in iter_index_rows(catalog, progress_callback=catalog_progress):
         if (isinstance(row, dict) and row.get("quality_status") == "SAFE"
                 and row.get("replay_compatible") is True
                 and row.get("asset_verified") is not False
@@ -692,20 +705,33 @@ def run(root, destination, *, workers=4, limit=0, repair=False, resume=False, cr
                     / (_safe_component(row["dataset_id"]) + ".jsonl.gz"))
             selected.append((path, row))
     indexed_count = len(selected)
-    if not include_missing:
-        # User is auditing shards ALREADY on the PC, not attempting another
-        # download. An absent file is NOT a corrupt downloaded shard.
-        selected = [(path, row) for path, row in selected
-                    if path.is_file() or path.is_symlink()]
-    missing_count = indexed_count - len(selected)
+    # Count physical availability independently from the requested audit scope.
+    # With --include-missing, absent assets remain explicit BLOCKED rows rather
+    # than disappearing from the denominator.
+    locally_present = [(path, row) for path, row in selected
+                       if path.is_file() or path.is_symlink()]
+    missing_count = indexed_count - len(locally_present)
+    audit_candidates = selected if include_missing else locally_present
+    limit_applied = bool(limit and len(audit_candidates) > limit)
     if limit:
-        selected = selected[:limit]
+        audit_candidates = audit_candidates[:limit]
+    selected = audit_candidates
+    run_status = (
+        "LIMITED" if limit_applied
+        else "PARTIAL_LOCAL" if missing_count and not include_missing
+        else "COMPLETE"
+    )
+    scope_complete = run_status == "COMPLETE"
     catalog_sha256 = digest_file(catalog)
     # Before any work, retire a previous green run so interrupted runs fail closed.
     report_path = destination / "LOCAL_L2_CERTIFICATION.json"
     atomic_json(report_path, {
         "schema": "alina.local_l2_certification.v1",
         "status": "IN_PROGRESS_NOT_CERTIFIED", "selected_count": len(selected),
+        "indexed_safe_l2_shards": indexed_count,
+        "not_downloaded_locally": missing_count,
+        "include_missing": include_missing,
+        "limit_applied": limit_applied,
         "paper_only": True,
     })
     registry = _L2AdmissionRegistry(destination)
@@ -843,7 +869,18 @@ def run(root, destination, *, workers=4, limit=0, repair=False, resume=False, cr
         destination / "LOCAL_L2_CERTIFICATION_ROWS.jsonl.gz", outputs
     )
     registry.finalize(
-        catalog_sha256, outputs, details_sha256=details["sha256"]
+        catalog_sha256,
+        outputs,
+        details_sha256=details["sha256"],
+        run_status=run_status,
+        scope_metadata={
+            "catalog_indexed_shards": str(indexed_count),
+            "catalog_audited_shards": str(len(selected)),
+            "catalog_not_downloaded_locally": str(missing_count),
+            "catalog_include_missing": str(include_missing).lower(),
+            "catalog_limit_applied": str(limit_applied).lower(),
+            "catalog_scope_complete": str(scope_complete).lower(),
+        },
     )
     registry.close()
     snapshot_backtestable = sum(
@@ -867,11 +904,23 @@ def run(root, destination, *, workers=4, limit=0, repair=False, resume=False, cr
     report = {
         "schema": "alina.local_l2_certification.v1",
         "catalog_sha256": catalog_sha256,
-        "status": "LOCAL_L2_AUDIT_COMPLETE_NOT_GLOBAL_REPLAY_CERTIFICATION",
+        "status": (
+            "LOCAL_L2_AUDIT_COMPLETE_NOT_GLOBAL_REPLAY_CERTIFICATION"
+            if scope_complete
+            else "LOCAL_L2_AUDIT_LIMITED"
+            if run_status == "LIMITED"
+            else "LOCAL_L2_AUDIT_PARTIAL_LOCAL"
+        ),
+        "run_status": run_status,
+        "scope_complete": scope_complete,
         "totals": totals, "repair_failures": repair_failures,
         "cross_shard_mode": cross_shard,
         "indexed_safe_l2_shards": indexed_count,
+        "audited_shards": len(selected),
+        "locally_available_shards": indexed_count - missing_count,
         "not_downloaded_locally": missing_count,
+        "include_missing": include_missing,
+        "limit_applied": limit_applied,
         "cache_reused_without_new_hash": sum(x.get("stat_cache_reused_without_new_hash", False) for x in outputs),
         "admission": {
             "snapshot_backtestable_shards": snapshot_backtestable,
@@ -922,7 +971,13 @@ def main(argv=None):
         return 2
     print("ALINA_L2_RESULT " + json.dumps(report["totals"], sort_keys=True))
     print("ALINA_L2_REPORT " + str(destination / "LOCAL_L2_CERTIFICATION.json"))
-    return 0 if not report["totals"].get("BLOCKED") and not report["repair_failures"] else 1
+    return (
+        0
+        if report.get("scope_complete") is True
+        and not report["totals"].get("BLOCKED")
+        and not report["repair_failures"]
+        else 1
+    )
 
 
 if __name__ == "__main__":

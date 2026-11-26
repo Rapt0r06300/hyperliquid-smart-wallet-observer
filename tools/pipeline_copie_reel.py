@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import argparse
 import bisect
+import hashlib
 import json
+import re
 import sys
 import time
 from collections.abc import Callable, Mapping
@@ -116,18 +118,125 @@ def _strict_positive_timestamp_ms(value: object) -> int | None:
 def _nav_history(root: Path) -> dict[str, list[tuple[int, float]]]:
     """Return sorted observable NAV history keyed by canonical vault identity."""
     history: dict[str, list[tuple[int, float]]] = {}
+    provenance_path = root / "runtime" / "reports" / "datasets" / "SELECTION_PROVENANCE.json"
+    dataset_provenance_present = provenance_path.exists()
+    verified_receipt = _verified_safe_nav_catalog(root, provenance_path)
+    if dataset_provenance_present and verified_receipt is None:
+        return history
+    safe_catalog_sha256, expected_nav_rows = verified_receipt or (None, None)
+    accepted_nav_rows = 0
     for row in _charger_jsonl(root / SNAP):
+        if dataset_provenance_present and not _safe_nav_evidence_valid(
+            row, expected_catalog_sha256=safe_catalog_sha256,
+        ):
+            return {}
+        if dataset_provenance_present and (
+            type(row.get("ts_ms")) is not int
+            or isinstance(row.get("nav_usd"), bool)
+            or not isinstance(row.get("nav_usd"), (int, float))
+        ):
+            return {}
         try:
             vault = VB.normaliser_vault(row["vault"])
             ts_ms = int(row["ts_ms"])
             nav_usd = float(row["nav_usd"])
         except (KeyError, TypeError, ValueError):
+            if dataset_provenance_present:
+                return {}
             continue
         if vault and ts_ms > 0 and nav_usd > 0:
             history.setdefault(vault, []).append((ts_ms, nav_usd))
+            accepted_nav_rows += 1
+        elif dataset_provenance_present:
+            return {}
+    if dataset_provenance_present and accepted_nav_rows != expected_nav_rows:
+        return {}
     for rows in history.values():
         rows.sort(key=lambda item: item[0])
     return history
+
+
+def _verified_safe_nav_catalog(root: Path, provenance_path: Path) -> tuple[str, int] | None:
+    """Verify the bridge receipt binds the exact NAV artifact before reading it."""
+    if not provenance_path.exists() or provenance_path.is_symlink():
+        return None
+    try:
+        provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError):
+        return None
+    if not isinstance(provenance, Mapping):
+        return None
+    catalog_sha256 = provenance.get("catalog_sha256")
+    outputs = provenance.get("outputs")
+    artifact = outputs.get("copy_vault_broad_state") if isinstance(outputs, Mapping) else None
+    counts = provenance.get("counts")
+    expected_rows = counts.get("snapshot_nav_observations") if isinstance(counts, Mapping) else None
+    if (
+        not str(provenance.get("schema") or "").startswith(
+            "hypersmart.dataset_selection_provenance.v"
+        )
+        or provenance.get("source_repository")
+        != "Rapt0r06300/hyperliquid-smart-wallet-observer"
+        or provenance.get("paper_read_only") is not True
+        or provenance.get("real_execution") is not False
+        or provenance.get("economic_proof") is not False
+        or not isinstance(catalog_sha256, str)
+        or re.fullmatch(r"[0-9a-f]{64}", catalog_sha256) is None
+        or type(expected_rows) is not int
+        or expected_rows < 0
+        or counts.get("copy_vault_broad_state") != expected_rows
+        or not isinstance(artifact, Mapping)
+        or artifact.get("path") != "runtime/data/vault_snapshots.jsonl"
+        or type(artifact.get("bytes")) is not int
+        or artifact["bytes"] < 0
+        or not isinstance(artifact.get("sha256"), str)
+        or re.fullmatch(r"[0-9a-f]{64}", artifact["sha256"]) is None
+    ):
+        return None
+    nav_path = root / SNAP
+    if nav_path.is_symlink() or not nav_path.is_file():
+        return None
+    try:
+        if nav_path.stat().st_size != artifact["bytes"]:
+            return None
+        digest = hashlib.sha256()
+        with nav_path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError:
+        return None
+    if digest.hexdigest() != artifact["sha256"]:
+        return None
+    return catalog_sha256, expected_rows
+
+
+def _safe_nav_evidence_valid(
+    row: Mapping[str, Any], *, expected_catalog_sha256: str | None,
+) -> bool:
+    """Dataset workspaces accept NAV only when every row binds to the SAFE catalog."""
+    if (
+        expected_catalog_sha256 is None
+        or row.get("source_family") != "copy_vault_broad_state"
+        or row.get("source_quality_status") != "SAFE"
+        or row.get("source_manifest_verified") is not True
+        or row.get("source_replay_compatible") is not True
+        or row.get("source_catalog_sha256") != expected_catalog_sha256
+        or row.get("source_evidence_status") == "UNAVAILABLE"
+    ):
+        return False
+    hashes = (
+        row.get("source_shard_sha256"),
+        row.get("source_jsonl_sha256"),
+        row.get("source_frame_sha256"),
+        row.get("source_raw_sha256"),
+    )
+    if any(
+        not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None
+        for value in hashes
+    ):
+        return False
+    frame_number = row.get("source_frame_number")
+    return type(frame_number) is int and frame_number > 0
 
 
 def _nav_asof(

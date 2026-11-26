@@ -123,26 +123,56 @@ def _vault_tick(*, good=True, family="copy_vault_positions", ts=1000):
     source = {
         "copy_vault_positions": "hyperliquid_public_info",
         "copy_vault_selection": "hyperliquid_public_vaults",
+        "copy_vault_broad_state": "hyperliquid_public_info",
     }[family]
-    raw = json.dumps({"assetPositions": []}) if family == "copy_vault_positions" else json.dumps({"selection": {}, "filters": {}})
+    if family == "copy_vault_positions":
+        raw = json.dumps({"assetPositions": []})
+    elif family == "copy_vault_broad_state":
+        raw = json.dumps({
+            "vault": "0x" + "1" * 40,
+            "phase": "START",
+            "clearinghouseState": {
+                "marginSummary": {"accountValue": "1000"},
+                "assetPositions": [],
+                "time": ts - 1,
+            },
+        })
+    else:
+        raw = json.dumps({"selection": {}, "filters": {}})
     provenance = {
         "transport": "https", "access": "read_only", "authenticated": False,
     }
     if family == "copy_vault_positions":
         provenance["request_type"] = "clearinghouseState"
+    elif family == "copy_vault_broad_state":
+        provenance.update({
+            "request_type": "clearinghouseState",
+            "url": "https://api.hyperliquid.xyz/info",
+            "network": "mainnet",
+            "broad_sweep": True,
+            "timestamp_semantics": "receive_observation_time_only",
+            "request_send_wall_ms": ts - 10,
+            "request_receive_wall_ms": ts,
+        })
     else:
         provenance["selection_causal"] = True
     return {
         "source_id": source, "channel": family, "event_kind": "SNAPSHOT",
+        "instrument": "*" if family == "copy_vault_broad_state" else "0xabc",
         "received_ts_ms": ts, "exchange_ts_ms": None, "local_monotonic_ns": ts * 1000,
         "real_execution": False, "raw_payload": raw,
         "raw_sha256": hashlib.sha256(raw.encode()).hexdigest() if good else "bad",
+        "parsed_summary": ({
+            "vault": "0x" + "1" * 40, "phase": "START", "nav_usd": 1000.0,
+        } if family == "copy_vault_broad_state" else {}),
         "provenance": provenance,
     }
 
 
 def test_receive_only_copy_vault_snapshots_are_replayable_with_strict_proof(tmp_path):
-    for family in ("copy_vault_positions", "copy_vault_selection"):
+    for family in (
+        "copy_vault_positions", "copy_vault_selection", "copy_vault_broad_state",
+    ):
         path = tmp_path / (family + ".jsonl.gz")
         with gzip.open(path, "wt", encoding="utf-8") as handle:
             for ts in (1000, 1001):
@@ -152,8 +182,8 @@ def test_receive_only_copy_vault_snapshots_are_replayable_with_strict_proof(tmp_
             "venue": "hyperliquid",
         })
         assert result["record_count"] == 2
-        assert result["replay_compatible"] is True
-        assert result["receive_only_snapshot_verified"] is True
+        assert result["replay_compatible"] is True, (family, result)
+        assert result["receive_only_snapshot_verified"] is True, (family, result)
 
 
 def test_bad_hash_or_fabricated_exchange_time_never_salvages_vault_snapshot(tmp_path):
@@ -170,6 +200,30 @@ def test_bad_hash_or_fabricated_exchange_time_never_salvages_vault_snapshot(tmp_
             handle.write(json.dumps(row) + "\n")
         result = inspect_asset(path, {
             "family": "copy_vault_positions", "source": "hyperliquid_public_info",
+            "venue": "hyperliquid",
+        })
+        assert result["replay_compatible"] is False
+        assert result["receive_only_snapshot_verified"] is False
+
+
+def test_broad_state_requires_vault_nav_and_receive_time_to_match(tmp_path):
+    for mode in ("request_time", "summary_nav", "summary_vault", "phase"):
+        row = _vault_tick(family="copy_vault_broad_state")
+        if mode == "request_time":
+            row["provenance"]["request_receive_wall_ms"] += 1
+        elif mode == "summary_nav":
+            row["parsed_summary"]["nav_usd"] = 2000.0
+        elif mode == "summary_vault":
+            row["parsed_summary"]["vault"] = "0x" + "2" * 40
+        else:
+            row["parsed_summary"]["phase"] = "END"
+
+        path = tmp_path / (mode + ".jsonl.gz")
+        with gzip.open(path, "wt", encoding="utf-8") as handle:
+            handle.write(json.dumps(row) + "\n")
+        result = inspect_asset(path, {
+            "family": "copy_vault_broad_state",
+            "source": "hyperliquid_public_info",
             "venue": "hyperliquid",
         })
         assert result["replay_compatible"] is False

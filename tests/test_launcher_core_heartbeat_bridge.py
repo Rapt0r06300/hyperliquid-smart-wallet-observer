@@ -177,6 +177,10 @@ def test_checkpoint_companion_publie_ses_pertes_dans_le_heartbeat(
         "checkpoint_expirations": 2,
         "checkpoint_queue_rejections": 3,
         "input_rotations": 1,
+        "reconnect_backfill_blocked": 0,
+        "invalid_rejected": 0,
+        "writer_outages": 0,
+        "coverage_receipt_status": "UNMEASURABLE",
     }
 
 

@@ -14,8 +14,8 @@ except ModuleNotFoundError:
     from backfill_exact_trade_counts import _native_trade_keys, _summary_trade_count
 
 TRADE_FAMILIES={"trades","agg_trades","fills","userfills","user_fills","copy_vault_fills"}
-REPLAYABLE_FAMILIES={"cross_venue_capacity_tape","capacity_tape","trades","agg_trades","bbo","l2book","l2","book","funding","funding_settlement","open_interest","fills","userfills","user_fills","copy_vault_fills","copy_vault_l2","copy_vault_positions","copy_vault_selection","copy_vault_snapshot","external_events","activeassetctx","instrument_metadata","mark_price","ticker"}
-VERIFIER_VERSION="alina.replay.compatibility.v8"
+REPLAYABLE_FAMILIES={"cross_venue_capacity_tape","capacity_tape","trades","agg_trades","bbo","l2book","l2","book","funding","funding_settlement","open_interest","fills","userfills","user_fills","copy_vault_fills","copy_vault_l2","copy_vault_positions","copy_vault_selection","copy_vault_snapshot","copy_vault_broad_state","external_events","activeassetctx","instrument_metadata","mark_price","ticker"}
+VERIFIER_VERSION="alina.replay.compatibility.v9"
 
 
 def _open(path: Path):
@@ -34,6 +34,7 @@ def _timestamp(row: Mapping[str, Any]) -> float | None:
 _RECEIVE_ONLY_COPY_SOURCES = {
     "copy_vault_positions": "hyperliquid_public_info",
     "copy_vault_selection": "hyperliquid_public_vaults",
+    "copy_vault_broad_state": "hyperliquid_public_info",
 }
 
 
@@ -47,7 +48,10 @@ def _proof_of_receive_only_snapshot(
         or row.get("source_id") != _RECEIVE_ONLY_COPY_SOURCES[family]
         or str(row.get("channel") or "").lower() != family
         or str(row.get("event_kind") or "").upper() != "SNAPSHOT"
-        or row.get("exchange_ts_ms") is not None
+        or (
+            family != "copy_vault_broad_state"
+            and row.get("exchange_ts_ms") is not None
+        )
         or row.get("real_execution") is not False
     ):
         return None
@@ -85,6 +89,62 @@ def _proof_of_receive_only_snapshot(
             summary = row.get("parsed_summary")
             if not isinstance(summary, Mapping) or summary.get("position_count") != len(payload["assetPositions"]):
                 return None
+    elif family == "copy_vault_broad_state":
+        if (
+            provenance.get("request_type") != "clearinghouseState"
+            or provenance.get("broad_sweep") is not True
+            or provenance.get("url") != "https://api.hyperliquid.xyz/info"
+            or provenance.get("network") != "mainnet"
+            or provenance.get("access") != "read_only"
+            or provenance.get("timestamp_semantics") != "receive_observation_time_only"
+            or row.get("exchange_ts_ms") is not None
+            or row.get("instrument") != "*"
+        ):
+            return None
+        state = payload.get("clearinghouseState")
+        if not isinstance(state, Mapping):
+            return None
+        margin = state.get("marginSummary")
+        if not isinstance(margin, Mapping) or not isinstance(state.get("assetPositions"), list):
+            return None
+        nav_raw = margin.get("accountValue")
+        if isinstance(nav_raw, bool) or not isinstance(nav_raw, (str, int, float)):
+            return None
+        try:
+            nav = float(nav_raw)
+        except (KeyError, TypeError, ValueError, OverflowError):
+            return None
+        vault = payload.get("vault")
+        summary = row.get("parsed_summary")
+        summary_nav_raw = summary.get("nav_usd") if isinstance(summary, Mapping) else None
+        if isinstance(summary_nav_raw, bool) or not isinstance(summary_nav_raw, (int, float)):
+            return None
+        try:
+            summary_nav = float(summary_nav_raw)
+        except (KeyError, TypeError, ValueError, OverflowError):
+            return None
+        if (
+            not isinstance(vault, str)
+            or len(vault) != 42
+            or not vault.startswith("0x")
+            or any(char not in "0123456789abcdef" for char in vault[2:].lower())
+            or payload.get("phase") not in {"START", "END"}
+            or not isinstance(summary, Mapping)
+            or summary.get("vault") != vault.lower()
+            or summary.get("phase") != payload.get("phase")
+            or not math.isfinite(nav)
+            or nav <= 0
+            or not math.isfinite(summary_nav)
+            or not math.isclose(summary_nav, nav, rel_tol=1e-12, abs_tol=1e-9)
+        ):
+            return None
+        send = provenance.get("request_send_wall_ms")
+        receive = provenance.get("request_receive_wall_ms")
+        if (
+            type(send) is not int or type(receive) is not int
+            or send <= 0 or receive < send or receive != row.get("received_ts_ms")
+        ):
+            return None
     else:
         if not isinstance(payload.get("selection"), Mapping) or not isinstance(payload.get("filters"), Mapping):
             return None

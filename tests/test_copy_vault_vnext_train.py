@@ -324,3 +324,22 @@ def test_copy_vnext_persists_causal_economic_entity_key_for_concentration() -> N
     assert reasons["ADMITTED"] >= 2
     assert admitted[-1]["entity_concentration_key_at_signal"] == "public:entity-a"
     assert admitted[-1]["entity_cluster_id_at_signal"].startswith("entity-")
+
+
+def test_vnext_window_index_preserves_boundary_and_prior_only_consensus() -> None:
+    rows = [
+        _row(ts=1_000, vault="0xa"),
+        _row(ts=2_000, vault="0xb"),
+        _row(ts=2_500, vault="0xother", coin="BTC"),
+        _row(ts=2_600, vault="0xshort", coin="ETH") | {"direction": -1},
+        _row(ts=3_000, vault="0xc"),
+        _row(ts=3_000, vault="0xd"),
+        _row(ts=4_000, vault="0xe"),
+    ]
+
+    admitted, reasons = admit_consensus_train_rows(
+        rows, window_ms=2_000, minimum_distinct_wallets=4,
+    )
+
+    assert [row["trade_id"] for row in admitted] == ["train-0xe-ETH-4000"]
+    assert reasons["INSUFFICIENT_PRIOR_DISTINCT_WALLET_CONSENSUS"] == 6

@@ -33,7 +33,8 @@ def _etat(**kw):
         "gap_windows_dropped": 0,
         "clean_epoch_ms": 1_000_000,
         "gap_windows": [],
-        "counters": {"input_rotations": 0, "checkpoints_expired": 0, "pending_overflow_rejected": 0},
+        "counters": {"input_rotations": 0, "checkpoints_expired": 0,
+                     "pending_overflow_rejected": 0, "invalid_rejected": 0},
     }
     base.update(kw)
     return base
@@ -202,8 +203,8 @@ def test_un_DEBORDEMENT_publie_une_fenetre_qui_porte_tout_le_lot(tmp_path):
     assert G.journal_coherent(tail.state)[0] is True
 
 
-def test_un_etat_ANCIEN_avec_des_trous_n_ouvre_PAS_le_journal(tmp_path):
-    """Le cas réel du 16/11 : 43 expirations et 1 rotation déjà écrites, positions perdues."""
+def test_un_etat_ancien_avec_des_trous_est_archive_puis_repart_sur_un_epoch_propre(tmp_path):
+    """Les trous historiques restent non prouvés; seul un nouvel epoch peut repartir proprement."""
     import json
 
     from hl_observer.collection import copy_vault_checkpoint_tail as T
@@ -217,10 +218,46 @@ def test_un_etat_ANCIEN_avec_des_trous_n_ouvre_PAS_le_journal(tmp_path):
     tail.state_path.write_text(json.dumps(ancien), encoding="utf-8")
     recharge = T.CopyVaultCheckpointTail(
         root=tmp_path, clock_ms=lambda: horloge["t"], fetch_book=lambda coin: None).state
-    assert recharge.get("gap_windows_schema") != G.SCHEMA_FENETRES, (
-        "ouvrir un journal vide ici ferait passer 44 trous de position inconnue pour une epoque propre")
-    assert "TROUS_ANTERIEURS_SANS_FENETRE" in recharge.get("gap_windows_unavailable_reason", "")
-    assert G.journal_coherent(recharge)[0] is False
+    rollover = recharge["gap_epoch_rollover"]
+    archive = tmp_path / rollover["preserved_state_path"]
+    archived = json.loads(archive.read_text(encoding="utf-8"))
+    assert archived["counters"]["checkpoints_expired"] == 43
+    assert archived["counters"]["input_rotations"] == 1
+    assert archived.get("gap_windows_schema") is None
+    assert "TROUS_ANTERIEURS_SANS_FENETRE" in rollover["reason"]
+    assert recharge["gap_windows_schema"] == G.SCHEMA_FENETRES
+    assert G.journal_coherent(recharge)[0] is True
+    assert recharge["input_offset"] == tail.input_path.stat().st_size
+    expected_output_offset = tail.output_path.stat().st_size if tail.output_path.exists() else 0
+    assert recharge["output_start_offset"] == expected_output_offset
+    assert recharge["writer_run_id"] != archived["writer_run_id"]
+
+
+def test_epoch_courant_avec_compteurs_et_fenetres_divergents_est_archive(tmp_path):
+    import json
+
+    from hl_observer.collection import copy_vault_checkpoint_tail as T
+
+    horloge = {"t": 5_000_000}
+    tail = _ecrivain(tmp_path, lambda: horloge["t"])
+    ancien = dict(tail.state)
+    ancien["counters"] = {
+        **ancien["counters"],
+        "checkpoints_expired": 43,
+        "input_rotations": 1,
+    }
+    tail.state_path.write_text(json.dumps(ancien), encoding="utf-8")
+
+    recharge = T.CopyVaultCheckpointTail(
+        root=tmp_path, clock_ms=lambda: horloge["t"], fetch_book=lambda coin: None
+    ).state
+
+    archive = tmp_path / recharge["gap_epoch_rollover"]["preserved_state_path"]
+    archived = json.loads(archive.read_text(encoding="utf-8"))
+    assert archived["counters"]["checkpoints_expired"] == 43
+    assert archived["counters"]["input_rotations"] == 1
+    assert G.journal_coherent(recharge)[0] is True
+    assert recharge["clean_epoch_ms"] == horloge["t"]
 
 
 def test_un_etat_ancien_SANS_aucun_trou_peut_ouvrir_le_journal(tmp_path):

@@ -14,7 +14,7 @@ creates a freeze candidate and cannot certify the family.
 from __future__ import annotations
 
 import math
-from collections import Counter
+from collections import Counter, deque
 from collections.abc import Mapping, Sequence
 from decimal import Decimal
 from typing import Any
@@ -275,7 +275,12 @@ def admit_consensus_train_rows(
         ),
     )
     admitted: list[dict[str, Any]] = []
-    for index, row in enumerate(ordered):
+    # Keep a rolling causal history for each native coin and direction. The
+    # previous scan copied ordered[:index] for every signal, even though it
+    # only used recent rows for the same market; this avoids that quadratic
+    # prefix-copy cost without changing the consensus inputs.
+    prior_by_market: dict[tuple[str, int], deque[dict[str, Any]]] = {}
+    for row in ordered:
         timestamp = _strict_positive_int(row["signal_ts_ms"])
         if timestamp is None:
             reasons["INVALID_SIGNAL_TIMESTAMP_OR_DIRECTION"] += 1
@@ -283,25 +288,25 @@ def admit_consensus_train_rows(
         coin = preserve_native_instrument_symbol(row.get("coin"))
         direction = row["direction"]
         current_vault = str(row.get("vault") or "").lower()
+        history = prior_by_market.setdefault((coin, direction), deque())
+        cutoff = timestamp - valid_window_ms
+        while history and (_strict_positive_int(history[0]["signal_ts_ms"]) or 0) < cutoff:
+            history.popleft()
         supporting_rows: list[dict[str, Any]] = []
         prior_vaults: set[str] = set()
-        for previous in reversed(ordered[:index]):
+        for previous in history:
             previous_ts = _strict_positive_int(previous["signal_ts_ms"])
             if previous_ts is None:
                 continue
             age = timestamp - previous_ts
-            if age > valid_window_ms:
-                break
             if age <= 0:
                 continue
-            if (
-                preserve_native_instrument_symbol(previous.get("coin")) == coin
-                and previous["direction"] == direction
-            ):
-                vault = str(previous.get("vault") or "").lower()
-                if vault and vault != current_vault:
-                    prior_vaults.add(vault)
-                    supporting_rows.append(previous)
+            vault = str(previous.get("vault") or "").lower()
+            if vault and vault != current_vault:
+                prior_vaults.add(vault)
+                supporting_rows.append(previous)
+        # Insert after snapshotting prior votes; same-time rows stay excluded.
+        history.append(row)
         distinct_addresses = len(prior_vaults | {current_vault}) if current_vault else len(prior_vaults)
         if distinct_addresses < valid_minimum_wallets:
             reasons["INSUFFICIENT_PRIOR_DISTINCT_WALLET_CONSENSUS"] += 1

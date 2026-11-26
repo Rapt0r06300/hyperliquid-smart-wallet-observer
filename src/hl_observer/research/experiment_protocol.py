@@ -124,10 +124,20 @@ def _validate_budget(value: Any) -> dict[str, Any]:
     if not isinstance(trials, int) or isinstance(trials, bool) or not 1 <= trials <= 1_000_000:
         raise SpecValidationError("budget.max_trials must be an integer in [1, 1000000]")
     wall = budget.get("max_wall_seconds")
-    if wall is not None and (
-        not isinstance(wall, (int, float)) or isinstance(wall, bool) or wall <= 0
-    ):
-        raise SpecValidationError("budget.max_wall_seconds must be positive when provided")
+    if wall is not None:
+        try:
+            finite_wall = math.isfinite(wall)
+        except (OverflowError, TypeError, ValueError):
+            finite_wall = False
+        if (
+            not isinstance(wall, (int, float))
+            or isinstance(wall, bool)
+            or not finite_wall
+            or wall <= 0
+        ):
+            raise SpecValidationError(
+                "budget.max_wall_seconds must be finite and positive when provided"
+            )
     return budget
 
 

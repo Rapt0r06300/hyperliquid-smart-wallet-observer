@@ -16,6 +16,7 @@ import shutil
 import sys
 import zlib
 from pathlib import Path
+from typing import Any
 
 CANONICAL_REPOSITORY = "Rapt0r06300/hyperliquid-smart-wallet-observer"
 RESERVE_BYTES = 1024 ** 3
@@ -59,7 +60,8 @@ def _catalog_safe_bytes(
     digest: str,
     *,
     family_prefix: str | None = None,
-) -> tuple[dict[Path, tuple[int, str]], list[str]]:
+    include_metadata: bool = False,
+) -> tuple[dict[Path, tuple[Any, ...]], list[str]]:
     """Re-derive the selected gzip identities from the SHA-bound catalog."""
     if index_path.is_symlink() or not index_path.is_file():
         raise SafeUnpackError("canonical catalog missing or symlinked")
@@ -86,7 +88,7 @@ def _catalog_safe_bytes(
         raise SafeUnpackError(f"canonical catalog partition verification failed: {exc}") from exc
     if _hash(index_path) != digest:
         raise SafeUnpackError("canonical DATA_INDEX changed during SAFE selection")
-    expected: dict[Path, tuple[int, str]] = {}
+    expected: dict[Path, tuple[Any, ...]] = {}
     families: set[str] = set()
     for row in rows:
         if (row.get("replay_compatible") is not True
@@ -106,7 +108,10 @@ def _catalog_safe_bytes(
         )
         if path in expected:
             raise SafeUnpackError(f"duplicated SAFE shard output path: {path}")
-        expected[path] = (size, sha)
+        expected[path] = (
+            (size, sha, ident, str(row.get("family") or ""), tag)
+            if include_metadata else (size, sha)
+        )
         families.add(str(row.get("family") or ""))
     return expected, sorted(families)
 

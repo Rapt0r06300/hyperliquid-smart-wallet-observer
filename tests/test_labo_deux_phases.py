@@ -215,6 +215,52 @@ def test_la_phase_2_fusionne_les_tranches_dans_l_ordre(tmp_path: Path) -> None:
     assert audit["signal_ts_max_ms"] == 4_000
 
 
+def test_la_phase_2_ne_declare_que_les_journees_utc_entierement_couvertes(
+    tmp_path: Path,
+) -> None:
+    jour = 86_400_000
+    preparer_tranche(
+        metaordres=[_ordre("BTC", jour // 2)],
+        carnets={"BTC": [_carnet(jour // 2)]},
+        sortie=tmp_path / "t01", identite="t01", tranche=(0, jour - 1),
+    )
+    # Une lacune d'une milliseconde au debut du second jour interdit de le declarer complet.
+    preparer_tranche(
+        metaordres=[_ordre("BTC", jour + 1_000)],
+        carnets={"BTC": [_carnet(jour + 1_000)]},
+        sortie=tmp_path / "t02", identite="t02", tranche=(jour + 1, 2 * jour - 1),
+    )
+
+    _, _, audit = charger_tranches_preparees(tmp_path)
+
+    assert audit["complete_utc_day_starts_ms"] == [0]
+    assert audit["calendar_coverage_status"] == "PROVEN_FROM_VERIFIED_PHASE1_MANIFESTS"
+
+
+def test_la_phase_2_refuse_de_certifier_la_couverture_si_une_borne_manque(
+    tmp_path: Path,
+) -> None:
+    jour = 86_400_000
+    preparer_tranche(
+        metaordres=[_ordre("BTC", jour // 2)],
+        carnets={"BTC": [_carnet(jour // 2)]},
+        sortie=tmp_path / "t01", identite="t01", tranche=(0, jour - 1),
+    )
+    # Une tranche dont la fenêtre n'est pas attestée invalide le dénominateur de couverture.
+    preparer_tranche(
+        metaordres=[_ordre("BTC", jour + 1_000)],
+        carnets={"BTC": [_carnet(jour + 1_000)]},
+        sortie=tmp_path / "t02", identite="t02",
+    )
+
+    _, _, audit = charger_tranches_preparees(tmp_path)
+
+    assert audit["complete_utc_day_starts_ms"] == []
+    assert audit["calendar_coverage_status"] == (
+        "UNMEASURABLE_MISSING_OR_INVALID_TRANCHE_WINDOWS"
+    )
+
+
 def test_la_phase_2_ecarte_les_doublons_de_recouvrement(tmp_path: Path) -> None:
     """Deux tranches voisines peuvent se recouvrir ; compter deux fois gonflerait le corpus."""
     preparer_tranche(metaordres=[_ordre("BTC", 1_000)], carnets={"BTC": [_carnet(1_000)]},

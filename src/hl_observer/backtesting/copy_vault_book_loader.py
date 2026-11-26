@@ -102,53 +102,79 @@ def load_observed_books(
     causal_path = resolved_root / causal_relative_path
     bbo_path = resolved_root / bbo_relative_path
     checkpoint_state_path = resolved_root / CHECKPOINT_STATE_RELPATH
+    checkpoint_state_load_failure = None
     try:
         checkpoint_state = json.loads(checkpoint_state_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError, TypeError):
+    except FileNotFoundError:
         checkpoint_state = None
+        checkpoint_state_load_failure = "CHECKPOINT_STATE_MISSING"
+    except OSError:
+        checkpoint_state = None
+        checkpoint_state_load_failure = "CHECKPOINT_STATE_READ_FAILED"
+    except (ValueError, TypeError):
+        checkpoint_state = None
+        checkpoint_state_load_failure = "CHECKPOINT_STATE_INVALID_JSON"
     writer_run_id = (
-        str(checkpoint_state.get("writer_run_id") or "").strip()
+        checkpoint_state.get("writer_run_id", "").strip()
         if isinstance(checkpoint_state, dict)
+        and isinstance(checkpoint_state.get("writer_run_id"), str)
         else ""
     )
     try:
         clean_epoch_ms = _optional_epoch_ms(checkpoint_state.get("clean_epoch_ms"))
-        output_start_offset = int(checkpoint_state.get("output_start_offset") or 0)
+        output_start_offset = _exact_non_negative_int(
+            checkpoint_state.get("output_start_offset")
+        )
     except (AttributeError, TypeError, ValueError, OverflowError):
         clean_epoch_ms = 0
-        output_start_offset = -1
+        output_start_offset = None
     checkpoint_counters = (
         checkpoint_state.get("counters")
         if isinstance(checkpoint_state, dict) else None
     )
     if not isinstance(checkpoint_counters, dict):
         checkpoint_counters = {}
-    checkpoint_counter_values = [
-        _exact_non_negative_int(checkpoint_counters.get(name))
-        for name in (
-            "input_rotations",
-            "checkpoints_expired",
-            "pending_overflow_rejected",
+    checkpoint_counter_values = []
+    for name in GAPS.COMPTEUR_PAR_NATURE.values():
+        if name in GAPS.COMPTEURS_FACULTATIFS and name not in checkpoint_counters:
+            checkpoint_counter_values.append(0)
+            continue
+        checkpoint_counter_values.append(
+            _exact_non_negative_int(checkpoint_counters.get(name))
         )
-    ]
     if any(value is None for value in checkpoint_counter_values):
         collector_gap_count = 1
     else:
         collector_gap_count = sum(checkpoint_counter_values)
-    clean_epoch_receipt_valid = bool(
-        isinstance(checkpoint_state, dict)
-        and checkpoint_state.get("schema_version") == CHECKPOINT_WRITER_STATE_SCHEMA
-        and checkpoint_state.get("protocol") == CHECKPOINT_COLLECTOR_PROTOCOL
-        and checkpoint_state.get("instrument_identity_schema") == INSTRUMENT_IDENTITY_SCHEMA
-        and checkpoint_state.get("paper_read_only") is True
-        and checkpoint_state.get("real_execution") is False
-        and writer_run_id
-        and clean_epoch_ms > 0
-        and output_start_offset >= 0
-    )
+    receipt_precondition_failure = checkpoint_state_load_failure
+    if receipt_precondition_failure is None:
+        if not isinstance(checkpoint_state, dict):
+            receipt_precondition_failure = "CHECKPOINT_STATE_NOT_OBJECT"
+        elif checkpoint_state.get("schema_version") != CHECKPOINT_WRITER_STATE_SCHEMA:
+            receipt_precondition_failure = "CHECKPOINT_SCHEMA_MISMATCH"
+        elif checkpoint_state.get("protocol") != CHECKPOINT_COLLECTOR_PROTOCOL:
+            receipt_precondition_failure = "CHECKPOINT_PROTOCOL_MISMATCH"
+        elif checkpoint_state.get("instrument_identity_schema") != INSTRUMENT_IDENTITY_SCHEMA:
+            receipt_precondition_failure = "CHECKPOINT_INSTRUMENT_IDENTITY_MISMATCH"
+        elif checkpoint_state.get("paper_read_only") is not True:
+            receipt_precondition_failure = "CHECKPOINT_NOT_PAPER_READ_ONLY"
+        elif checkpoint_state.get("real_execution") is not False:
+            receipt_precondition_failure = "CHECKPOINT_REAL_EXECUTION_FLAG_INVALID"
+        elif not writer_run_id:
+            receipt_precondition_failure = "CHECKPOINT_WRITER_RUN_ID_MISSING"
+        elif clean_epoch_ms <= 0:
+            receipt_precondition_failure = "CHECKPOINT_CLEAN_EPOCH_INVALID"
+        elif output_start_offset is None:
+            receipt_precondition_failure = "CHECKPOINT_OUTPUT_OFFSET_INVALID"
+    clean_epoch_receipt_valid = receipt_precondition_failure is None
+    output_start_offset = output_start_offset if output_start_offset is not None else -1
     # Segmentation des trous : voir `GAPS.segmenter_l_epoque` (un trou non situe ferme l'epoque).
     intervalles_surs, raison_segmentation, clean_epoch_receipt_valid, etat_ecrivain_ms = (
         GAPS.segmenter_l_epoque(checkpoint_state, recu_valide=clean_epoch_receipt_valid))
+    receipt_invalid_reason = (
+        receipt_precondition_failure
+        or (raison_segmentation if not clean_epoch_receipt_valid else None)
+    )
     # Une ligne recue APRES la derniere ecriture d'etat n'est pas encore couverte par une preuve
     # de trou : elle attend la prochaine ecriture. On ne certifie pas sur une ignorance.
     rows_inside_gap_window = 0
@@ -758,6 +784,7 @@ def load_observed_books(
         "clean_epoch_receipt": {
             "schema_version": CHECKPOINT_INTEGRITY_SCHEMA,
             "receipt_valid": clean_epoch_receipt_valid,
+            "receipt_invalid_reason": receipt_invalid_reason,
             "writer_role": "BOUND_WRITER" if clean_epoch_receipt_valid else None,
             "writer_run_id": writer_run_id or None,
             "clean_epoch_ms": clean_epoch_ms or None,

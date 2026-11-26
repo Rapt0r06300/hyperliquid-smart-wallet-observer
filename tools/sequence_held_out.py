@@ -26,7 +26,7 @@ import sys
 from pathlib import Path
 
 _RACINE = Path(__file__).resolve().parents[1]
-for _chemin in (_RACINE / "src", _RACINE):
+for _chemin in (_RACINE / "src", _RACINE / "tools", _RACINE):
     if str(_chemin) not in sys.path:
         sys.path.insert(0, str(_chemin))
 
@@ -35,6 +35,7 @@ from audit_selection_labo import BORNES_PAR_DEFAUT, gel_au_contrat  # noqa: E402
 from hl_observer.backtesting import copy_vault_funding_realise as fr  # noqa: E402
 from hl_observer.backtesting.copy_vault_labo_deux_phases import (  # noqa: E402
     entrees_de_phase_2,
+    jours_utc_complets_depuis_manifestes,
 )
 from hl_observer.backtesting.copy_vault_local_lab import _PARAMETER_DOMAINS  # noqa: E402
 from hl_observer.backtesting.copy_vault_v21_frozen import (  # noqa: E402
@@ -129,32 +130,19 @@ def journees_utc_completes(racine: Path) -> list[int]:
     """
     import json
 
-    fenetres = []
+    manifestes = []
     for manifeste in sorted((racine / "runtime/labo_phase1").glob("*/MANIFESTE.json")):
         try:
             m = json.loads(manifeste.read_text(encoding="utf-8"))
-            fenetres.append((int(m["tranche_debut_ms"]), int(m["tranche_fin_ms"])))
-        except (OSError, ValueError, KeyError):
-            continue
-    if not fenetres:
+        except (OSError, ValueError, json.JSONDecodeError):
+            return []
+        if not isinstance(m, dict):
+            return []
+        manifestes.append(m)
+    if not manifestes:
         return []
-    fenetres.sort()
-    fusionnees = [list(fenetres[0])]
-    for debut, fin in fenetres[1:]:
-        # +1 ms : deux tranches jointives se touchent a la milliseconde pres.
-        if debut <= fusionnees[-1][1] + 1:
-            fusionnees[-1][1] = max(fusionnees[-1][1], fin)
-        else:
-            fusionnees.append([debut, fin])
-    premier = (fusionnees[0][0] // UTC_JOUR_MS) * UTC_JOUR_MS
-    dernier = (fusionnees[-1][1] // UTC_JOUR_MS) * UTC_JOUR_MS
-    completes = []
-    jour = premier
-    while jour <= dernier:
-        if any(d <= jour and jour + UTC_JOUR_MS - 1 <= f for d, f in fusionnees):
-            completes.append(jour)
-        jour += UTC_JOUR_MS
-    return completes
+    completes, status = jours_utc_complets_depuis_manifestes(manifestes)
+    return completes if status == "PROVEN_FROM_VERIFIED_PHASE1_MANIFESTS" else []
 
 
 def gel_du_candidat(racine: Path, surcharges: dict, bornes: dict | None = None) -> dict:

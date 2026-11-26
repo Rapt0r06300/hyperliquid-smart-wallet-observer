@@ -34,6 +34,7 @@ def verifier_le_gel(raw: Mapping[str, Any]) -> dict[str, Any]:
         MAX_GROSS_EXPOSURE_USD,
         MAX_REFERENCE_LAG_MS,
         MAX_TARGET_LAG_MS,
+        PAPER_LEVERAGE,
         PROTOCOL,
         _strict_positive_int,
     )
@@ -58,6 +59,14 @@ def verifier_le_gel(raw: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError("COPY_V21_SAFETY_CONTRACT_MISMATCH")
     if parameter_hash(parameters) != str(row.get("parameters_sha256") or ""):
         raise ValueError("COPY_V21_FREEZE_HASH_MISMATCH")
+    paper_leverage = parameters.get("paper_leverage", PAPER_LEVERAGE)
+    if (
+        isinstance(paper_leverage, bool)
+        or not isinstance(paper_leverage, (int, float))
+        or not math.isfinite(float(paper_leverage))
+        or float(paper_leverage) != PAPER_LEVERAGE
+    ):
+        raise ValueError("COPY_V21_PAPER_LEVERAGE_OUTSIDE_CONTRACT")
     required_parameters = {
         "training_selection_eligible",
         "minimum_leader_fill_notional_usd",

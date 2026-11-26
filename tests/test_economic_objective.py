@@ -170,6 +170,14 @@ def test_equal_campaign_and_proof_sample_counts_must_reconcile_economics():
     assert result["eligible_net_pnl_usd"] is None
 
 
+def test_missing_net_proof_does_not_claim_the_informational_reference_was_missed():
+    result = evaluate_objective(_proof(oos=None, forward=None))
+    assert result["proof_net_pnl_usd"] is None
+    assert result["historical_target_status"] == "UNMEASURED"
+    assert result["historical_target_reached"] is False
+    assert "TARGET_NET_USD_NOT_REACHED" not in result["objective_reasons"]
+
+
 def test_oos_forward_proof_cannot_claim_more_trades_than_campaign():
     result = evaluate_objective(_proof(closed_positions=3, opened_positions=3))
     assert "PROOF_SAMPLE_COUNT_EXCEEDS_CAMPAIGN_CLOSED" in result["objective_reasons"]

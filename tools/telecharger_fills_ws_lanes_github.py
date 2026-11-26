@@ -22,6 +22,12 @@ sys.path.insert(0, str(RACINE / "src"))
 sys.path.insert(0, str(RACINE / "tools"))
 
 from fusionner_fills_lanes import fusionner  # noqa: E402
+from hl_observer.collection.copy_vault_checkpoint_socle import (  # noqa: E402
+    CheckpointSourceBusy,
+    FillSourceChanged,
+    FillWriterBusy,
+    copy_vault_checkpoint_source_lock,
+)
 from telecharger_fills_lanes_github import (  # noqa: E402 (réutilise la plomberie gh)
     _gh_reel, gh_disponible, lister_runs_reussis as _lister_generic, telecharger_runs,
 )
@@ -53,6 +59,13 @@ def lister_runs_reussis(gh, cwd: Path, limite: int) -> list[str]:
 
 def telecharger_et_fusionner(root: Path, *, gh=_gh_reel, limite_runs: int = 3,
                              max_lag_ms: int = 600_000) -> dict:
+    try:
+        # Fast preflight: avoid downloading while the forward-only reader is live.
+        with copy_vault_checkpoint_source_lock(root, wait_s=0):
+            pass
+    except CheckpointSourceBusy:
+        return {"statut": "deferred_active_checkpoint", "runs": 0, "fusion": None}
+
     if not gh_disponible(gh, cwd=root):
         return {"statut": "gh_indisponible", "runs": 0, "fusion": None}
     run_ids = lister_runs_reussis(gh, root, limite_runs)
@@ -63,7 +76,14 @@ def telecharger_et_fusionner(root: Path, *, gh=_gh_reel, limite_runs: int = 3,
         telecharges = telecharger_runs(gh, root, run_ids, tmp)
         if telecharges == 0:
             return {"statut": "telechargement_vide", "runs": 0, "fusion": None}
-        rapport = fusionner(root, tmp, max_lag_ms, cible_rel=CIBLE_WS, motif=MOTIF_WS)
+        try:
+            rapport = fusionner(root, tmp, max_lag_ms, cible_rel=CIBLE_WS, motif=MOTIF_WS)
+        except (CheckpointSourceBusy, FillSourceChanged, FillWriterBusy):
+            return {
+                "statut": "deferred_live_source_busy",
+                "runs": telecharges,
+                "fusion": None,
+            }
         return {"statut": "OK", "runs": telecharges, "fusion": rapport}
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -85,6 +105,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if res["statut"] == "telechargement_vide":
         print("[ws-lanes] aucun artefact telecharge (expires ?) -> rien a fusionner.", flush=True)
+        return 0
+    if res["statut"] in {"deferred_active_checkpoint", "deferred_live_source_busy"}:
+        phase = "avant telechargement" if res["runs"] == 0 else "apres telechargement temporaire"
+        print(f"[ws-lanes] fusion differee ({phase}) : source live ou checkpoint occupe. "
+              "La cible locale n'a pas ete modifiee ; les artefacts restent disponibles sur GitHub. "
+              "Relancer AlinaSync apres la fin de l'ecriture en cours.", flush=True)
         return 0
     f = res["fusion"]
     print(f"[ws-lanes] {res['runs']} run(s) GitHub rapatrie(s) ; total final {f['total_final']} fills "

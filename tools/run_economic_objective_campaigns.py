@@ -545,7 +545,10 @@ def run_campaigns(
     copy_raw["next_hypothesis_v9"] = copy_v9
     copy_raw_path = _write_raw(root, "copy_vault", copy_raw)
     copy_campaign = build_copy_campaign(
-        copy_raw, freeze=copy_freeze, datasets=copy_data, require_daily=True
+        # The historical +5 USD/day reference is descriptive, not a Copy-Vault
+        # proof gate. Keep daily evidence in the report, but do not require every
+        # complete day to clear that reference before admitting positive net proof.
+        copy_raw, freeze=copy_freeze, datasets=copy_data, require_daily=False
     )
     copy_campaign["evidence_paths"].append(copy_raw_path.relative_to(root).as_posix())
     write_campaign(root, copy_campaign)

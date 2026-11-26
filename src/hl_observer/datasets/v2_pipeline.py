@@ -22,6 +22,7 @@ _SNAPSHOT_CHANNELS = {
     "instrument_metadata",
     "copy_vault_positions",
     "copy_vault_selection",
+    "copy_vault_broad_state",
     "copy_vault_snapshot",
     "copy_vault_funding",
     "copy_vault_ledger",
@@ -75,12 +76,16 @@ def infer_reconciliation_status(manifest: Mapping[str, Any]) -> str:
             return "SNAPSHOT_VERIFIED"
         return "UNVERIFIED"
     if transports and transports.issubset({"https", "http"}) and family in _SNAPSHOT_CHANNELS:
-        if family in {"copy_vault_positions", "copy_vault_selection"}:
+        if family in {
+            "copy_vault_positions", "copy_vault_selection", "copy_vault_broad_state",
+        }:
             semantics = {
                 str(value).lower()
                 for value in (provenance.get("timestamp_semantics") or [])
             }
             if "receive_observation_time_only" not in semantics:
+                return "UNVERIFIED"
+            if family == "copy_vault_broad_state" and manifest.get("source") != "hyperliquid_public_info":
                 return "UNVERIFIED"
         if family == "copy_vault_snapshot":
             semantics = {

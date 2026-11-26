@@ -26,11 +26,15 @@ from typing import Any
 
 RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
+from hl_observer.collection.collecte_fiable import ajouter_atomique  # noqa: E402
 sys.path.insert(0, str(RACINE / "tools"))
 
 from hl_observer.collection import userfills_live as UL  # noqa: E402
 from hl_observer.collection import verrou_instance as VI  # noqa: E402
 from hl_observer.collection import slots_userfills as SLOTS  # noqa: E402
+from hl_observer.collection.copy_vault_checkpoint_socle import (  # noqa: E402
+    copy_vault_fill_writer_lock,
+)
 from hl_observer.backtesting.copy_vault_executable import (  # noqa: E402
     CHECKPOINT_COLLECTOR_PROTOCOL,
     COPY_DELAY_MS as COPY_VAULT_DELAY_MS,
@@ -142,6 +146,39 @@ def _l2_rejection_heartbeat_metrics(*, max_codes: int = 20) -> dict[str, object]
         "l2_reject_reason_codes_omitted": len(omitted),
         "l2_reject_reason_counts_omitted": sum(count for _, count in omitted),
     }
+
+
+def _collector_error_context(exc: BaseException, root: Path, *, limit: int = 240) -> str:
+    """Keep bounded exception details and useful repo-relative paths out of live logs."""
+    fields = [type(exc).__name__]
+    if isinstance(exc, OSError):
+        errno = getattr(exc, "errno", None)
+        winerror = getattr(exc, "winerror", None)
+        if isinstance(errno, int):
+            fields.append(f"errno={errno}")
+        if isinstance(winerror, int):
+            fields.append(f"winerror={winerror}")
+        detail = getattr(exc, "strerror", None) or "operating-system error"
+        for attr in ("filename", "filename2"):
+            raw_path = getattr(exc, attr, None)
+            if raw_path is None:
+                continue
+            path = Path(os.fsdecode(raw_path))
+            if not path.is_absolute():
+                path = Path(root) / path
+            try:
+                display_path = path.resolve(strict=False).relative_to(
+                    Path(root).resolve(strict=False)
+                ).as_posix()
+            except (OSError, ValueError):
+                display_path = path.name
+            fields.append(f"{attr}={display_path}")
+    else:
+        detail = str(exc)
+    compact_detail = " ".join(str(detail).split())
+    if compact_detail:
+        fields.append(compact_detail)
+    return " ".join(fields)[:max(32, int(limit))]
 
 
 def _strict_positive_timestamp_ms(value) -> int | None:
@@ -947,9 +984,8 @@ def _append_copy_vault_book(
         row["connection_id"] = connection_id
         row["l2_gap_epoch"] = max(0, int(l2_gap_epoch or 0))
     path = Path(root) / COPY_VAULT_L2_TAPE
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(row, ensure_ascii=False, allow_nan=False) + "\n")
+    # 26/11/2026 : ajout ATOMIQUE -- ce ruban a un autre ecrivain (AlinaSync et/ou un autre collecteur) ; deux ajouts "a" simultanes perdent des lignes sous Windows (mesure). Memes octets qu'avant.
+    ajouter_atomique(path, json.dumps(row, ensure_ascii=False, allow_nan=False) + "\n")
     _COPY_VAULT_LAST_SAMPLE_MS[symbol] = max(int(previous or 0), received)
     return True
 
@@ -1270,8 +1306,9 @@ def _traiter_un(root: Path, fill: dict, coins_a_verifier: set, t_ws_mono: float)
         "received_at_ms": received,
         "processed_at_ms": processed_at_ms,
     }
-    with (root / FILLS_LIVE).open("a", encoding="utf-8") as f:
-        f.write(json.dumps(persisted_fill, ensure_ascii=False) + "\n")
+    with copy_vault_fill_writer_lock(root, wait_s=5.0):
+        with (root / FILLS_LIVE).open("a", encoding="utf-8") as f:
+            f.write(json.dumps(persisted_fill, ensure_ascii=False) + "\n")
     _HEARTBEAT_WS["persisted_fills"] = int(
         _HEARTBEAT_WS.get("persisted_fills") or 0
     ) + 1
@@ -1330,7 +1367,10 @@ async def _worker(root: Path, file: asyncio.Queue) -> None:
                 for coh in CO.COHORTES.values():                 # exits ÉVÉNEMENTIELS sur les coins bougés
                     CO.gerer_exits(coh, root, lecteur_l2=_lecteur_l2_marquage, close_run_id=RUN_ID)   # marquage book WS frais
         except Exception as exc:  # noqa: BLE001
-            print("[userfills] worker err %s" % str(exc)[:60], flush=True)
+            print(
+                "[userfills] worker err " + _collector_error_context(exc, root),
+                flush=True,
+            )
         finally:
             file.task_done()
 
@@ -1846,7 +1886,11 @@ async def _exits_periodiques(root: Path, *, intervalle_s: float = 2.0) -> None:
                 CO.statut(coh, root, lecteur_l2=_lecteur_l2_marquage, run_id=RUN_ID, trigger_version=TRIGGER_VERSION,
                           config_hash=CO.config_hash_courant(coh, root))
             except Exception as exc:  # noqa: BLE001
-                print("[userfills] exits %s err %s" % (coh.nom, str(exc)[:40]), flush=True)
+                print(
+                    "[userfills] exits %s err %s"
+                    % (coh.nom, _collector_error_context(exc, root)),
+                    flush=True,
+                )
         await asyncio.sleep(intervalle_s)
 
 
@@ -2205,7 +2249,7 @@ _TAPE_COINS_ACTIFS: dict = {}                # coin -> dernier fill_recv (ms wal
 _TAPE_PREWARM_COINS: set[str] = set()        # coins réels récents suivis avant le prochain fill live
 _TAPE_ACTIVE_L2_SYMBOLS: set[str] = set()     # univers allMids reellement negociable au dernier refresh
 _TAPE_L2_CANONICAL: dict[str, str] = {}        # identité native exacte -> symbole exigé par le WS
-_TAPE_BUFFER: dict = {}                      # coin -> list[{recv_mono, resume}] (snapshots successifs)
+_TAPE_BUFFER: dict = {}                      # coin -> frames WS horodatees avec identite de connexion/epoch
 _COPY_VAULT_LAST_SAMPLE_MS: dict[str, int] = {}
 TAPE_BUFFER_MAX = 400
 #: Durée pendant laquelle un coin reste abonné au carnet L2 après le dernier fill d'un leader.
@@ -2423,7 +2467,16 @@ def _first_ws_checkpoint(
             recv_wall = int(event["recv_wall_ms"])
             resume = event["resume"]
             exchange_ts = int(resume["book_exchange_time"])
+            connection_id = event["connection_id"]
+            l2_gap_epoch = event["l2_gap_epoch"]
         except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+        if (
+            not isinstance(connection_id, str)
+            or not connection_id.strip()
+            or type(l2_gap_epoch) is not int
+            or l2_gap_epoch < 0
+        ):
             continue
         if recv_mono < float(target_mono_ms):
             continue
@@ -2632,6 +2685,8 @@ async def _capture_copy_vault_checkpoint(root: Path, checkpoint: dict) -> dict:
             received_at_ms=int(ws_event["recv_wall_ms"]),
             sample_interval_ms=0,
             source="HYPERLIQUID_L2_WS",
+            connection_id=str(ws_event["connection_id"]).strip(),
+            l2_gap_epoch=ws_event["l2_gap_epoch"],
             checkpoint_stage=str(checkpoint["stage"]),
             checkpoint_target_ms=target_wall,
             checkpoint_id=str(checkpoint["checkpoint_id"]),
@@ -2740,6 +2795,8 @@ async def _tape_l2_buffer(root: Path, *, sync_s: float = 0.5) -> None:
                                 "recv_mono": time.monotonic() * 1000,
                                 "recv_wall_ms": recv_wall_ms,
                                 "resume": r,
+                                "connection_id": connexion_id,
+                                "l2_gap_epoch": epoques.get(coin, 0),
                             })
                             if len(buf) > TAPE_BUFFER_MAX:
                                 del buf[:len(buf) - TAPE_BUFFER_MAX]

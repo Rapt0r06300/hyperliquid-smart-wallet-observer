@@ -195,6 +195,13 @@ def _suggested_verdict(
         return "BLOCKED", [str(raw.get("raison") or "optimizer unavailable")]
     if not raw.get("lance", False):
         return "BLOCKED", [str(raw.get("raison") or "optimizer did not run")]
+    completed = int(raw.get("trials_termines") or 0)
+    if completed <= 0:
+        return "BLOCKED", ["no completed local trials"]
+    if raw.get("wall_budget_exhausted") is True or raw.get("wall_budget_overrun") is True:
+        return "ITERATE", [
+            "wall-clock budget reached or exceeded; this run cannot freeze or promote a candidate"
+        ]
     metrics = best.get("metrics") if isinstance(best, Mapping) else None
     if isinstance(metrics, Mapping):
         requested = metrics.get("candidate_verdict")
@@ -203,9 +210,6 @@ def _suggested_verdict(
             if isinstance(reasons, list):
                 return requested, [str(item)[:500] for item in reasons[:10]]
             return requested, ["evaluator supplied candidate_verdict"]
-    completed = int(raw.get("trials_termines") or 0)
-    if completed <= 0:
-        return "BLOCKED", ["no completed local trials"]
     if best is None:
         return "REJECT", ["completed trials produced no candidate"]
     return "ITERATE", ["candidate exists; independent validation decision still required"]
@@ -253,6 +257,23 @@ def run_experiment(
     compute_policy = _configure_cpu_first_local_compute()
     evaluator = resolve_evaluator(spec)
     run_optimizer = optimizer or _default_optimizer()
+    max_wall_seconds = spec.budget.get("max_wall_seconds")
+    optimizer_kwargs: dict[str, Any] = {}
+    if max_wall_seconds is not None:
+        try:
+            optimizer_parameters = inspect.signature(run_optimizer).parameters
+            accepts_optimizer_kwargs = any(
+                parameter.kind == inspect.Parameter.VAR_KEYWORD
+                for parameter in optimizer_parameters.values()
+            )
+        except (TypeError, ValueError):
+            optimizer_parameters = {}
+            accepts_optimizer_kwargs = False
+        if "max_wall_seconds" not in optimizer_parameters and not accepts_optimizer_kwargs:
+            raise SpecValidationError(
+                "optimizer cannot enforce budget.max_wall_seconds; refusing an unbounded run"
+            )
+        optimizer_kwargs["max_wall_seconds"] = float(max_wall_seconds)
     run_id = _forced_run_id(spec.experiment_id) if force else spec.experiment_id
     run_dir = result_dir(runtime_root, run_id)
     if not force and run_dir.exists() and any(run_dir.iterdir()):
@@ -276,6 +297,7 @@ def run_experiment(
         n_trials=int(spec.budget["max_trials"]),
         storage_dir=storage_dir,
         seed=spec.seed,
+        **optimizer_kwargs,
     )
     duration_s = round(time.monotonic() - t0, 6)
     if not isinstance(raw, Mapping):
@@ -309,7 +331,10 @@ def run_experiment(
         "duration_s": duration_s,
         "budget": _compact(spec.budget),
         "compute_policy": compute_policy,
-        "wall_budget_enforced": False,
+        "wall_budget_enforced": raw_dict.get("wall_budget_enforced") is True,
+        "wall_budget_enforcement": raw_dict.get("wall_budget_enforcement"),
+        "wall_budget_exhausted": raw_dict.get("wall_budget_exhausted") is True,
+        "wall_budget_overrun": raw_dict.get("wall_budget_overrun") is True,
         "trials": trials,
         "best_candidate": best,
         "verdict": verdict,

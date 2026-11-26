@@ -125,6 +125,9 @@ CLES_METRIQUES = (
     "source_queue_drops",   # userFills perdus avant persistence/reconciliation
     "l2_tape_queue_drops",  # fills persistés mais non remis à la tape L2 dérivée
     "l2_validation_rejections",  # snapshots L2 rejetés fail-closed avant admission au tape Copy-Vault
+    "l2_reject_reasons",  # causes de rejet L2 bornées, triées et exportées par le collecteur
+    "l2_reject_reason_codes_omitted",  # causes non affichées au-delà du plafond du résumé
+    "l2_reject_reason_counts_omitted",  # occurrences correspondant aux causes omises
     "subscription_ack_count",   # abonnements userFills reconnus sur la rotation courante
     "subscription_required_count",  # abonnements attendus sur la rotation courante
     "invalid_subscription_acks",  # réponses serveur non corrélées à une souscription demandée
@@ -139,12 +142,16 @@ CLES_METRIQUES = (
     "invalid_rejected",
     "writer_outages",
     "coverage_receipt_status",
+    "coverage_receipt_reason",
+    "gap_journal_status",
+    "gap_journal_reason",
 )
 
 _CLES_METRIQUES_ENTIERES = frozenset({
     "gaps_critiques", "reconnects", "hors_ordre",
     "source_queue_drops", "l2_tape_queue_drops",
     "l2_validation_rejections",
+    "l2_reject_reason_codes_omitted", "l2_reject_reason_counts_omitted",
     "subscription_ack_count", "subscription_required_count",
     "invalid_subscription_acks", "pre_ack_userfills_frames",
     "invalid_json_frames", "unexpected_userfills_channels",
@@ -152,7 +159,8 @@ _CLES_METRIQUES_ENTIERES = frozenset({
     "checkpoint_expirations", "checkpoint_queue_rejections",
     "input_rotations", "reconnect_backfill_blocked", "invalid_rejected", "writer_outages",
 })
-_CLES_METRIQUES_TEXTUELLES = frozenset({"coverage_receipt_status"})
+_CLES_METRIQUES_TEXTUELLES = frozenset({"coverage_receipt_status", "gap_journal_status"})
+_CLES_METRIQUES_RAISON = frozenset({"coverage_receipt_reason", "gap_journal_reason"})
 _ETATS_RECU_COUVERTURE = frozenset({"PROVEN", "UNMEASURABLE"})
 
 
@@ -161,15 +169,45 @@ def _metriques_propres(m: Mapping[str, Any] | None) -> dict:
     if not m:
         return {}
     out: dict = {}
+    omitted_l2_codes = 0
+    omitted_l2_counts = 0
     for cle in CLES_METRIQUES:
         if cle in m:
             v = m[cle]
-            if cle in _CLES_METRIQUES_ENTIERES:
+            if cle == "l2_reject_reasons":
+                if not isinstance(v, Mapping):
+                    continue
+                comptes = []
+                for code, compte in v.items():
+                    if (isinstance(code, str) and code and len(code) <= 96
+                            and isinstance(compte, int) and not isinstance(compte, bool) and compte >= 0):
+                        comptes.append((code, compte))
+                comptes.sort(key=lambda item: (-item[1], item[0]))
+                out[cle] = dict(comptes[:20])
+                omis = comptes[20:]
+                omitted_l2_codes = len(omis)
+                omitted_l2_counts = sum(compte for _, compte in omis)
+            elif cle in _CLES_METRIQUES_ENTIERES:
                 out[cle] = int(v)
             elif cle in _CLES_METRIQUES_TEXTUELLES:
-                out[cle] = v if isinstance(v, str) and v in _ETATS_RECU_COUVERTURE else "UNMEASURABLE"
+                out[cle] = (
+                    v if isinstance(v, str) and v in _ETATS_RECU_COUVERTURE
+                    else "UNMEASURABLE"
+                )
+            elif cle in _CLES_METRIQUES_RAISON:
+                if isinstance(v, str) and len(v) <= 192 and all(
+                    char.isalnum() or char in "_:=,-" for char in v
+                ):
+                    out[cle] = v
             else:
                 out[cle] = bool(v)
+    if omitted_l2_codes:
+        out["l2_reject_reason_codes_omitted"] = (
+            out.get("l2_reject_reason_codes_omitted", 0) + omitted_l2_codes
+        )
+        out["l2_reject_reason_counts_omitted"] = (
+            out.get("l2_reject_reason_counts_omitted", 0) + omitted_l2_counts
+        )
     return out
 
 

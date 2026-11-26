@@ -104,9 +104,10 @@ def test_bitget_pseq_requires_exact_previous(tmp_path):
     assert inspect_shard(source, info)["status"] != "CONTINUOUS_L2"
 
 
-def test_full_offline_report_and_fast_receipt_resume(tmp_path):
+def test_full_offline_report_and_fast_receipt_resume(tmp_path, monkeypatch):
+    from tools import partitioned_data_index
     from tools.certify_local_l2 import run
-    from pathlib import Path
+    from tools.partitioned_data_index import partition_index
 
     root = tmp_path / "repository"
     destination = root / "runtime" / "recovery" / "full"
@@ -119,10 +120,21 @@ def test_full_offline_report_and_fast_receipt_resume(tmp_path):
                 "asset_verified": True, "validation_allowed": True,
                 "release_tag": "sample-release", "symbol": "BTCUSDT"})
     (root / "catalog").mkdir()
-    (root / "catalog" / "DATA_INDEX.json").write_text(
-        json.dumps({"schema": "alina.data_index.v2", "shards": [row]}),
-        encoding="utf-8",
+    index_root, partitions = partition_index(
+        {"schema": "alina.data_index.v2", "shards": [row]},
+        max_partition_bytes=4096,
     )
+    (root / "catalog" / "DATA_INDEX.json").write_text(
+        json.dumps(index_root), encoding="utf-8",
+    )
+    for relative, content in partitions.items():
+        partition = root / "catalog" / relative
+        partition.parent.mkdir(parents=True, exist_ok=True)
+        partition.write_bytes(content)
+    def reject_eager_read(*_args, **_kwargs):
+        raise AssertionError("L2 certification must stream the verified index")
+
+    monkeypatch.setattr(partitioned_data_index, "read_index", reject_eager_read)
     first = run(root, destination, workers=2)
     assert first["totals"] == {"CONTINUOUS_L2": 1}
     assert first["cache_reused_without_new_hash"] == 0
@@ -178,6 +190,63 @@ def test_missing_catalog_shards_are_counted_not_mislabeled_corrupt(tmp_path):
     assert report["indexed_safe_l2_shards"] == 2
     assert report["not_downloaded_locally"] == 1
     assert report["totals"] == {"SNAPSHOT_OBSERVATIONS_ONLY": 1}
+    assert report["run_status"] == "PARTIAL_LOCAL"
+    assert report["scope_complete"] is False
+    with sqlite3.connect(dest / "SAFE_SHARDS.sqlite3") as connection:
+        assert connection.execute(
+            "SELECT value FROM l2_certification_meta WHERE key='run_status'"
+        ).fetchone()[0] == "PARTIAL_LOCAL"
+        assert connection.execute(
+            "SELECT COUNT(*) FROM current_l2_snapshot_backtestable"
+        ).fetchone()[0] == 0
+
+    complete = run(root, dest, include_missing=True)
+    assert complete["run_status"] == "COMPLETE"
+    assert complete["scope_complete"] is True
+    assert complete["audited_shards"] == 2
+    assert complete["not_downloaded_locally"] == 1
+    assert complete["totals"] == {"BLOCKED": 1, "SNAPSHOT_OBSERVATIONS_ONLY": 1}
+
+
+def test_l2_smoke_limit_never_promotes_partial_catalog_as_complete(tmp_path):
+    from tools.certify_local_l2 import run
+
+    root = tmp_path / "repo"
+    dest = root / "runtime" / "recovery" / "full"
+    stored = dest / "usable" / "shards" / "release"
+    stored.mkdir(parents=True)
+    source, row = prepare(tmp_path, [snap(1, 100)])
+    rows = []
+    for dataset_id in ("one", "two"):
+        (stored / f"{dataset_id}.jsonl.gz").write_bytes(source.read_bytes())
+        rows.append({
+            **row,
+            "dataset_id": dataset_id,
+            "quality_status": "SAFE",
+            "replay_compatible": True,
+            "asset_verified": True,
+            "validation_allowed": True,
+            "release_tag": "release",
+            "symbol": "BTCUSDT",
+        })
+    (root / "catalog").mkdir()
+    (root / "catalog" / "DATA_INDEX.json").write_text(
+        json.dumps({"schema": "alina.data_index.v2", "shards": rows}),
+        encoding="utf-8",
+    )
+
+    report = run(root, dest, limit=1)
+
+    assert report["run_status"] == "LIMITED"
+    assert report["scope_complete"] is False
+    assert report["limit_applied"] is True
+    with sqlite3.connect(dest / "SAFE_SHARDS.sqlite3") as connection:
+        assert connection.execute(
+            "SELECT value FROM l2_certification_meta WHERE key='run_status'"
+        ).fetchone()[0] == "LIMITED"
+        assert connection.execute(
+            "SELECT COUNT(*) FROM current_l2_snapshot_backtestable"
+        ).fetchone()[0] == 0
 
 
 def test_report_is_compact_and_database_separates_snapshot_from_continuous(tmp_path):
@@ -212,6 +281,9 @@ def test_report_is_compact_and_database_separates_snapshot_from_continuous(tmp_p
 
     report = run(root, dest, workers=2)
 
+    assert report["run_status"] == "COMPLETE"
+    assert report["scope_complete"] is True
+    assert report["audited_shards"] == report["indexed_safe_l2_shards"] == 2
     assert "l2_rows" not in report
     assert report["admission"] == {
         "snapshot_backtestable_shards": 2,

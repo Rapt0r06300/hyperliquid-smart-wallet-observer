@@ -162,6 +162,7 @@ def assess_train_variant(
     max_coin_share: float | None = None,
     max_vault_share: float | None = None,
     max_top_positive_share: float | None = None,
+    net_value_key: str = "net_pnl_usd",
 ) -> dict[str, Any]:
     """Applique les garde-fous économiques et statistiques pré-déclarés.
 
@@ -181,10 +182,32 @@ def assess_train_variant(
     placebo = summarize(placebo_rows)
     statistics = summarize_train_rows(
         rows,
-        value_key="net_pnl_usd",
+        value_key=net_value_key,
         timestamp_key="entry_ts_ms",
         trial_count=int(trial_count),
         family_alpha=FAMILY_ALPHA,
+    )
+    execution_statistics = (
+        statistics
+        if net_value_key == "net_pnl_usd"
+        else summarize_train_rows(
+            rows,
+            value_key="net_pnl_usd",
+            timestamp_key="entry_ts_ms",
+            trial_count=int(trial_count),
+            family_alpha=FAMILY_ALPHA,
+        )
+    )
+    placebo_statistics = (
+        None
+        if net_value_key == "net_pnl_usd"
+        else summarize_train_rows(
+            placebo_rows,
+            value_key=net_value_key,
+            timestamp_key="entry_ts_ms",
+            trial_count=int(trial_count),
+            family_alpha=FAMILY_ALPHA,
+        )
     )
     coin_count = max(
         Counter(str(row.get("coin") or "UNKNOWN") for row in rows).values(),
@@ -198,9 +221,20 @@ def assess_train_variant(
     coin_share = coin_count / denominator
     vault_share = vault_count / denominator
     net = decimal_value(statistics.get("net_pnl_usd_exact_decimal"))
-    placebo_net = decimal_value(placebo.get("net_pnl_usd_exact_decimal"))
+    placebo_net = decimal_value(
+        placebo_statistics.get("net_pnl_usd_exact_decimal")
+        if placebo_statistics is not None
+        else placebo.get("net_pnl_usd_exact_decimal")
+    )
     total_lcb = decimal_value(statistics.get("total_lcb_usd_exact_decimal"))
     reasons: list[str] = []
+    if statistics.get("sample_count") != len(rows):
+        reasons.append("SCORING_VALUE_INCOMPLETE")
+    if (
+        placebo_statistics is not None
+        and placebo_statistics.get("sample_count") != len(placebo_rows)
+    ):
+        reasons.append("PLACEBO_SCORING_VALUE_INCOMPLETE")
     if len(rows) < MIN_TRAIN_TRADES:
         reasons.append("INSUFFICIENT_TRAIN_TRADES")
     if int(statistics.get("distinct_days") or 0) < MIN_DISTINCT_DAYS:
@@ -231,8 +265,11 @@ def assess_train_variant(
         "eligible": not reasons,
         "reasons": reasons,
         "statistics": statistics,
+        "execution_statistics": execution_statistics,
         "economic_summary": economic,
         "placebo_summary": placebo,
+        "placebo_statistics": placebo_statistics,
+        "scoring_value_key": net_value_key,
         "largest_coin_trade_share": coin_share,
         "largest_vault_trade_share": vault_share,
     }

@@ -13,6 +13,7 @@ from hl_observer.datasets.v2_pipeline import (
     summarize_admission_rejections,
     verify_remote_asset,
 )
+from hl_observer.datasets.v2_export import build_manifest_from_tick_shard
 
 
 def _event(ts: int, *, connection: str = "ws-1", gap_count: int = 0) -> TickEnvelope:
@@ -54,6 +55,97 @@ def test_https_historical_copy_vault_snapshot_requires_causal_availability_seman
         },
     }
     assert infer_reconciliation_status(verified) == "SNAPSHOT_VERIFIED"
+
+
+def test_copy_vault_broad_state_is_receive_time_only_and_safe_when_bound(tmp_path):
+    address = "0x" + "1" * 40
+    writer = PartitionedTickDatasetWriter(tmp_path)
+    writer.append(TickEnvelope(
+        source_id="hyperliquid_public_info",
+        channel="copy_vault_broad_state",
+        instrument="*",
+        event_kind="SNAPSHOT",
+        raw_payload={
+            "vault": address,
+            "phase": "START",
+            "clearinghouseState": {
+                "marginSummary": {"accountValue": "1000"},
+                "assetPositions": [],
+                "time": 999,
+            },
+        },
+        exchange_ts_ms=None,
+        received_ts_ms=1_000,
+        local_monotonic_ns=2_000,
+        provenance={
+            "url": "https://api.hyperliquid.xyz/info",
+            "network": "mainnet",
+            "access": "read_only",
+            "transport": "https",
+            "authenticated": False,
+            "request_type": "clearinghouseState",
+            "broad_sweep": True,
+            "timestamp_semantics": "receive_observation_time_only",
+            "request_send_wall_ms": 900,
+            "request_receive_wall_ms": 1_000,
+        },
+        parsed_summary={"vault": address, "phase": "START", "nav_usd": 1_000.0},
+    ))
+    [shard] = writer.rotate_all()
+
+    manifest = build_manifest_from_tick_shard(shard, collector_version="test")
+    assert manifest["family"] == "copy_vault_broad_state"
+    assert manifest["integrity"]["missing_timestamp_count"] == 0
+    assert manifest["replay_compatible"] is True
+    assert infer_reconciliation_status(manifest) == "SNAPSHOT_VERIFIED"
+    manifest["asset_verified"] = True
+    manifest["reconciliation"] = {"status": "SNAPSHOT_VERIFIED"}
+    finalized = finalize_manifest(manifest)
+    assert finalized["quality_status"] == "SAFE"
+    assert finalized["proof_of_pnl_allowed"] is False
+
+
+def test_copy_vault_broad_state_without_request_bounds_cannot_be_replayable_or_safe(tmp_path):
+    address = "0x" + "1" * 40
+    writer = PartitionedTickDatasetWriter(tmp_path)
+    writer.append(TickEnvelope(
+        source_id="hyperliquid_public_info",
+        channel="copy_vault_broad_state",
+        instrument="*",
+        event_kind="SNAPSHOT",
+        raw_payload={
+            "vault": address,
+            "phase": "START",
+            "clearinghouseState": {
+                "marginSummary": {"accountValue": "1000"},
+                "assetPositions": [],
+            },
+        },
+        exchange_ts_ms=None,
+        received_ts_ms=1_000,
+        local_monotonic_ns=2_000,
+        provenance={
+            "url": "https://api.hyperliquid.xyz/info",
+            "network": "mainnet",
+            "access": "read_only",
+            "transport": "https",
+            "authenticated": False,
+            "request_type": "clearinghouseState",
+            "broad_sweep": True,
+            "timestamp_semantics": "receive_observation_time_only",
+            "request_receive_wall_ms": 1_000,
+        },
+        parsed_summary={"vault": address, "phase": "START", "nav_usd": 1_000.0},
+    ))
+    [shard] = writer.rotate_all()
+
+    manifest = build_manifest_from_tick_shard(shard, collector_version="test")
+
+    assert manifest["integrity"]["invalid_record_count"] == 1
+    assert manifest["replay_compatible"] is False
+    manifest["asset_verified"] = True
+    manifest["reconciliation"] = {"status": "SNAPSHOT_VERIFIED"}
+    assert finalize_manifest(manifest)["quality_status"] != "SAFE"
 
 
 def _copy_vault_ws_manifest(*, heartbeat=None):

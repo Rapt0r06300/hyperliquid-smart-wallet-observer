@@ -18,9 +18,7 @@ PAPER / lecture seule. FAIL-SOFT : sans ``gh``, sans run ou sans artefact, rien 
 from __future__ import annotations
 
 import argparse
-import contextlib
 import json
-import os
 import shutil
 import sys
 import tempfile
@@ -34,6 +32,7 @@ sys.path.insert(0, str(RACINE / "tools"))
 
 from telecharger_fills_lanes_github import _gh_reel, gh_disponible, telecharger_runs  # noqa: E402
 
+from hl_observer.collection.collecte_fiable import ajouter_atomique  # noqa: E402
 from hl_observer.datasets import coffre_certifie as C  # noqa: E402
 
 DATA = Path("runtime") / "data"
@@ -95,11 +94,9 @@ def fusionner_ruban(root: Path, artefacts: Path, nom: str, *, now_ms: int | None
                     acceptees.append(ligne)
     if acceptees:
         cible.parent.mkdir(parents=True, exist_ok=True)
-        with cible.open("a", encoding="utf-8", newline="\n") as handle:
-            handle.write("".join(ligne + "\n" for ligne in acceptees))
-            handle.flush()
-            with contextlib.suppress(OSError):
-                os.fsync(handle.fileno())
+        # 26/11/2026 : ajout ATOMIQUE (le collecteur de la lane ecrit le meme ruban en meme temps ; deux ajouts
+        # "a" simultanes perdent des lignes sous Windows, mesure). Memes octets : fins de ligne "\n".
+        ajouter_atomique(cible, "".join(ligne + "\n" for ligne in acceptees), fins_texte=False, fsync=True)
     return {"ruban": nom, "statut": "OK", "famille": famille, "fichiers_artefact": len(fichiers),
             "lues": stats.entrees, "ajoutees": len(acceptees), "doublons": stats.doublons,
             "rejetees": stats.quarantaine, "raisons_rejet": dict(sorted(stats.raisons.items()))}

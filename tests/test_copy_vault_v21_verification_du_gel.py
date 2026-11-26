@@ -88,6 +88,13 @@ def test_un_gel_coherent_est_accepte_et_rendu_tel_quel():
     assert _verified_freeze is verifier_le_gel
 
 
+def test_un_gel_ne_peut_pas_elargir_le_levier_paper():
+    with pytest.raises(
+        ValueError, match="COPY_V21_PAPER_LEVERAGE_OUTSIDE_CONTRACT"
+    ):
+        verifier_le_gel(_gel(_parametres() | {"paper_leverage": 2.0}))
+
+
 def test_le_gel_imbrique_sous_la_clef_freeze_est_accepte():
     """Le reçu du moteur enveloppe parfois le gel : les deux formes doivent passer."""
     assert verifier_le_gel({"freeze": _gel()})["family"] == "copy_vault"

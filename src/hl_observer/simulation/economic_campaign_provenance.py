@@ -83,6 +83,140 @@ def dataset_provenance(root: str | Path, paths: Iterable[str | Path]) -> dict[st
     }
 
 
+def audit_frozen_dataset_provenance(
+    root: str | Path, freeze_payload: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Allow exact reproduction only when every frozen input has an exact match.
+
+    Edge hashes are useful for cheap change detection on large append-only tapes, but
+    cannot prove byte-for-byte identity. They therefore never authorize reproduction.
+    File mtimes are deliberately ignored: moving an identical immutable file must not
+    change its content identity. Inputs that change while being hashed are rejected.
+    """
+    project_root = Path(root).resolve()
+    freeze = freeze_payload.get("freeze")
+    if not isinstance(freeze, Mapping):
+        freeze = freeze_payload
+    provenance = freeze.get("dataset_provenance") if isinstance(freeze, Mapping) else None
+    frozen_files = provenance.get("files") if isinstance(provenance, Mapping) else None
+    if not isinstance(frozen_files, list) or not frozen_files:
+        return {
+            "schema_version": "hypersmart.frozen_dataset_audit.v1",
+            "status": "UNMEASURABLE_FROZEN_PROVENANCE_MISSING",
+            "reproduction_allowed": False,
+            "file_count": 0,
+            "files": [],
+        }
+
+    reports: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in frozen_files:
+        path_text = item.get("path") if isinstance(item, Mapping) else None
+        if not isinstance(path_text, str) or not path_text.strip():
+            reports.append({"path": None, "status": "INVALID_FROZEN_PATH"})
+            continue
+        relative = Path(path_text)
+        if relative.is_absolute() or ".." in relative.parts:
+            reports.append({"path": path_text.replace("\\", "/"), "status": "PATH_OUTSIDE_ROOT"})
+            continue
+        try:
+            resolved = (project_root / relative).resolve()
+            resolved.relative_to(project_root)
+        except (OSError, ValueError):
+            reports.append({"path": relative.as_posix(), "status": "PATH_OUTSIDE_ROOT"})
+            continue
+        display_path = relative.as_posix()
+        key = display_path.casefold()
+        if key in seen:
+            reports.append({"path": display_path, "status": "DUPLICATE_FROZEN_PATH"})
+            continue
+        seen.add(key)
+
+        expected_exists = item.get("exists")
+        if not isinstance(expected_exists, bool):
+            reports.append({"path": display_path, "status": "INVALID_FROZEN_EXISTENCE"})
+            continue
+        if not resolved.exists():
+            reports.append({
+                "path": display_path,
+                "status": "MATCHED_ABSENT" if not expected_exists else "FROZEN_INPUT_MISSING",
+            })
+            continue
+        if not resolved.is_file():
+            reports.append({"path": display_path, "status": "INPUT_NOT_A_FILE"})
+            continue
+        if not expected_exists:
+            reports.append({"path": display_path, "status": "UNEXPECTED_INPUT_PRESENT"})
+            continue
+
+        expected_size = item.get("size_bytes")
+        expected_hash = item.get("fingerprint")
+        expected_method = item.get("fingerprint_method")
+        if (
+            isinstance(expected_size, bool)
+            or not isinstance(expected_size, int)
+            or expected_size < 0
+            or not isinstance(expected_hash, str)
+            or not re.fullmatch(r"[0-9a-fA-F]{64}", expected_hash)
+            or expected_method not in {"FULL_SHA256", "EDGE_SHA256_WITH_SIZE"}
+        ):
+            reports.append({"path": display_path, "status": "INVALID_FROZEN_FINGERPRINT"})
+            continue
+
+        try:
+            before = resolved.stat()
+            # Recompute a full digest when the freeze claims one; retain bounded edge
+            # hashing only when the freeze itself recorded that weaker method.
+            full_limit = max(1, before.st_size) if expected_method == "FULL_SHA256" else 0
+            actual_hash, actual_method = _sha256(resolved, full_limit_bytes=full_limit)
+            after = resolved.stat()
+        except OSError as exc:
+            reports.append({
+                "path": display_path,
+                "status": "INPUT_READ_ERROR",
+                "error_type": type(exc).__name__,
+            })
+            continue
+        if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+            reports.append({"path": display_path, "status": "INPUT_CHANGED_DURING_AUDIT"})
+            continue
+        if before.st_size != expected_size:
+            reports.append({"path": display_path, "status": "INPUT_SIZE_MISMATCH"})
+            continue
+        if actual_method != expected_method or actual_hash.casefold() != expected_hash.casefold():
+            reports.append({"path": display_path, "status": "INPUT_FINGERPRINT_MISMATCH"})
+            continue
+        reports.append({
+            "path": display_path,
+            "status": (
+                "MATCHED_FULL_SHA256"
+                if expected_method == "FULL_SHA256"
+                else "MATCHED_PARTIAL_EDGE_SHA256"
+            ),
+        })
+
+    accepted = {"MATCHED_FULL_SHA256", "MATCHED_ABSENT"}
+    reproduction_allowed = bool(reports) and all(
+        item.get("status") in accepted for item in reports
+    )
+    has_partial = any(
+        item.get("status") == "MATCHED_PARTIAL_EDGE_SHA256" for item in reports
+    )
+    return {
+        "schema_version": "hypersmart.frozen_dataset_audit.v1",
+        "status": (
+            "EXACT_INPUT_MATCH"
+            if reproduction_allowed
+            else "UNMEASURABLE_PARTIAL_FINGERPRINT"
+            if has_partial
+            else "FROZEN_INPUTS_MISMATCH"
+        ),
+        "reproduction_allowed": reproduction_allowed,
+        "file_count": len(reports),
+        "files": reports,
+    }
+
+
 def freeze_parameters(
     root: str | Path,
     family: str,

@@ -715,6 +715,13 @@ def evaluate_objective(evidence: Mapping[str, Any], *, target_net_usd: float = T
     if target_decimal is None:
         issues.append("INVALID_TARGET_NET_USD")
     proof_net = float_not_above(proof_net_decimal) if proof_net_decimal is not None else None
+    reference_target_status = "UNMEASURED"
+    if proof_net_decimal is not None and target_decimal is not None:
+        reference_target_status = (
+            "REACHED" if proof_net_decimal >= target_decimal else "NOT_REACHED"
+        )
+        if reference_target_status == "NOT_REACHED":
+            issues.append("TARGET_NET_USD_NOT_REACHED")
     historical_target_reached = bool(
         proof_net_decimal is not None
         and proof_net is not None
@@ -722,8 +729,6 @@ def evaluate_objective(evidence: Mapping[str, Any], *, target_net_usd: float = T
         and proof_net_decimal >= target_decimal
         and not (daily_target_required and isinstance(daily_evidence, Mapping) and daily_evidence.get("all_days_at_or_above_target") is not True)
     )
-    if not historical_target_reached:
-        issues.append("TARGET_NET_USD_NOT_REACHED")
     unique_issues = list(dict.fromkeys(issues))
     target_only_reasons = {
         "TARGET_NET_USD_NOT_REACHED",
@@ -752,7 +757,7 @@ def evaluate_objective(evidence: Mapping[str, Any], *, target_net_usd: float = T
             daily_evidence.get("total_net_pnl_usd_exact_decimal"), proof_net_decimal
         )) <= USD_RECONCILIATION_ABS_TOLERANCE
     )
-    return {"family": family, "target_net_usd": float(target_decimal) if target_decimal is not None else None, "target_net_usd_per_day": TARGET_NET_USD_PER_DAY, "daily_target_required": daily_target_required, "daily_evidence": dict(daily_evidence) if isinstance(daily_evidence, Mapping) else None, "copy_checkpoint_integrity": dict(evidence["copy_checkpoint_integrity"]) if isinstance(evidence.get("copy_checkpoint_integrity"), Mapping) else None, "proof_economics": proof_economics, "proof_net_pnl_usd": proof_net, "positive_net_proof": positive_net_proof, "quality_gates_passed": quality_gates_passed, "historical_target_reached": historical_target_reached, "reference_target_reached": reference_target_reached, "eligible_net_pnl_usd": proof_net if proof_eligible else None, "objective_status": _statut_objectif(proof_eligible=proof_eligible, repere_atteint=historical_target_reached), "objective_reasons": unique_issues}
+    return {"family": family, "target_net_usd": float(target_decimal) if target_decimal is not None else None, "target_net_usd_per_day": TARGET_NET_USD_PER_DAY, "daily_target_required": daily_target_required, "daily_evidence": dict(daily_evidence) if isinstance(daily_evidence, Mapping) else None, "copy_checkpoint_integrity": dict(evidence["copy_checkpoint_integrity"]) if isinstance(evidence.get("copy_checkpoint_integrity"), Mapping) else None, "proof_economics": proof_economics, "proof_net_pnl_usd": proof_net, "positive_net_proof": positive_net_proof, "quality_gates_passed": quality_gates_passed, "historical_target_status": reference_target_status, "historical_target_reached": historical_target_reached, "reference_target_reached": reference_target_reached, "eligible_net_pnl_usd": proof_net if proof_eligible else None, "objective_status": _statut_objectif(proof_eligible=proof_eligible, repere_atteint=historical_target_reached), "objective_reasons": unique_issues}
 
 
 __all__ = ["CANONICAL_FAMILIES", "COPY_HELDOUT_MIN_N", "ECONOMIC_CONTRACT_VERSION", "EVIDENCE_LEVEL_THRESHOLDS", "MIN_PROOF_DAYS", "STARTING_CAPITAL_USD", "TARGET_NET_USD", "TARGET_NET_USD_PER_DAY", "canonical_family", "evaluate_daily_net", "evaluate_objective"]

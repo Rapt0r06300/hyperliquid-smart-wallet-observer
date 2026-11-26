@@ -338,6 +338,18 @@ Required evidence includes:
 - post-fill markout checkpoints (100/250/500 ms, 1 s, 5 s or the current execution model horizons);
 - immutable selection reason, score inputs and causal timestamps.
 
+Broad `clearinghouseState` sweeps are account-state observations, not exchange
+events. Preserve the server response, including any server-side `time`, in the
+immutable raw payload, but set `exchange_ts_ms` to null and make the state
+available to replay only at its locally recorded receive time. Record the
+official public `/info` source, request-send and response-receive wall times,
+local monotonic receive time, vault identity, sweep phase, and exact raw-payload
+hash. A verified broad-state row may supply an as-of NAV denominator for sizing
+or rejecting a signal; it must never be interpreted as a fill, a position
+transition, or PnL evidence. SAFE admission and replay compatibility require
+the exact source shard and frame lineage, and this family must always retain
+`proof_of_pnl_allowed=false`.
+
 Instrument identity remains venue-native and case-sensitive through every
 Copy-Vault edge: live fills, REST backfills, position state, fill IDs,
 metaorders, L2 subscription/fetch keys, checkpoints, TRAIN selection and replay
@@ -1440,6 +1452,8 @@ This was a research target, not a guarantee or an ANALYZE stage-completion gate.
 
 Promotion of an actual economic strategy remains fail-closed. Thresholds, costs, OOS/forward separation or validation rules may not be weakened merely to obtain a higher number.
 
+For active Copy-Vault research, `PAPER_LEVERAGE` is fixed at `1.0`; leverage is not a searchable alpha parameter. A candidate or freeze that requests another value must be rejected. Capacity diagnostics may scale the paper-capital scenario only and never imply leverage or become promotion evidence.
+
 Copy-Vault capacity diagnostics may replay the unchanged frozen policy over the predeclared hypothetical capital ladder 10 / 50 / 100 / 200 / 350 / 400 / 1,000 / 2,000 / 5,000 / 10,000 USD. Sizing and the dollar profit-lock scale proportionally to scenario capital; gross exposure is capped at that capital, with no leverage assumed. Every result is DIAGNOSTIC_ONLY, never promotion-eligible, and cannot change the physical paper contract or overwrite a strategy freeze. **Superseded on 2026-11-19:** that contract is **100 USD** (`hl_observer.contrat_paper.PAPER_EQUITY_USD`), not the 350 USD this sentence was written against; the capital ladder itself stays unchanged as a diagnostic. Missing instrument minimums/lot rules or insufficient observed L2 depth must be reported as unmeasured/refused, not inferred from a successful larger-capital run.
 
 Before a forward-eligible V21 candidate is considered robust, run the fixed diagnostic stress grid through the same execution path: doubled taker fees, 2x/3x observed spread, 50%/25% L2 depth, and additional copy delays of 100 ms, 500 ms, 1 s, 5 s, 30 s, 60 s, and 300 s. Stress outputs never retune or replace the frozen policy and are not themselves economic proof. Funding adversity remains UNMEASURABLE until measured funding rows are wired; regime splits require proven regime labels; leader-data outages require measured observation gaps; partial fills are not claimed by the all-or-none executor; missing-venue stress is not applicable to this single-venue family. Report these limitations explicitly rather than treating omitted stresses as passed.
@@ -1451,7 +1465,7 @@ the evidence contract requires them, and missing costs remain unmeasurable.
 
 Current implementation contract for the economic-acceleration path:
 
-- **Copy-Vault**: the physically frozen V21 policy is replayed without retuning and opens held-out evidence sequentially (`VALIDATION -> OOS -> FORWARD`). Failure of an earlier gate keeps later data unopened. The FULL/COLD dataset runner invokes this immutable evaluator directly, and the historical V21 reproducer is portable from the repository root rather than tied to a user PC. Before replay, the hash-bound freeze must contain the complete parameter set, valid safety flags, bounded notionals, finite sizing/risk parameters, and strictly chronological TRAIN/VALIDATION/OOS windows preceding the freeze timestamp; an invalid freeze is rejected explicitly and cannot abort unrelated diagnostics. Every signal-time reference (including the execution engine's reference price, depth imbalance and capacity) must use the latest causally received book with `received_at <= signal_time`; entry and exit observations may be selected only after their respective executable target times. A later or stale book is unavailable and the candidate is unmeasurable/rejected; unsorted continuous observations are refused. In the observed-book adapter, `ts_ms` is the validated local receive time for causal rows. Held-out evaluation must not select a future row to fill a missing reference observation. Until measured funding rows are wired into this Copy-Vault replay, any position interval crossing an hourly funding boundary is refused as `FUNDING_BOUNDARY_UNPRICED`; an unobserved funding charge must never be assumed zero. **Updated on 2026-11-19:** the measurement now exists -- `hl_observer.backtesting.copy_vault_funding_realise` reads the vault's `funding_history` family (80 shards, 54 days; 20,390 hourly settlements over 263 coins for the TRAIN window alone) and returns a `MEASURED` receipt with the realized carry, or `UNMEASURABLE` with its reason. It is **not yet wired into the frozen evaluator**, so the refusal above still applies; wiring it is what would make `FUNDING_PNL_UNMEASURABLE` clearable at all, since no line in the repository produced the accepting status before. Every evaluated split emits a funding receipt derived from its trade entry/exit timestamps and the applicable settlement rule; measured zero is valid only when complete segment coverage is proven and no settlement boundary is crossed. A blocked or unevaluated split emits `null/NOT_EVALUATED`; missing or invalid calendar coverage, timestamps, settlement rules, or a crossed unpriced boundary emits `null/UNMEASURABLE` and blocks economic eligibility. The aggregate funding value is numeric only when VALIDATION, OOS, and FORWARD are all evaluated, covered, and internally consistent with their trade rows and receipts. Funding stress diagnostics remain separate from realized funding PnL. Frozen notionals must not exceed the paper gross-exposure limit, and the sum of overlapping open notionals must remain under that limit; invalid freezes are reported as rejected, never silently rescaled. The configured daily profit lock is a sizing/risk rule. **Superseded on 2026-11-19:** it is a profit CEILING, which the current contract forbids as an active rule -- a strategy that stops trading once it is ahead measures its own regularity, not its edge. Measured the same day: the frozen V21 value of 4 USD/day scales to **0.59 USD** at 100 USD capital, so it was reachable and the baseline was braked while challengers explored with the lock neutralized (1,000,000 USD in the searched domain). It is now neutralized for the baseline too, at use time; the freeze file on disk is left untouched. The **+5 USD net/day** value is a reference metric only, not a pass/fail gate for economic proof; its reported attainment is computed independently from `economically_proven`. Measured outcomes and evidence determine status honestly. Each validated improvement is recorded as its own immutable checkpoint/freeze before further tuning; later work starts from that checkpoint and cannot rewrite its evidence or parameters.
+- **Copy-Vault**: the physically frozen V21 policy is replayed without retuning and opens held-out evidence sequentially (`VALIDATION -> OOS -> FORWARD`). Failure of an earlier gate keeps later data unopened. The FULL/COLD dataset runner invokes this immutable evaluator directly, and the historical V21 reproducer is portable from the repository root rather than tied to a user PC. Before replay, the hash-bound freeze must contain the complete parameter set, valid safety flags, bounded notionals, finite sizing/risk parameters, and strictly chronological TRAIN/VALIDATION/OOS windows preceding the freeze timestamp; an invalid freeze is rejected explicitly and cannot abort unrelated diagnostics. Every signal-time reference (including the execution engine's reference price, depth imbalance and capacity) must use the latest causally received book with `received_at <= signal_time`; entry and exit observations may be selected only after their respective executable target times. A later or stale book is unavailable and the candidate is unmeasurable/rejected; unsorted continuous observations are refused. In the observed-book adapter, `ts_ms` is the validated local receive time for causal rows. Held-out evaluation must not select a future row to fill a missing reference observation. `hl_observer.backtesting.copy_vault_funding_realise` reads and SHA-verifies requested `funding_history` shards from the local vault, rejects unbounded or non-admissible shards, and requires an observed rate for every hourly settlement crossed by a trade; an ambiguous fill exactly on a settlement boundary or a missing hourly rate remains `UNMEASURABLE`, never zero. `tools.run_dataset_economic_campaigns` supplies rates and their audit to V21 VALIDATION/OOS/FORWARD. `LOCAL_CERTIFIED` rates are exploratory only and cannot establish economic proof; proof use requires every selected funding shard to be explicitly `SAFE`, replay-compatible, validation-allowed, and asset-verified. The current local index labels its measured funding shards `LOCAL_CERTIFIED`, so carry can be inspected but SAFE economic proof remains blocked until eligible SAFE shards are available. Every evaluated split emits a funding receipt derived from its trade entry/exit timestamps and the applicable settlement rule; measured zero is valid only when complete segment coverage is proven and no settlement boundary is crossed. A blocked or unevaluated split emits `null/NOT_EVALUATED`; missing or invalid calendar coverage, timestamps, settlement rules, or a crossed unpriced boundary emits `null/UNMEASURABLE` and blocks economic eligibility. The aggregate funding value is numeric only when VALIDATION, OOS, and FORWARD are all evaluated, covered, and internally consistent with their trade rows and receipts. Funding stress diagnostics remain separate from realized funding PnL. Frozen notionals must not exceed the paper gross-exposure limit, and the sum of overlapping open notionals must remain under that limit; invalid freezes are reported as rejected, never silently rescaled. The configured daily profit lock is a sizing/risk rule. **Superseded on 2026-11-19:** it is a profit CEILING, which the current contract forbids as an active rule -- a strategy that stops trading once it is ahead measures its own regularity, not its edge. Measured the same day: the frozen V21 value of 4 USD/day scales to **0.59 USD** at 100 USD capital, so it was reachable and the baseline was braked while challengers explored with the lock neutralized (1,000,000 USD in the searched domain). It is now neutralized for the baseline too, at use time; the freeze file on disk is left untouched. The **+5 USD net/day** value is a reference metric only, not a pass/fail gate for economic proof; its reported attainment is computed independently from `economically_proven`. Measured outcomes and evidence determine status honestly. Each validated improvement is recorded as its own immutable checkpoint/freeze before further tuning; later work starts from that checkpoint and cannot rewrite its evidence or parameters.
 
 Copy-Vault capacity diagnostics may replay the unchanged frozen policy over the predeclared hypothetical capital ladder `10 / 50 / 100 / 200 / 350 / 400 / 1,000 / 2,000 / 5,000 / 10,000 USD`. Sizing and the dollar profit-lock scale proportionally to the scenario capital; gross exposure is capped at that scenario capital, with no leverage assumed. Every such result is `DIAGNOSTIC_ONLY`, is never promotion-eligible, and cannot change the physical paper contract or overwrite a strategy freeze. **Superseded on 2026-11-19:** that contract is **100 USD** (`hl_observer.contrat_paper.PAPER_EQUITY_USD`), not the 350 USD this sentence was written against; the capital ladder itself stays unchanged as a diagnostic. Missing instrument minimums/lot rules or insufficient observed L2 depth must be reported as unmeasured/refused, not inferred from a successful larger-capital run.
 - **Lead-Lag**: TRAIN selection includes a predeclared same-source causal microstructure gate that requires the external shock direction to agree with both follower-book imbalance and signed aggressor notional over a fixed backward-looking window. Its hypotheses are included in the family multiplicity correction; it cannot consume held-out data during selection.
@@ -12759,6 +12773,12 @@ Hyperliquid official semantics are hourly settlements. Certified funding uses ei
 
 The documented standard-perp payment uses position size × **oracle price** × funding rate. Mark price is not substituted for oracle price.
 
+An observed leader `userFunding` payment is only that leader account's funding component. A local
+per-leader rollup may support leader research, but it is not complete leader PnL and is never the
+hypothetical follower's funding cost. Report its observed event count and time range separately;
+incomplete coverage, rejected events and empty snapshots must not be converted to zero payments,
+and no cross-wallet sum is a Copy-Vault PnL metric.
+
 A continuously prorated funding accrual, forecast, predicted next funding, or proportionally split historical estimate is **not settled funding** and cannot enter certified realized/net PnL. It may be shown separately as an estimate.
 
 ### Non-funding ledger truth
@@ -14326,6 +14346,19 @@ déterminé par la présence de trades, pas par un PnL non nul. La couverture
 n'est jamais déduite des seuls trades ou snapshots, et la référence de
 5 USD/jour reste informative, sans seuil de promotion.
 
+Pour le labo en deux phases, la phase 2 dérive ces débuts UTC depuis l'union des
+fenêtres inclusives des manifestes phase 1 après vérification des empreintes des
+rubans préparés. Une journée n'est complète que si l'union couvre ses bornes sans
+aucun trou, y compris d'une milliseconde. Si une tranche n'a pas de bornes valides,
+la couverture globale est `UNMEASURABLE`; le moteur ne doit ni ignorer cette tranche
+ni déduire des jours depuis les seuls timestamps de trades. La même liste prouvée
+alimente le baseline TRAIN, l'incumbent rescored et chaque candidat TRAIN. Son statut,
+son empreinte et le nombre de jours sont liés à la configuration, aux reçus d'essais
+et aux checkpoints de reprise pour empêcher de mélanger des campagnes évaluées sur
+des couvertures différentes. `sequence_held_out.py` réutilise le même calcul et échoue
+fermée sur un manifeste illisible ou invalide. Cette preuve de couverture ne remplace
+pas les gates de funding, de coûts, d'exécutabilité ni les validations indépendantes.
+
 ### 2026-10-27 — Historique comptable Copy-Vault borné et causal
 
 Pour chaque compte leader retenu dans une campagne Copy-Vault, la collecte
@@ -14525,6 +14558,8 @@ Contrôle réel en lecture seule le 25/11/2026 à 00:04:58 : watchdog frais (2 s
 `CopyVaultCheckpointTail.poll_once()` réutilise maintenant `coverage_receipt()` pour le nombre d'incidents et l'état `replay_evidence_complete`. Une rotation et son `reconnect_backfill_blocked` sont une seule cause; les `invalid_rejected`, expirations, débordements et interruptions restent des motifs qui empêchent la preuve. Un compteur `writer_outages` présent mais non entier invalide le reçu. Le heartbeat transporte l'état du reçu et les compteurs détaillés; l'ETA ne transforme pas un reçu `UNMEASURABLE` sans nombre en zéro gap.
 
 Rectification de l'observation du début de journée : sur l'état persistant relu en lecture seule, `input_rotations=7`, `reconnect_backfill_blocked=7`, `checkpoints_expired=1159`, `invalid_rejected=479`, `writer_outages=11`, débordements=0. Le reçu canonique donne **1 656 incidents empêchant la preuve**; les incidents de continuité sans les rejets invalides sont **1 177**. L'ancien heartbeat actif affiche encore 1 184 car il double les 7 rotations et omet les 479 rejets invalides. `+3` mesure le delta depuis le premier relevé de CE watchdog pour le bail, pas depuis le début de collecte. Le processus actif n'a pas été redémarré; ses valeurs historiques ne sont pas réécrites.
+
+Le lecteur L2 publie `receipt_invalid_reason` en plus de `gap_segmentation_reason`, sans modifier le verdict fail-closed. État absent, illisible, JSON invalide, schéma/protocole/identité incompatibles, drapeaux de sécurité invalides, epoch/run ID invalides et offset de sortie invalide sont distingués. `output_start_offset` doit être un entier exact non négatif : aucune conversion permissive ni valeur `0` par défaut ne peut fabriquer une liaison. Si le reçu de base est valide mais que les fenêtres ne réconcilient pas exactement les compteurs, la raison détaillée du journal demeure visible et le replay reste `UNMEASURABLE`. Au prochain démarrage du writer, un état incohérent est archivé et une époque forward-only repart des fins actuelles des rubans; les lignes antérieures ne deviennent pas rétroactivement prouvables.
 
 ### 2026-11-25 — Fraîcheur du flux distincte de la présence du processus
 
@@ -14765,3 +14800,22 @@ Quand plusieurs fills d’un même wallet et marché partagent le même timestam
 Les coûts du filtre doivent rester alignés sur `ReplayConfig().round_trip_cost_bps`; le taux de réussite et la décision de qualification sont calculés après ce coût. Le préfiltre demande au moins 20 cycles clos et une borne inférieure conservatrice de l'edge net strictement positive; cette approximation ne corrige pas la dépendance temporelle ni les comparaisons multiples et ne constitue donc jamais une preuve OOS/forward ou de rentabilité. Les replis de warm-up du collecteur maintiennent l'observation en lecture seule afin d'accumuler l'historique; ils ne valent pas admissibilité économique et ne doivent pas être présentés comme tels. Aucun résultat financier n'est inféré de cette correction.
 
 Le détecteur `copy-run` ne doit pas attribuer un mouvement futur positif fixe aux ouvertures. Sans prévision mesurée et tracée fournie explicitement, `leader_expected_move_bps` reste à zéro, le signal n'est pas généré et le rapport indique `leader_expected_move_unmeasured`. Un paramètre d'expérience explicite permet des tests de modèle, mais ne constitue pas à lui seul une preuve de performance.
+
+### 2026-11-26 — Valorisation prudente du funding V21
+
+Le net d'exécution reste réconcilié séparément et n'est jamais réécrit avec un coût de funding.
+Une position sans règlement traversé peut recevoir un carry mesuré à zéro si ses bornes temporelles
+sont non ambiguës. Pour une position traversant un règlement, le taux observé multiplié par le
+notionnel d'entrée est uniquement une estimation : le moteur ne joint pas encore la quantité
+réellement détenue et le prix oracle au timestamp du règlement. Cette estimation peut alimenter des
+statistiques explicitement diagnostiques, mais les champs de carry réglé et de PnL journalier
+certifié restent nuls/indisponibles, la validation du segment échoue en fail-closed et la preuve
+économique reste `UNMEASURABLE`.
+
+Le chargement des taux du coffre conserve séparément l'admission de la source et l'admission de la
+preuve économique : même un shard `SAFE` et vérifié ne prouve pas le montant réglé sans la jointure
+point-in-time. L'exécution paper refuse donc actuellement tout épisode qui traverse un règlement.
+Pour lever ce blocage, il faudra fournir et valider, pour chaque règlement, la quantité de position
+Copy-Vault immédiatement avant l'échéance, le prix oracle causal correspondant, le taux admissible,
+les timestamps/provenances, puis les joindre par identités et fenêtres sans lookahead. Aucun PnL
+n'est déclaré sur le proxy `ENTRY_NOTIONAL_RATE_PROXY`.

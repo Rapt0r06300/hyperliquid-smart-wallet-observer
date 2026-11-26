@@ -10,8 +10,9 @@ entière, pour toujours.
 
 La spec autorise des trous globaux mais exige leur quarantaine et des intervalles
 `EXECUTION_REPLAY_SAFE` sans trou applicable. C'est ce que fait ce module : l'écrivain publie la
-**fenêtre temporelle réellement affectée** par chaque incident — il la connaît, contrairement au
-lecteur —, et le lecteur ne certifie qu'une ligne reçue **hors** de toute fenêtre.
+**fenêtre temporelle affectée** par chaque incident — y compris les rejets d'entrée, localisés à
+leur timestamp fiable ou, sinon, depuis la dernière ligne fiable — et le lecteur ne certifie
+qu'une ligne reçue **hors** de toute fenêtre.
 
 CE QUE CE MODULE NE FAIT PAS, PAR CONSTRUCTION :
 * il ne remet aucun compteur à zéro — un trou historique reste un trou historique ;
@@ -34,24 +35,25 @@ SCHEMA_FENETRES = "hypersmart.copy_vault_gap_windows.v1"
 TROU_ROTATION = "input_rotation"
 TROU_EXPIRATION = "checkpoint_expired"
 TROU_DEBORDEMENT = "pending_overflow"
+TROU_REJET_INVALIDE = "invalid_input_rejected"
 #: 17/11/2026 — l'écrivain lui-même n'observait pas (arrêté, endormi, bloqué). Avant, un arrêt
 #: n'était visible que par les checkpoints qu'il faisait expirer : sans checkpoint en attente, il
 #: ne laissait AUCUNE fenêtre, et la durée « sûre » publiée à la porte de preuve l'incluait.
 TROU_ARRET = "writer_outage"
-NATURES = (TROU_ROTATION, TROU_EXPIRATION, TROU_DEBORDEMENT, TROU_ARRET)
+NATURES = (TROU_ROTATION, TROU_EXPIRATION, TROU_DEBORDEMENT, TROU_REJET_INVALIDE, TROU_ARRET)
 
 #: Compteur de l'écrivain correspondant à chaque nature.
 COMPTEUR_PAR_NATURE = {
     TROU_ROTATION: "input_rotations",
     TROU_EXPIRATION: "checkpoints_expired",
     TROU_DEBORDEMENT: "pending_overflow_rejected",
+    TROU_REJET_INVALIDE: "invalid_rejected",
     TROU_ARRET: "writer_outages",
 }
 
-#: Compteurs nés APRÈS le journal. Absent d'un état écrit par un code antérieur, un tel compteur
-#: vaut zéro : cet écrivain-là n'a jamais déclaré d'arrêt, ni vrai ni faux. Présent, il doit être
-#: expliqué fenêtre par fenêtre, comme les autres.
-COMPTEURS_FACULTATIFS = frozenset({"writer_outages"})
+#: Compteurs nés après le journal. Absents des anciens états, ils valent zéro uniquement pour
+#: ces états versionnés; dès qu'ils existent, chaque incident doit être expliqué par une fenêtre.
+COMPTEURS_FACULTATIFS = frozenset({"writer_outages", "invalid_rejected"})
 
 #: Le journal est borné : l'état est réécrit atomiquement à chaque passe, il ne doit pas enfler.
 #: Au-delà, on ne tronque pas en silence : on compte les pertes et plus rien n'est certifiable.
@@ -304,7 +306,7 @@ def segmenter_l_epoque(etat: Any, *, recu_valide: bool,
 
 __all__ = [
     "SCHEMA_FENETRES", "MAX_FENETRES", "MARGE_MS", "NATURES", "COMPTEUR_PAR_NATURE",
-    "TROU_ROTATION", "TROU_EXPIRATION", "TROU_DEBORDEMENT", "TROU_ARRET",
+    "TROU_ROTATION", "TROU_EXPIRATION", "TROU_DEBORDEMENT", "TROU_REJET_INVALIDE", "TROU_ARRET",
     "COMPTEURS_FACULTATIFS", "compacter",
     "fenetre", "fusionner", "intervalles_surs", "est_sur", "couverture_ms",
     "journal_coherent", "intervalles_depuis_etat", "ajouter_fenetre",

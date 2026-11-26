@@ -27,6 +27,8 @@ SEUIL_LEADER_OFF_USD = -1e18
 
 
 def _fini(x: Any) -> float | None:
+    if isinstance(x, bool):
+        return None
     try:
         v = float(x)
     except (TypeError, ValueError):
@@ -72,19 +74,20 @@ def build_leader_quality_index(
 def leader_prior_pnl_at(
     index: Mapping[str, tuple[list[int], list[float]]], vault: Any, ts_ms: int,
 ) -> float | None:
-    """PnL réalisé cumulé du leader au dernier fill ``<= ts_ms`` (causal strict).
+    """PnL réalisé cumulé connu strictement avant ``ts_ms``.
 
     ``None`` si aucun fill causal (leader inconnu ou sans historique avant ``ts_ms``).
+    Les égalités sont exclues : les horodatages sont à la milliseconde et ne permettent
+    pas d'établir l'ordre de réception entre un fill et le signal au même instant.
     """
     entry = index.get(str(vault or ""))
     if not entry:
         return None
     tss, cums = entry
-    try:
-        cible = int(ts_ms)
-    except (TypeError, ValueError):
+    if type(ts_ms) is not int or ts_ms <= 0:
         return None
-    i = bisect.bisect_right(tss, cible) - 1
+    cible = ts_ms
+    i = bisect.bisect_left(tss, cible) - 1
     if i < 0:
         return None
     return cums[i]

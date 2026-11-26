@@ -2,6 +2,7 @@
 + NAV, mesure OOS purgée. NEED_MORE_DATA honnête sans historique. Sans réseau (fichiers locaux)."""
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -81,6 +82,58 @@ def test_nav_asof_interdit_fuite_future_et_deduplique_episodes(tmp_path):
     assert entries[0]["move_frac"] == 0.1
     assert audit["duplicate_episodes_rejected"] == 1
     assert audit["missing_or_stale_asof_nav_rejected"] == 1
+
+
+def test_dataset_workspace_nav_requires_safe_frame_provenance(tmp_path):
+    data = tmp_path / "runtime" / "data"
+    proof = tmp_path / "runtime" / "reports" / "datasets" / "SELECTION_PROVENANCE.json"
+    data.mkdir(parents=True)
+    proof.parent.mkdir(parents=True)
+    catalog_sha = "a" * 64
+    proof.write_text(json.dumps({"catalog_sha256": catalog_sha}), encoding="utf-8")
+    snapshots = data / "vault_snapshots.jsonl"
+    base = {"vault": "0xA", "ts_ms": 100, "nav_usd": 1_000}
+    snapshots.write_text(json.dumps(base), encoding="utf-8")
+    assert PR._nav_history(tmp_path) == {}
+
+    safe = {
+        **base,
+        "source_family": "copy_vault_broad_state",
+        "source_quality_status": "SAFE",
+        "source_manifest_verified": True,
+        "source_replay_compatible": True,
+        "source_catalog_sha256": catalog_sha,
+        "source_shard_sha256": "b" * 64,
+        "source_jsonl_sha256": "c" * 64,
+        "source_frame_sha256": "d" * 64,
+        "source_raw_sha256": "e" * 64,
+        "source_frame_number": 1,
+    }
+    safe_bytes = (json.dumps(safe) + "\n").encode("utf-8")
+    snapshots.write_bytes(safe_bytes)
+    proof.write_text(json.dumps({
+        "schema": "hypersmart.dataset_selection_provenance.v7",
+        "source_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "paper_read_only": True,
+        "real_execution": False,
+        "economic_proof": False,
+        "catalog_sha256": catalog_sha,
+        "counts": {
+            "copy_vault_broad_state": 1,
+            "snapshot_nav_observations": 1,
+        },
+        "outputs": {
+            "copy_vault_broad_state": {
+                "path": "runtime/data/vault_snapshots.jsonl",
+                "bytes": len(safe_bytes),
+                "sha256": hashlib.sha256(safe_bytes).hexdigest(),
+            },
+        },
+    }), encoding="utf-8")
+    assert PR._nav_history(tmp_path) == {"0xa": [(100, 1_000.0)]}
+
+    snapshots.write_text(json.dumps({**safe, "nav_usd": 9_999}) + "\n", encoding="utf-8")
+    assert PR._nav_history(tmp_path) == {}
 
 
 def test_notional_fixe_preserve_entree_sans_inventer_nav(tmp_path):

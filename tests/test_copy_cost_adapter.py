@@ -187,3 +187,39 @@ def test_copy_cost_does_not_match_depth_for_case_distinct_instrument() -> None:
     assert result["complete"] is False
     assert result["components_bps"] is None
     assert result["failure_counts"]["DEPTH_MISSING"] == 1
+
+
+def test_depth_index_is_built_once_per_instrument_for_many_events() -> None:
+    class CountingDepth(dict):
+        lookups = 0
+
+        def get(self, key, default=None):
+            self.lookups += 1
+            return super().get(key, default)
+
+    event = _event()
+    entry = event["ts_ms"] + 60_000
+    exit_ = entry + 300_000
+    snapshots = CountingDepth({
+        "BTC": [_depth(entry - 100), _depth(exit_ - 100)],
+    })
+
+    result = measure_copy_cost_components(
+        iter((event, event, event)),
+        snapshots,
+        notional_usd=100.0,
+        copy_delay_ms=60_000,
+        horizon_ms=300_000,
+        threshold=0.05,
+    )
+
+    assert snapshots.lookups == 1
+    assert result["complete"] is True
+    assert result["selected_events"] == result["matched_events"] == 3
+    assert result["max_depth_age_ms"] == 100.0
+    assert result["components_bps"] == {
+        "fees_bps": COPY_ROUNDTRIP_TAKER_FEES_BPS,
+        "spread_bps": 2.5,
+        "slippage_bps": 0.0,
+        "latency_bps": 0.0,
+    }

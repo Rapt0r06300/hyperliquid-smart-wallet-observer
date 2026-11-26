@@ -40,6 +40,56 @@ def test_battre_persiste_les_metriques_et_round_trip(tmp_path):
     assert relu["metriques"]["coverage_receipt_status"] == "UNMEASURABLE"
 
 
+def test_battre_persiste_les_motifs_du_recu_et_du_journal_de_fenetres(tmp_path):
+    hb = _battre_sain(
+        tmp_path,
+        "copy-vault-checkpoints",
+        metriques={
+            "coverage_receipt_status": "UNMEASURABLE",
+            "coverage_receipt_reason": "GAPS_PRESENT",
+            "gap_journal_status": "UNMEASURABLE",
+            "gap_journal_reason": "FENETRES_INCOMPLETES:input_rotations=9,fenetres=8",
+            "unapproved_metric": "must be dropped",
+        },
+    )
+
+    assert hb["metriques"]["coverage_receipt_reason"] == "GAPS_PRESENT"
+    assert hb["metriques"]["gap_journal_status"] == "UNMEASURABLE"
+    assert hb["metriques"]["gap_journal_reason"] == (
+        "FENETRES_INCOMPLETES:input_rotations=9,fenetres=8"
+    )
+    assert "unapproved_metric" not in hb["metriques"]
+    assert HB.lire(tmp_path, "copy-vault-checkpoints")["metriques"] == hb["metriques"]
+
+
+def test_battre_persiste_les_causes_de_rejet_l2_bornees(tmp_path):
+    causes = {f"L2_REASON_{index:02d}": index for index in range(25)}
+    causes["invalid-count"] = True
+    causes["x" * 97] = 10_000
+    hb = _battre_sain(
+        tmp_path,
+        "userfills-live",
+        metriques={
+            "l2_validation_rejections": 300,
+            "l2_reject_reasons": causes,
+            "l2_reject_reason_codes_omitted": 3,
+            "l2_reject_reason_counts_omitted": 42,
+            "unapproved_metric": 999,
+        },
+    )
+
+    expected = {f"L2_REASON_{index:02d}": index for index in range(5, 25)}
+    assert hb["metriques"]["l2_reject_reasons"] == expected
+    assert hb["metriques"]["l2_validation_rejections"] == 300
+    assert hb["metriques"]["l2_reject_reason_codes_omitted"] == 8
+    assert hb["metriques"]["l2_reject_reason_counts_omitted"] == 52
+    assert "unapproved_metric" not in hb["metriques"]
+
+    # Le contrat important est le round-trip du fichier heartbeat, pas seulement le dict en mémoire.
+    relu = HB.lire(tmp_path, "userfills-live")
+    assert relu["metriques"]["l2_reject_reasons"] == expected
+
+
 def test_metriques_none_conserve_l_etat_precedent(tmp_path):
     # un problème connu ne se « nettoie » pas par un simple battement sans métrique (fail-closed honnête).
     _battre_sain(tmp_path, "bbo-collector", metriques={"gaps_critiques": 2})

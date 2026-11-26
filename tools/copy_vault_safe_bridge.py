@@ -28,6 +28,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from hl_observer.backtesting.copy_vault_book_loader import MAX_TARGET_LAG_MS  # noqa: E402
 from hl_observer.collection.userfills_live import parser_message_userfills  # noqa: E402
+from hl_observer.collection.portefeuille_compte import construire_portefeuille  # noqa: E402
 from hl_observer.normalization.instrument_identity import (  # noqa: E402
     preserve_native_instrument_symbol as canonical_copy_vault_coin,
 )
@@ -191,6 +192,7 @@ def _fills(record: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
     ):
         raise SafeBridgeError("Copy-Vault fill identity or message mismatch")
     drapeau = data.get("isSnapshot")
+    fallback_is_snapshot: bool | None = None
     if drapeau is True:
         return [], len(data.get("fills") or [])
     if drapeau is None:
@@ -203,14 +205,20 @@ def _fills(record: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
         resume = record.get("parsed_summary")
         if not isinstance(resume, dict) or resume.get("is_snapshot") is not False:
             raise SafeBridgeError("Copy-Vault fill snapshot flag missing")
+        fallback_is_snapshot = False
     elif drapeau is not False:
         raise SafeBridgeError("Copy-Vault fill snapshot flag invalid")
     fills = parser_message_userfills(
         message, vault=vault, received_at_ms=receive,
         receive_mono_ns=record.get("local_monotonic_ns"),
         connection_id=str(record.get("connection_id") or ""),
+        fallback_is_snapshot=fallback_is_snapshot,
     )
-    if not fills or max(int(row["ts_ms"]) for row in fills) != exchange:
+    if (
+        not fills
+        or max(int(row["ts_ms"]) for row in fills) != exchange
+        or any(row.get("isSnapshot") is not False for row in fills)
+    ):
         raise SafeBridgeError("missing fills or mismatched exchange timestamp")
     if any(
         int(row["ts_ms"]) <= 0 or int(row["ts_ms"]) > receive
@@ -286,6 +294,93 @@ def _historical_fills(record: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def _broad_state_snapshot(record: dict[str, Any]) -> dict[str, Any]:
+    """Normalize one SAFE receive-time clearinghouseState for NAV-as-of only."""
+    provenance = record.get("provenance")
+    summary = record.get("parsed_summary")
+    raw = record.get("raw_payload")
+    receive = record.get("received_ts_ms")
+    monotonic = record.get("local_monotonic_ns")
+    if (
+        record.get("schema_version") != "hypersmart.tick.v1"
+        or record.get("source_id") != "hyperliquid_public_info"
+        or record.get("channel") != "copy_vault_broad_state"
+        or record.get("instrument") != "*"
+        or record.get("event_kind") != "SNAPSHOT"
+        or record.get("exchange_ts_ms") is not None
+        or record.get("read_only") is not True
+        or record.get("real_execution") is not False
+        or type(receive) is not int or receive <= 0
+        or type(monotonic) is not int or monotonic <= 0
+        or not isinstance(provenance, dict)
+        or provenance.get("url") != "https://api.hyperliquid.xyz/info"
+        or provenance.get("network") != "mainnet"
+        or provenance.get("access") != "read_only"
+        or provenance.get("transport") != "https"
+        or provenance.get("authenticated") is not False
+        or provenance.get("request_type") != "clearinghouseState"
+        or provenance.get("broad_sweep") is not True
+        or provenance.get("timestamp_semantics") != "receive_observation_time_only"
+        or type(provenance.get("request_send_wall_ms")) is not int
+        or provenance["request_send_wall_ms"] <= 0
+        or provenance.get("request_receive_wall_ms") != receive
+        or provenance["request_send_wall_ms"] > receive
+    ):
+        raise SafeBridgeError("broad-state receive-only provenance is incomplete")
+    if not isinstance(raw, str) or not raw or hashlib.sha256(raw.encode("utf-8")).hexdigest() != record.get("raw_sha256"):
+        raise SafeBridgeError("broad-state raw payload hash mismatch")
+    try:
+        message = json.loads(raw)
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise SafeBridgeError("invalid broad-state payload") from exc
+    if not isinstance(message, dict):
+        raise SafeBridgeError("broad-state payload is not an object")
+    vault = message.get("vault")
+    phase = message.get("phase")
+    state = message.get("clearinghouseState")
+    if (
+        not isinstance(vault, str)
+        or re.fullmatch(r"0x[0-9a-fA-F]{40}", vault) is None
+        or phase not in {"START", "END"}
+        or not isinstance(state, dict)
+        or not isinstance(summary, dict)
+        or summary.get("vault") != vault.lower()
+    ):
+        raise SafeBridgeError("broad-state identity or phase mismatch")
+    snapshot = construire_portefeuille(
+        state,
+        user=vault,
+        recv_ms=receive,
+        source="SAFE_CLEARINGHOUSE_STATE",
+    )
+    nav = snapshot.get("nav_usd") if isinstance(snapshot, dict) else None
+    summary_nav = summary.get("nav_usd")
+    if (
+        not isinstance(snapshot, dict)
+        or isinstance(nav, bool)
+        or not isinstance(nav, (int, float))
+        or not math.isfinite(float(nav))
+        or nav <= 0
+        or isinstance(summary_nav, bool)
+        or not isinstance(summary_nav, (int, float))
+        or not math.isfinite(float(summary_nav))
+        or not math.isclose(float(summary_nav), float(nav), rel_tol=1e-12, abs_tol=1e-9)
+        or summary.get("phase") != phase
+    ):
+        raise SafeBridgeError("broad-state NAV or positions are invalid")
+    snapshot.update({
+        "ts_ms": receive,
+        "source_id": record["source_id"],
+        "source_phase": phase,
+        "timestamp_semantics": "receive_observation_time_only",
+        "causal_observation": True,
+        "data_origin": "SAFE_VERIFIED",
+        "read_only": True,
+        "real_execution": False,
+    })
+    return snapshot
+
+
 def _levels(side: Any, *, descending: bool) -> list[list[float]]:
     if not isinstance(side, list) or not side:
         raise SafeBridgeError("L2 side has no observed levels")
@@ -338,11 +433,22 @@ def _book(record: dict[str, Any]) -> dict[str, Any]:
     ):
         raise SafeBridgeError("invalid L2 connection identity")
     parsed_summary = record.get("parsed_summary")
-    gap_epoch = (
+    summary_epoch = (
         parsed_summary.get("l2_gap_epoch")
         if isinstance(parsed_summary, dict)
         else None
     )
+    record_epoch = record.get("l2_gap_epoch")
+    if (
+        summary_epoch is not None
+        and record_epoch is not None
+        and summary_epoch != record_epoch
+    ):
+        raise SafeBridgeError("conflicting L2 gap epoch fields")
+    # TickDatasetWriter has carried the epoch inside parsed_summary; the local
+    # L2 lane writes it at the record's top level. Preserve either authenticated
+    # source field without synthesizing an epoch when older shards omit both.
+    gap_epoch = summary_epoch if summary_epoch is not None else record_epoch
     if gap_epoch is not None and (type(gap_epoch) is not int or gap_epoch < 0):
         raise SafeBridgeError("invalid L2 gap epoch")
     result = {
@@ -370,7 +476,11 @@ def _book(record: dict[str, Any]) -> dict[str, Any]:
 
 def _safe_registry_rows(
     recovery: Path, catalog_path: Path,
-) -> tuple[str, list[tuple[str, int, str, tuple[int, int, int, int]]], str]:
+) -> tuple[
+    str,
+    list[tuple[str, int, str, tuple[int, int, int, int], str | None, str | None]],
+    str,
+]:
     restore = _read_json(recovery / "RESTORE_REPORT.json")
     unpack = _read_json(recovery / "UNPACK_REPORT.json")
     binding = restore.get("catalog_verification")
@@ -407,7 +517,7 @@ def _safe_registry_rows(
         or not isinstance(catalog, str) or len(catalog) != 64
     ):
         raise SafeBridgeError("AlinaSync SAFE restoration and extraction are not certified")
-    active_paths: set[str] | None = None
+    active_catalog: dict[str, tuple[int, str, str, str, str]] | None = None
     if unpack.get("unpack_scope") == "COPY_VAULT_ONLY":
         try:
             from tools.unpack_verified_safe import PREFIXE_ACTIF, _catalog_safe_bytes
@@ -415,12 +525,17 @@ def _safe_registry_rows(
             from unpack_verified_safe import PREFIXE_ACTIF, _catalog_safe_bytes
         selection, _families = _catalog_safe_bytes(
             catalog_path, recovery, catalog, family_prefix=PREFIXE_ACTIF,
+            include_metadata=True,
         )
-        active_paths = {
-            shard.relative_to(recovery).as_posix()
-            for shard in selection
-        }
-        if not active_paths or len(active_paths) != len(selection):
+        active_catalog = {}
+        for shard, identity in selection.items():
+            if len(identity) != 5:
+                raise SafeBridgeError("active SAFE catalog row lacks source identity")
+            size, sha, dataset_id, family, release_tag = identity
+            active_catalog[shard.relative_to(recovery).as_posix()] = (
+                int(size), str(sha), str(dataset_id), str(family), str(release_tag),
+            )
+        if not active_catalog:
             raise SafeBridgeError("active-family catalog selection is empty or ambiguous")
     if (
         catalog_path.is_symlink() or not catalog_path.is_file()
@@ -453,21 +568,34 @@ def _safe_registry_rows(
                 "SELECT relative_path, bytes, sha256, stat_dev, stat_ino, "
                 "stat_mtime_ns, stat_ctime_ns FROM current_safe_shards"
             )
-            if active_paths is None:
+            if active_catalog is None:
                 raw = db.execute(query + " ORDER BY relative_path").fetchall()
                 registry_count = len(raw)
             else:
-                # Keep only the active Copy-Vault rows in memory. The full SAFE
-                # view still gets scanned once to verify global registry parity,
-                # but we avoid fetchall() plus a sort of ~1.8M off-scope rows.
+                # Verify global parity with an index-only count, then fetch the
+                # active shards by the registry's (dataset_id, release_tag) PK.
+                # A prior cursor walk materialized/decoded all ~1.8M SAFE rows
+                # for the same result; the active branch should only touch the
+                # compact active index plus the selected Copy-Vault rows.
                 raw = []
-                registry_count = 0
-                for row in db.execute(query):
-                    registry_count += 1
-                    relative = str(row[0]).replace(chr(92), "/")
-                    if relative in active_paths:
-                        raw.append(row)
-                raw.sort(key=lambda row: str(row[0]).replace(chr(92), "/"))
+                registry_count = int(db.execute(
+                    "SELECT COUNT(*) FROM current_safe_shards"
+                ).fetchone()[0])
+                active_query = query + " WHERE dataset_id=? AND release_tag=?"
+                for relative, expected_row in sorted(active_catalog.items()):
+                    expected_size, expected_sha, dataset_id, family, release_tag = expected_row
+                    row = db.execute(active_query, (dataset_id, release_tag)).fetchone()
+                    if row is None:
+                        raise SafeBridgeError(f"SAFE catalog shard is absent from registry: {relative}")
+                    if (
+                        str(row[0]).replace(chr(92), "/") != relative
+                        or int(row[1]) != expected_size
+                        or str(row[2]).lower() != expected_sha
+                    ):
+                        raise SafeBridgeError(
+                            f"SAFE registry identity differs from catalog: {relative}"
+                        )
+                    raw.append((*row, dataset_id, family))
     except sqlite3.Error as exc:
         raise SafeBridgeError("unreadable SAFE_SHARDS registry") from exc
     expected = classification.get("usable_shards")
@@ -475,7 +603,7 @@ def _safe_registry_rows(
         type(expected) is not int
         or expected <= 0
         or registry_count != expected
-        or (active_paths is None and len(raw) != expected)
+        or (active_catalog is None and len(raw) != expected)
         or type(unpack.get("certified_shards")) is not int
         or unpack.get("certified_shards") != expected
     ):
@@ -483,16 +611,61 @@ def _safe_registry_rows(
     # 23/11/2026 : le deballage se limite aux familles ACTIVES (copy_vault_*) ; le registre complet
     # vient d'etre controle ci-dessus, on ne lit ensuite que ce qui a ete deballe. Avant, le pont
     # parcourait les 1 792 577 shards (deux empreintes chacun) pour en ecarter 99 %.
-    if active_paths is not None and (
-        len(raw) != len(active_paths)
+    if active_catalog is not None and (
+        len(raw) != len(active_catalog)
         or type(unpack.get("unpacked_shards")) is not int
         or unpack.get("unpacked_shards") != len(raw)
     ):
         raise SafeBridgeError("active-family SAFE shards and their extraction disagree")
     return catalog, [
-        (str(row[0]), int(row[1]), str(row[2]), tuple(int(v) for v in row[3:]))
+        (
+            str(row[0]), int(row[1]), str(row[2]), tuple(int(v) for v in row[3:7]),
+            str(row[7]) if len(row) > 7 else None,
+            str(row[8]) if len(row) > 8 else None,
+        )
         for row in raw
     ], source_read_mode
+
+
+def _bind_safe_source(
+    row: dict[str, Any], *, catalog_sha256: str, shard_relative_path: str,
+    shard_sha256: str, dataset_id: str | None, family: str | None,
+    source_record: dict[str, Any], source_line: bytes, line_number: int,
+    jsonl_sha256: str,
+) -> dict[str, Any]:
+    """Bind a normalized row to the exact SAFE catalog shard and source frame."""
+    row.update({
+        "source_quality_status": "SAFE",
+        "source_manifest_verified": True,
+        "source_replay_compatible": True,
+        "source_catalog_sha256": catalog_sha256,
+        "source_shard_sha256": shard_sha256,
+        "source_shard_relative_path": shard_relative_path,
+        "source_jsonl_sha256": jsonl_sha256,
+        "source_frame_number": line_number,
+        "source_frame_sha256": hashlib.sha256(source_line).hexdigest(),
+        "source_raw_sha256": source_record.get("raw_sha256"),
+    })
+    if dataset_id:
+        row["source_dataset_id"] = dataset_id
+    if family:
+        row["source_family"] = family
+    return row
+
+
+def _dataset_id_from_safe_path(relative: str) -> str | None:
+    """Recover only reversible dataset IDs from AlinaSync's safe archive path."""
+    parts = PurePosixPath(relative).parts
+    if (
+        len(parts) != 4 or parts[:2] != ("usable", "shards")
+        or not parts[3].endswith(".jsonl.gz")
+    ):
+        return None
+    candidate = parts[3][:-len(".jsonl.gz")]
+    sanitized = re.sub(r"[^A-Za-z0-9._-]+", "_", candidate).strip("._")
+    if candidate and len(candidate) <= 200 and sanitized == candidate:
+        return candidate
+    return None
 
 
 def build_safe_copy_workspace(
@@ -520,7 +693,7 @@ def build_safe_copy_workspace(
     if parent.is_symlink():
         raise SafeBridgeError("unsafe Copy-Vault workspace parent")
     parent.mkdir(parents=True, exist_ok=True)
-    bridge_schema = "hypersmart.dataset_selection_provenance.v5"
+    bridge_schema = "hypersmart.dataset_selection_provenance.v7"
     selection = hashlib.sha256()
     selection.update(bridge_schema.encode("ascii") + b"\0" + catalog.encode("ascii"))
     # A schema change gets a new immutable artifact directory instead of
@@ -534,11 +707,14 @@ def build_safe_copy_workspace(
     paths = {
         "copy_vault_fills": destination / "vault_fills_live.jsonl",
         "copy_vault_snapshot": destination / "vault_fills.jsonl",
+        "copy_vault_broad_state": destination / "vault_snapshots.jsonl",
         "copy_vault_l2": destination / "copy_vault_l2_tape.jsonl",
     }
     counts = {
         "copy_vault_fills": 0,
         "copy_vault_snapshot": 0,
+        "copy_vault_broad_state": 0,
+        "snapshot_nav_observations": 0,
         "historical_fill_observations": 0,
         "copy_vault_l2": 0,
         "snapshots_excluded_from_forward": 0,
@@ -555,6 +731,7 @@ def build_safe_copy_workspace(
         with (
             paths["copy_vault_fills"].open("w", encoding="utf-8", newline="\n") as fill_out,
             paths["copy_vault_snapshot"].open("w", encoding="utf-8", newline="\n") as history_out,
+            paths["copy_vault_broad_state"].open("w", encoding="utf-8", newline="\n") as snapshot_out,
             paths["copy_vault_l2"].open("w", encoding="utf-8", newline="\n") as l2_out,
             decisions_path.open("w", encoding="utf-8", newline="\n") as decisions_out,
         ):
@@ -581,7 +758,9 @@ def build_safe_copy_workspace(
                 ] += 1
                 decision_reasons[reason_code] += 1
 
-            for i, (relative, size, sha, stat_identity) in enumerate(registry, 1):
+            for i, (
+                relative, size, sha, stat_identity, dataset_id, catalog_family,
+            ) in enumerate(registry, 1):
                 processed_shards = i
                 archive, plain, seal_path = _safe_paths(recovery, relative)
                 # L extraction (plain) n est plus EXIGEE : le sceau prouve le JSONL, et on sait
@@ -631,6 +810,13 @@ def build_safe_copy_workspace(
                             deferred_source_error = exc
                             continue
                         record_channel = record.get("channel")
+                        if catalog_family and record_channel != catalog_family:
+                            deferred_source_error = SafeBridgeError(
+                                f"SAFE catalog family/channel mismatch: {relative}"
+                            )
+                            continue
+                        source_dataset_id = dataset_id or _dataset_id_from_safe_path(relative)
+                        source_family = catalog_family or str(record_channel or "") or None
                         if rows == 1:
                             channel = record_channel
                         if record_channel != channel:
@@ -665,6 +851,18 @@ def build_safe_copy_workspace(
                                 continue
                             counts["snapshots_excluded_from_forward"] += excluded
                             for fill in normalized:
+                                fill["isSnapshot"] = False
+                                fill["is_snapshot"] = False
+                                if "closedPnl" in fill:
+                                    fill["closed_pnl"] = fill["closedPnl"]
+                                _bind_safe_source(
+                                    fill, catalog_sha256=catalog,
+                                    shard_relative_path=relative, shard_sha256=sha,
+                                    dataset_id=source_dataset_id, family=source_family,
+                                    source_record=record, source_line=line,
+                                    line_number=line_number,
+                                    jsonl_sha256=str(seal["jsonl_sha256"]),
+                                )
                                 fill_out.write(json.dumps(fill, sort_keys=True, allow_nan=False) + "\n")
                             counts[record_channel] += len(normalized)
                         elif record_channel == "copy_vault_snapshot":
@@ -682,9 +880,44 @@ def build_safe_copy_workspace(
                                 quarantined_frames += 1
                                 continue
                             for fill in normalized:
+                                _bind_safe_source(
+                                    fill, catalog_sha256=catalog,
+                                    shard_relative_path=relative, shard_sha256=sha,
+                                    dataset_id=source_dataset_id, family=source_family,
+                                    source_record=record, source_line=line,
+                                    line_number=line_number,
+                                    jsonl_sha256=str(seal["jsonl_sha256"]),
+                                )
                                 history_out.write(json.dumps(fill, sort_keys=True, allow_nan=False) + "\n")
                             counts[record_channel] += 1
                             counts["historical_fill_observations"] += len(normalized)
+                        elif record_channel == "copy_vault_broad_state":
+                            try:
+                                snapshot = _broad_state_snapshot(record)
+                            except SafeBridgeError as exc:
+                                record_decision(
+                                    decision="QUARANTINE",
+                                    reason_code="BROAD_STATE_NAV_CONTRACT_REJECTED",
+                                    reason=str(exc),
+                                    relative=relative, archive_sha=sha,
+                                    jsonl_sha=str(seal["jsonl_sha256"]),
+                                    line_number=line_number, line=line,
+                                )
+                                quarantined_frames += 1
+                                continue
+                            _bind_safe_source(
+                                snapshot, catalog_sha256=catalog,
+                                shard_relative_path=relative, shard_sha256=sha,
+                                dataset_id=source_dataset_id, family=source_family,
+                                source_record=record, source_line=line,
+                                line_number=line_number,
+                                jsonl_sha256=str(seal["jsonl_sha256"]),
+                            )
+                            snapshot_out.write(
+                                json.dumps(snapshot, sort_keys=True, allow_nan=False) + "\n"
+                            )
+                            counts[record_channel] += 1
+                            counts["snapshot_nav_observations"] += 1
                         else:
                             try:
                                 book = _book(record)
@@ -699,6 +932,14 @@ def build_safe_copy_workspace(
                                 )
                                 quarantined_frames += 1
                                 continue
+                            _bind_safe_source(
+                                book, catalog_sha256=catalog,
+                                shard_relative_path=relative, shard_sha256=sha,
+                                dataset_id=source_dataset_id, family=source_family,
+                                source_record=record, source_line=line,
+                                line_number=line_number,
+                                jsonl_sha256=str(seal["jsonl_sha256"]),
+                            )
                             l2_out.write(json.dumps(book, sort_keys=True, allow_nan=False) + "\n")
                             counts[record_channel] += 1
                         admitted_frames += 1

@@ -328,6 +328,21 @@ def _lignes_detail_suivi_collecteurs(suivi: dict | None) -> list[str]:
         for cle, etiquette in champs
         if type(detail.get(cle)) is int and detail[cle] > 0
     ]
+    journal_reason = detail.get("gap_journal_reason")
+    receipt_reason = detail.get("coverage_receipt_reason")
+    diagnostic = (
+        journal_reason
+        if detail.get("gap_journal_status") == "UNMEASURABLE"
+        and isinstance(journal_reason, str)
+        else receipt_reason
+        if detail["coverage_receipt_status"] == "UNMEASURABLE"
+        and isinstance(receipt_reason, str)
+        else None
+    )
+    if diagnostic:
+        if diagnostic.startswith("FENETRES_INCOMPLETES:"):
+            diagnostic = "journal incomplet (" + diagnostic.split(":", 1)[1] + ")"
+        morceaux.insert(0, f"motif {diagnostic}")
     contenu = "; ".join(morceaux) if morceaux else "aucun incident signalé"
     return [f"| DÉTAIL PREUVE     : {detail['coverage_receipt_status']} | {contenu}"]
 
@@ -1249,6 +1264,7 @@ def lignes_dashboard_simple(
         f"| SAFE RESTAURÉ     : {safe}",
         f"| EXTRACTION        : {unpacked}",
         f"| GITHUB            : {release}",
+        "| RYTHME            : débit 2 s; SAFE/GitHub = reçus; ETA moteur = sonde (âge indiqué).",
         f"| COFFRE            : {coffre}",
         *_lignes_suivi_collecteurs(suivi_collecteurs),
         f"| SONDE DENSITÉ     : {progression_txt} | rapport {sonde_source}",

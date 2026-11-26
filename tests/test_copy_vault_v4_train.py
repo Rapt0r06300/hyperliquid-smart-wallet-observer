@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from hl_observer.backtesting.copy_vault_executable import cluster_metaorders
 from hl_observer.backtesting.copy_vault_causal_selection import causal_live_observation
+from hl_observer.backtesting.copy_vault_executable import cluster_metaorders
 from hl_observer.backtesting.copy_vault_protocol import NOTIONAL_USD
 from hl_observer.backtesting.copy_vault_v4_train import (
     _share_exceeds,
@@ -169,6 +169,49 @@ def test_assessment_bloque_un_gain_concentre_sur_un_seul_vault() -> None:
     assert result["placebo_summary"]["net_pnl_usd"] == -4.0
     assert result["eligible"] is False
     assert "VAULT_TRADE_CONCENTRATION_TOO_HIGH" in result["reasons"]
+
+
+def test_assessment_compare_actual_and_placebo_on_after_funding_net() -> None:
+    trades = [_economic_trade(index, 1.0) for index in range(8)]
+    placebo = [_economic_trade(index, 0.5, vault="placebo") for index in range(8)]
+    for trade in trades:
+        trade["net_after_funding_usd"] = 0.25
+        trade["net_after_funding_usd_exact_decimal"] = "0.25"
+    for trade in placebo:
+        trade["net_after_funding_usd"] = 0.5
+        trade["net_after_funding_usd_exact_decimal"] = "0.5"
+
+    result = assess_train_variant(
+        trades,
+        placebo,
+        trial_count=16,
+        net_value_key="net_after_funding_usd",
+    )
+
+    assert result["execution_statistics"]["net_pnl_usd"] == 8.0
+    assert result["statistics"]["net_pnl_usd"] == 2.0
+    assert result["placebo_summary"]["net_pnl_usd"] == 4.0
+    assert result["placebo_statistics"]["net_pnl_usd"] == 4.0
+    assert result["scoring_value_key"] == "net_after_funding_usd"
+    assert "PLACEBO_NOT_BEATEN" in result["reasons"]
+
+
+def test_assessment_refuse_missing_after_funding_rows() -> None:
+    trades = [_economic_trade(index, 1.0) for index in range(8)]
+    placebo = [_economic_trade(index, 0.5, vault="placebo") for index in range(8)]
+    for trade in trades:
+        trade["net_after_funding_usd"] = 1.0
+        trade["net_after_funding_usd_exact_decimal"] = "1"
+
+    result = assess_train_variant(
+        trades,
+        placebo,
+        trial_count=16,
+        net_value_key="net_after_funding_usd",
+    )
+
+    assert "PLACEBO_SCORING_VALUE_INCOMPLETE" in result["reasons"]
+    assert "PLACEBO_NOT_BEATEN" in result["reasons"]
 
 
 def test_concentration_gate_uses_exact_integer_ratio_at_float_boundary() -> None:

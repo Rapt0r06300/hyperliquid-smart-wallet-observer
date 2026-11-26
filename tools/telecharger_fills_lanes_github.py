@@ -23,6 +23,10 @@ sys.path.insert(0, str(RACINE / "src"))
 sys.path.insert(0, str(RACINE / "tools"))
 
 from fusionner_fills_lanes import fusionner  # noqa: E402
+from hl_observer.collection.copy_vault_checkpoint_socle import (  # noqa: E402
+    FillSourceChanged,
+    FillWriterBusy,
+)
 
 WORKFLOW = "copy-vault-poll-lanes.yml"
 
@@ -88,7 +92,10 @@ def telecharger_et_fusionner(
         telecharges = telecharger_runs(gh, root, run_ids, tmp)
         if telecharges == 0:
             return {"statut": "telechargement_vide", "runs": 0, "fusion": None}
-        rapport = fusionner(root, tmp, max_lag_ms)
+        try:
+            rapport = fusionner(root, tmp, max_lag_ms)
+        except (FillSourceChanged, FillWriterBusy):
+            return {"statut": "deferred_live_append", "runs": telecharges, "fusion": None}
         return {"statut": "OK", "runs": telecharges, "fusion": rapport}
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -110,6 +117,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if res["statut"] == "telechargement_vide":
         print("[lanes] aucun artefact telecharge (expires ?) -> rien a fusionner.", flush=True)
+        return 0
+    if res["statut"] == "deferred_live_append":
+        print("[lanes] fusion differee : le collecteur a ajoute des fills pendant la preparation. "
+              "Aucun fill local n'a ete remplace ; les artefacts restent disponibles sur GitHub. "
+              "Relancer la fusion lors d'une fenetre sans nouvelle ecriture.", flush=True)
         return 0
     f = res["fusion"]
     print(f"[lanes] {res['runs']} run(s) GitHub rapatrie(s) ; "

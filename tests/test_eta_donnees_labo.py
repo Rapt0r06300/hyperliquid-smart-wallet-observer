@@ -452,6 +452,7 @@ def test_dashboard_court_separe_safe_extraction_et_github_sans_ligne_trop_longue
     assert any("SAFE RESTAURÉ" in ligne and "snapshot vérifié" in ligne for ligne in lignes)
     assert any("EXTRACTION" in ligne and "15,456" in ligne and "NON VÉRIFIÉS" in ligne for ligne in lignes)
     assert any("GITHUB" in ligne and "21,400" in ligne for ligne in lignes)
+    assert any("SAFE/GitHub = reçus" in ligne and "ETA moteur = sonde" in ligne for ligne in lignes)
     assert any("COFFRE" in ligne and "31,601 fichiers" in ligne for ligne in lignes)
     assert max(map(len, lignes)) <= 100
     assert "téléchargement seul ≠ jour dense" in texte
@@ -805,11 +806,15 @@ def test_resume_detaille_explique_la_composition_des_ecarts_de_preuve():
             "input_rotations": 7,
             "writer_outages": 11,
             "checkpoint_queue_rejections": 0,
+            "coverage_receipt_reason": "GAPS_PRESENT",
+            "gap_journal_status": "UNMEASURABLE",
+            "gap_journal_reason": "FENETRES_INCOMPLETES:input_rotations=9,fenetres=8",
         }
     })
 
     assert lignes == [
-        "| DÉTAIL PREUVE     : UNMEASURABLE | expirés 1159; rejets invalides 479; "
+        "| DÉTAIL PREUVE     : UNMEASURABLE | motif journal incomplet "
+        "(input_rotations=9,fenetres=8); expirés 1159; rejets invalides 479; "
         "rotations 7; interruptions écrivain 11"
     ]
 

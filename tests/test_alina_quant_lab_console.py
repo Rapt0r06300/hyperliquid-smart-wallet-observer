@@ -11,6 +11,7 @@ from hl_observer.backtesting.copy_vault_protocol import MAX_GROSS_EXPOSURE_USD
 from hl_observer.contrat_paper import PAPER_EQUITY_USD
 from hl_observer.simulation.economic_freeze_registry import parameter_hash
 from tools.alina_quant_lab_console import (
+    _verified_economic_freeze_verdict,
     _pytest_counts,
     _run_group,
     _test_groups,
@@ -18,6 +19,13 @@ from tools.alina_quant_lab_console import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_verified_freeze_verdict_does_not_reintroduce_a_daily_dollar_gate() -> None:
+    verdict = _verified_economic_freeze_verdict()
+    assert "TRAIN, VALIDATION, OOS et FORWARD" in verdict
+    assert "informatif, pas une condition" in verdict
+    assert "5 USD" not in verdict
 
 
 def test_quant_lab_initial_capital_follows_the_paper_contract() -> None:

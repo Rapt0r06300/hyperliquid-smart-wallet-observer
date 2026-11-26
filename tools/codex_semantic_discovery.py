@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -33,6 +34,7 @@ DEFAULT_LEDGER = REPO_ROOT / "runtime/codex_research/HYPOTHESIS_LEDGER.jsonl"
 DEFAULT_PROCESS_MEMORY = REPO_ROOT / "runtime/codex_research/PROCESS_MEMORY.jsonl"
 DEFAULT_HISTORICAL_PROCESS_MEMORY = REPO_ROOT / "docs/quant/HISTORICAL_EXPERIMENT_MEMORY.jsonl"
 DEFAULT_STATUS = REPO_ROOT / "runtime/codex_research/SEMANTIC_DISCOVERY_STATUS.json"
+_FINGERPRINT_CHUNK_BYTES = 1024 * 1024
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -54,7 +56,10 @@ def _parser() -> argparse.ArgumentParser:
         "--retest-evidence",
         action="append",
         default=[],
-        help="verified evidence satisfying a documented retest condition; repeatable",
+        help=(
+            "declared retest label for exploratory ranking only; this CLI does not "
+            "verify the evidence or certify outcomes; repeatable"
+        ),
     )
     parser.add_argument("--out", type=Path)
     parser.add_argument(
@@ -68,6 +73,32 @@ def _parser() -> argparse.ArgumentParser:
 
 def _output_path(path: Path) -> Path:
     return path if path.is_absolute() else REPO_ROOT / "runtime/codex_research" / path.name
+
+
+def _source_fingerprint(path: Path) -> dict[str, int | str | None]:
+    """Return stable, privacy-safe identity metadata for one discovery input."""
+    resolved = path.resolve()
+    try:
+        display_path = resolved.relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        # Temporary or externally supplied inputs must not leak machine-specific paths.
+        display_path = f"external/{resolved.name}"
+
+    digest = hashlib.sha256()
+    size_bytes = 0
+    try:
+        with resolved.open("rb") as handle:
+            while chunk := handle.read(_FINGERPRINT_CHUNK_BYTES):
+                digest.update(chunk)
+                size_bytes += len(chunk)
+    except FileNotFoundError:
+        return {"path": display_path, "status": "MISSING", "size_bytes": None, "sha256": None}
+    return {
+        "path": display_path,
+        "status": "VERIFIED",
+        "size_bytes": size_bytes,
+        "sha256": digest.hexdigest(),
+    }
 
 
 def _atomic_json(path: Path, payload: dict) -> None:
@@ -103,16 +134,30 @@ def main() -> int:
     args = _parser().parse_args()
     try:
         family = require_active_strategy(args.family)
+        input_paths = {
+            "catalog": args.catalog,
+            "hypothesis_ledger": args.ledger,
+            "runtime_process_memory": args.process_memory,
+            "historical_process_memory": args.historical_process_memory,
+        }
+        source_inputs_before = {
+            name: _source_fingerprint(path) for name, path in input_paths.items()
+        }
         catalog = load_catalog(args.catalog)
         plans = generate_semantic_plans(catalog, family, args.pool_size, args.seed)
+        ledger = load_records(args.ledger)
+        historical = load_process_records(args.historical_process_memory)
+        runtime = load_process_records(args.process_memory)
+        source_inputs_after = {
+            name: _source_fingerprint(path) for name, path in input_paths.items()
+        }
+        if source_inputs_before != source_inputs_after:
+            raise ValueError("discovery inputs changed while the candidate pool was being built")
     except (OSError, ValueError) as exc:
         print(json.dumps({"status": "BLOCKED", "error": str(exc)}, ensure_ascii=False), file=sys.stderr)
         return 2
     if args.retest_evidence:
         plans = [{**plan, "retest_evidence": list(args.retest_evidence)} for plan in plans]
-    ledger = load_records(args.ledger)
-    historical = load_process_records(args.historical_process_memory)
-    runtime = load_process_records(args.process_memory)
     process = combine_process_records(historical, runtime)
     ranked = rank_semantic_plans(plans, ledger, process, args.shortlist)
     filtered = max(0, len(plans) - len(ranked))
@@ -126,6 +171,13 @@ def main() -> int:
         "filtered_before_llm": filtered,
         "historical_memory_records": len(historical),
         "runtime_memory_records": len(runtime),
+        "pool_size": args.pool_size,
+        "shortlist_limit": args.shortlist,
+        "seed": args.seed,
+        "source_inputs": source_inputs_after,
+        "retest_evidence_status": (
+            "UNVERIFIED_ASSERTION" if args.retest_evidence else "NONE"
+        ),
         "network_io": False,
         "certifying": False,
     }

@@ -95,20 +95,103 @@ def remplacer_avec_reprises(
 def append_jsonl(chemin: str | Path, enrs: Sequence[dict], *, fsync: bool = True) -> int:
     """Append JSONL avec flush (+fsync) : une écriture coupée ne laisse pas un fichier à moitié.
     Rend le nombre de lignes écrites. Crée le dossier au besoin."""
+    lignes = [json.dumps(e, ensure_ascii=False) + "\n" for e in enrs]
+    ajouter_atomique(chemin, "".join(lignes), fins_texte=True, fsync=fsync)
+    return len(lignes)
+
+
+#: Taille maximale d'UNE ecriture atomique ; au-dela, on coupe AUX FINS DE LIGNE (jamais au milieu d'une ligne).
+_MORCEAU_MAX = 256 * 1024 * 1024
+_K32: Any = None
+
+
+def _kernel32() -> Any:
+    global _K32
+    if _K32 is None:
+        import ctypes
+        from ctypes import wintypes
+
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.CreateFileW.restype = wintypes.HANDLE
+        k32.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
+                                    wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+        k32.WriteFile.restype = wintypes.BOOL
+        k32.WriteFile.argtypes = [wintypes.HANDLE, ctypes.c_char_p, wintypes.DWORD,
+                                  ctypes.POINTER(wintypes.DWORD), ctypes.c_void_p]
+        k32.FlushFileBuffers.restype = wintypes.BOOL
+        k32.FlushFileBuffers.argtypes = [wintypes.HANDLE]
+        k32.CloseHandle.restype = wintypes.BOOL
+        k32.CloseHandle.argtypes = [wintypes.HANDLE]
+        _K32 = k32
+    return _K32
+
+
+def _morceaux(donnees: bytes) -> list[bytes]:
+    if len(donnees) <= _MORCEAU_MAX:
+        return [donnees]
+    out, debut = [], 0
+    while debut < len(donnees):
+        fin = min(len(donnees), debut + _MORCEAU_MAX)
+        if fin < len(donnees):
+            coupe = donnees.rfind(b"\n", debut, fin)
+            fin = coupe + 1 if coupe >= debut else fin
+        out.append(donnees[debut:fin])
+        debut = fin
+    return out
+
+
+def ajouter_atomique(chemin: str | Path, texte: str, *, fins_texte: bool = True, fsync: bool = False) -> int:
+    r"""Ajoute ``texte`` en fin de fichier par des ecritures que le SYSTEME place lui-meme a la fin.
+
+    26/11/2026 -- MESURE : sous Windows, ``open(..., "a")`` se place en fin de fichier PUIS ecrit, en deux temps.
+    Deux processus qui ajoutent au meme ruban (un collecteur et une fusion d'AlinaSync, ou deux collecteurs)
+    perdent des lignes : 23 a 41 sur 120 000, plus des lignes coupees. Un descripteur ouvert en FILE_APPEND_DATA
+    SEUL laisse Windows placer chaque ecriture a la fin : 0 perte sur 3 essais -- a condition que TOUS les
+    ecrivains d'un fichier passent par ici (un seul ancien ecrivain en "a" suffit a perdre des lignes).
+
+    ``fins_texte=True`` reproduit ``open(..., "a", encoding="utf-8")`` en mode texte (\n -> os.linesep) : memes
+    octets qu'avant. ``False`` = octets tels quels (comme ``newline="\n"``). Rend le nombre d'octets ecrits.
+    """
     p = Path(chemin)
     p.parent.mkdir(parents=True, exist_ok=True)
-    n = 0
-    with p.open("a", encoding="utf-8") as fh:
-        for e in enrs:
-            fh.write(json.dumps(e, ensure_ascii=False) + "\n")
-            n += 1
-        fh.flush()
+    if fins_texte and os.linesep != "\n":
+        texte = texte.replace("\n", os.linesep)
+    donnees = texte.encode("utf-8")
+    if not donnees:
+        return 0
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+
+        k32 = _kernel32()
+        h = k32.CreateFileW(str(p), 0x0004 | 0x00100000, 0x1 | 0x2 | 0x4, None, 4, 0x80, None)
+        if h is None or h == wintypes.HANDLE(-1).value:
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            for morceau in _morceaux(donnees):
+                ecrit = wintypes.DWORD(0)
+                if not k32.WriteFile(h, morceau, len(morceau), ctypes.byref(ecrit), None) \
+                        or ecrit.value != len(morceau):
+                    raise ctypes.WinError(ctypes.get_last_error())
+            if fsync and not k32.FlushFileBuffers(h):
+                _noter("collection/collecte_fiable.py:ajouter_atomique_fsync")
+        finally:
+            k32.CloseHandle(h)
+        return len(donnees)
+    fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+    try:
+        for morceau in _morceaux(donnees):
+            vue = memoryview(morceau)
+            while vue:
+                vue = vue[os.write(fd, vue):]
         if fsync:
             try:
-                os.fsync(fh.fileno())
+                os.fsync(fd)
             except OSError:
-                _noter("collection/collecte_fiable.py:append_jsonl_fsync")
-    return n
+                _noter("collection/collecte_fiable.py:ajouter_atomique_fsync")
+    finally:
+        os.close(fd)
+    return len(donnees)
 
 
 def ecrire_atomique(

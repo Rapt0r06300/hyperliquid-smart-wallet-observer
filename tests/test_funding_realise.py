@@ -1,10 +1,7 @@
-"""Le funding d'un episode se MESURE ou se DIT inconnu — jamais un zéro favorable.
+"""Le carry est exact à zéro, estimate-only aux crossing sans quantité/oracle, ou inconnu.
 
-POURQUOI CES TESTS EXISTENT. Mesure du 19/11/2026 : la porte `FUNDING_PNL_UNMEASURABLE` refusait
-**100 % des 11 391 essais** du labo, parce que son seul statut acceptant était « aucun règlement
-traversé » — impossible avec un règlement horaire et des horizons allant jusqu'à une heure. Le
-statut `MEASURED` était accepté ailleurs dans le moteur, mais aucune ligne du dépôt ne le
-produisait. La grandeur n'était pas non mesurable : elle n'était pas mesurée.
+Les taux historiques seuls ne donnent pas le cashflow en USD : il faut la quantité follower et
+le prix oracle au règlement. Le produit taux x notionnel d'entrée reste explicitement estimé.
 
 Ce que ces tests verrouillent :
 
@@ -42,34 +39,151 @@ def _trade(entree: int, sortie: int, *, direction: int = 1, notionnel: float = 1
 def test_un_long_paie_le_funding_quand_le_taux_est_positif() -> None:
     """Convention Hyperliquid : à taux positif, les longs paient les courts."""
     recu = fr.funding_du_trade(_trade(3_000_000, 8_000_000), TAUX, couverture_ms=COUVERTURE)
-    assert recu["status"] == "MEASURED"
+    assert recu["status"] == "ESTIMATED"
     assert recu["settlement_crossing_count"] == 2, "les règlements de 1 h et 2 h sont traversés"
-    # 2 règlements x 0,0001 x 100 USD = 0,02 USD payés -> le résultat DIMINUE.
-    assert recu["carry_pnl_usd"] < 0
-    assert Decimal(recu["carry_pnl_usd_exact_decimal"]) == Decimal("-0.02")
+    # Entry notional is not the point-in-time settlement position value.
+    assert recu["carry_pnl_usd"] is None
+    assert Decimal(recu["estimated_carry_pnl_usd_exact_decimal"]) == Decimal("-0.02")
+    assert recu["settlement_valuation_basis"] == "ENTRY_NOTIONAL_RATE_PROXY"
+
+
+def test_champs_de_portage_ne_presentent_pas_le_proxy_comme_du_carry_regle() -> None:
+    estimated = fr.funding_du_trade(
+        _trade(3_000_000, 8_000_000), TAUX, couverture_ms=COUVERTURE
+    )
+    fields = fr.champs_de_portage(0.1, estimated)
+    assert fields["carry_status"] == "ESTIMATED"
+    assert fields["carry_pnl_usd"] is None
+    assert fields["net_after_carry_usd"] is None
+    assert fields["net_after_carry_estimate_usd"] < 0.1
+
+
+def test_resume_funding_reel_leaders_is_wallet_scoped_and_non_promotable() -> None:
+    def row(vault: str, ts: int, payment: str, event_hash: str, *, snapshot: bool = False):
+        return {
+            "schema_version": "hypersmart.copy_vault_funding.v1",
+            "vault": vault,
+            "coin": "BTC",
+            "exchange_ts_ms": ts,
+            "is_snapshot": snapshot,
+            "historical_only": not snapshot,
+            "data_origin": "REAL_OBSERVED_SAFE_CONTEXT",
+            "paper_read_only": True,
+            "proof_of_pnl_allowed": False,
+            "forward_evidence_allowed": False,
+            "event_raw": {
+                "time": ts,
+                "hash": event_hash,
+                "coin": "BTC",
+                "usdc": payment,
+                "szi": "2",
+                "fundingRate": "0.0001",
+            },
+        }
+
+    wallet_a = "0x" + "a" * 40
+    wallet_b = "0x" + "b" * 40
+    duplicate = row(wallet_a, 3_600_000, "-0.200000", "0x-a1", snapshot=True)
+    rows = [
+        duplicate,
+        row(wallet_a, 7_200_000, "0.050000", "0x-a2"),
+        row(wallet_b, 3_600_000, "0.100000", "0x-b1"),
+        duplicate,
+        row(wallet_a, 3_600_000, "-0.300000", "0x-a1"),  # identity conflict
+    ]
+    unsafe = row(wallet_b, 7_200_000, "9", "0x-unsafe")
+    unsafe["proof_of_pnl_allowed"] = True
+    rows.append(unsafe)
+    rows.append({
+        "schema_version": "hypersmart.copy_vault_funding.empty_snapshot.v1",
+        "empty_snapshot_is_zero_proof": False,
+    })
+
+    summary = fr.resume_funding_reel_leaders(rows)
+
+    assert summary["status"] == "OBSERVED_ONLY"
+    assert summary["scope"] == "LEADER_REALIZED_FUNDING_COMPONENT_ONLY"
+    assert summary["coverage_status"] == "OBSERVED_EVENTS_ONLY_NOT_PROVEN_COMPLETE"
+    assert summary["event_count"] == 3
+    assert summary["duplicate_event_count"] == 1
+    assert summary["conflicting_event_count"] == 1
+    assert summary["rejected_event_count"] == 2
+    assert summary["empty_snapshot_count"] == 1
+    assert summary["copy_vault_follower_pnl_input"] is False
+    assert summary["complete_leader_pnl_proven"] is False
+    assert summary["proof_of_pnl_allowed"] is False
+    assert summary["zero_cashflow_proven"] is False
+    by_vault = {item["vault"]: item for item in summary["by_vault"]}
+    assert by_vault[wallet_a]["net_funding_usdc_exact_decimal"] == "-0.150000"
+    assert by_vault[wallet_a]["snapshot_event_count"] == 1
+    assert by_vault[wallet_a]["payments_paid_usdc_exact_decimal"] == "0.200000"
+    assert by_vault[wallet_b]["net_funding_usdc_exact_decimal"] == "0.100000"
+
+
+def test_resume_funding_leader_absent_ne_se_convertit_pas_en_zero() -> None:
+    summary = fr.resume_funding_reel_leaders([])
+
+    assert summary["status"] == "UNMEASURABLE"
+    assert summary["event_count"] == 0
+    assert summary["by_vault"] == []
+    assert summary["zero_cashflow_proven"] is False
 
 
 def test_un_short_recoit_le_funding_quand_le_taux_est_positif() -> None:
     """Le signe inverse, sinon un coût deviendrait un revenu — le faux PnL que le contrat refuse."""
     recu = fr.funding_du_trade(_trade(3_000_000, 8_000_000, direction=-1), TAUX,
                                 couverture_ms=COUVERTURE)
-    assert recu["status"] == "MEASURED"
-    assert Decimal(recu["carry_pnl_usd_exact_decimal"]) == Decimal("0.02")
+    assert recu["status"] == "ESTIMATED"
+    assert recu["carry_pnl_usd"] is None
+    assert Decimal(recu["estimated_carry_pnl_usd_exact_decimal"]) == Decimal("0.02")
 
 
-def test_la_borne_des_reglements_traverses_est_verrouillee() -> None:
-    """`(entrée, sortie]` : un règlement à l'instant de l'entrée n'est pas payé, celui de la
-    sortie l'est — on détient encore la position au moment où il tombe."""
+def test_une_frontiere_de_reglement_exacte_est_refusee_comme_ambigue() -> None:
+    """Un timestamp de fill exactement à l'heure de règlement ne prouve pas l'ordre causal."""
     pile_a_l_entree = fr.funding_du_trade(_trade(3_600_000, 7_000_000), TAUX, couverture_ms=COUVERTURE)
-    assert pile_a_l_entree["settlement_crossing_count"] == 0, (
-        "un règlement a l'instant exact de l'entrée n'est pas paye par la position qui s'ouvre"
-    )
-    assert Decimal(pile_a_l_entree["carry_pnl_usd_exact_decimal"]) == Decimal("0")
+    assert pile_a_l_entree["status"] == "UNMEASURABLE"
+    assert pile_a_l_entree["reason"] == "FUNDING_BOUNDARY_UNPRICED"
 
     pile_a_la_sortie = fr.funding_du_trade(_trade(3_000_000, 3_600_000), TAUX, couverture_ms=COUVERTURE)
-    assert pile_a_la_sortie["settlement_crossing_count"] == 1, (
-        "celui de la sortie est paye : la position est encore detenue quand il tombe"
+    assert pile_a_la_sortie["status"] == "UNMEASURABLE"
+    assert pile_a_la_sortie["reason"] == "FUNDING_BOUNDARY_UNPRICED"
+
+
+def test_reglement_horaire_non_ambigu_est_mesure() -> None:
+    measured = fr.funding_du_trade(
+        _trade(3_000_000, 3_500_000), TAUX, couverture_ms=COUVERTURE
     )
+    assert measured["status"] == "MEASURED"
+    assert measured["settlement_crossing_count"] == 0
+    assert Decimal(measured["carry_pnl_usd_exact_decimal"]) == Decimal("0")
+
+
+def test_taux_manquant_sur_un_reglement_traverse_refuse_le_pnl() -> None:
+    incomplete = {"BTC": [SERIE[0], SERIE[2]]}
+    measured = fr.funding_du_trade(
+        _trade(3_000_000, 8_000_000), incomplete, couverture_ms=COUVERTURE
+    )
+    assert measured["status"] == "UNMEASURABLE"
+    assert measured["reason"] == "FUNDING_SETTLEMENT_RATE_MISSING"
+    assert measured["missing_settlement_timestamps_ms"] == [7_200_000]
+    assert measured["carry_pnl_usd"] is None
+
+
+def test_zero_funding_sans_frontiere_ne_requiert_pas_de_taux_absent() -> None:
+    measured = fr.funding_du_trade(_trade(1_000, 2_000_000), {})
+    assert measured["status"] == "MEASURED"
+    assert measured["settlement_crossing_count"] == 0
+    assert measured["carry_pnl_usd"] == 0.0
+
+
+def test_zero_funding_sans_reglement_ne_requiert_pas_direction_ni_notionnel() -> None:
+    measured = fr.funding_du_trade(
+        {"coin": "BTC", "entry_ts_ms": 1_000, "exit_ts_ms": 2_000_000},
+        {},
+    )
+    assert measured["status"] == "MEASURED"
+    assert measured["settlement_crossing_count"] == 0
+    assert Decimal(measured["carry_pnl_usd_exact_decimal"]) == Decimal(0)
 
 
 def test_un_episode_hors_couverture_est_refuse_et_non_mis_a_zero() -> None:
@@ -143,14 +257,18 @@ def test_une_seule_inconnue_emporte_le_total() -> None:
     inconnu = {**_trade(3_000_000, 8_000_000), "coin": "INCONNU"}
 
     tous_lisibles = fr.funding_des_trades([lisible, lisible], TAUX, couverture_ms=COUVERTURE)
-    assert tous_lisibles["status"] == "MEASURED"
-    assert Decimal(tous_lisibles["carry_pnl_usd_exact_decimal"]) == Decimal("-0.04")
+    assert tous_lisibles["status"] == "ESTIMATED"
+    assert tous_lisibles["carry_pnl_usd"] is None
+    assert Decimal(tous_lisibles["estimated_carry_pnl_usd_exact_decimal"]) == Decimal("-0.04")
     assert tous_lisibles["settlement_crossing_count"] == 4
+    assert tous_lisibles["measured_count"] == 0
+    assert tous_lisibles["estimated_count"] == 2
 
     melange = fr.funding_des_trades([lisible, inconnu], TAUX, couverture_ms=COUVERTURE)
     assert melange["status"] == "UNMEASURABLE"
     assert melange["carry_pnl_usd"] is None
-    assert melange["measured_count"] == 1
+    assert melange["measured_count"] == 0
+    assert melange["estimated_count"] == 1
     assert melange["reasons"] == {"FUNDING_RATES_MISSING_FOR_COIN": 1}
 
 
@@ -181,7 +299,7 @@ def test_un_intervalle_inattendu_est_refuse_et_compte(tmp_path, monkeypatch) -> 
         {"coin": "BTC", "ts_ms": 10_800_000, "funding": "pas-un-nombre", "interval": "1h"},
     ]
     monkeypatch.setattr(coffre_tranches, "selectionner",
-                        lambda *a, **k: {"shards": [{"shard": "s1"}]})
+                        lambda *a, **k: {"shards": [{"shard": "s1", "quality_status": "LOCAL_CERTIFIED"}]})
     monkeypatch.setattr(coffre_tranches, "flux", lambda *a, **k: iter(lignes))
 
     taux, audit = fr.taux_du_coffre(tmp_path, coins=["BTC"], debut_ms=0, fin_ms=99_000_000)
@@ -189,6 +307,8 @@ def test_un_intervalle_inattendu_est_refuse_et_compte(tmp_path, monkeypatch) -> 
     assert audit["ecartes_intervalle_inattendu"] == 1
     assert audit["ecartes_taux_illisible"] == 1
     assert [instant for instant, _ in taux["BTC"]] == [3_600_000]
+    assert audit["evidence_admission"] == "LOCAL_CERTIFIED_EXPLORATORY_ONLY"
+    assert audit["economic_proof_allowed"] is False
 
 
 def test_le_coffre_refuse_taux_non_finis_et_timestamps_non_finis(tmp_path, monkeypatch) -> None:
@@ -208,7 +328,7 @@ def test_le_coffre_refuse_taux_non_finis_et_timestamps_non_finis(tmp_path, monke
         {"coin": "BTC", "ts_ms": float("inf"), "funding": "0.0001", "interval": "1h"},
     ]
     monkeypatch.setattr(coffre_tranches, "selectionner",
-                        lambda *a, **k: {"shards": [{"shard": "s1"}]})
+                        lambda *a, **k: {"shards": [{"shard": "s1", "quality_status": "LOCAL_CERTIFIED"}]})
     monkeypatch.setattr(coffre_tranches, "flux", lambda *a, **k: iter(lignes))
 
     taux, audit = fr.taux_du_coffre(tmp_path, coins=["BTC"], debut_ms=0, fin_ms=99_000_000)
@@ -231,7 +351,11 @@ def test_le_coffre_verifie_les_hashes_et_refuse_une_serie_partielle(tmp_path, mo
     )
     lignes = [{"coin": "BTC", "ts_ms": 3_600_000, "funding": "0.0001", "interval": "1h"}]
 
-    monkeypatch.setattr(coffre_tranches, "selectionner", lambda *a, **k: {"shards": [{"shard": "s1"}]})
+    monkeypatch.setattr(
+        coffre_tranches,
+        "selectionner",
+        lambda *a, **k: {"shards": [{"shard": "s1", "quality_status": "LOCAL_CERTIFIED"}]},
+    )
 
     def flux_incomplet(*args, compteurs=None, **kwargs):
         assert kwargs["verifier_sha"] is True
@@ -253,3 +377,72 @@ def test_le_coffre_absent_se_dit(tmp_path) -> None:
     taux, audit = fr.taux_du_coffre(tmp_path, coins=["BTC"], debut_ms=0, fin_ms=1)
     assert taux == {}
     assert audit["status"] == "COFFRE_ABSENT"
+
+
+def test_le_coffre_refuse_un_shard_funding_sans_bornes_temporelles(tmp_path) -> None:
+    import json
+
+    coffre = tmp_path / "runtime/coffre_certifie"
+    coffre.mkdir(parents=True)
+    (coffre / "LOCAL_INDEX.json").write_text(
+        json.dumps({"shards": [{"famille": "funding_history", "shard": "unknown"}]}),
+        encoding="utf-8",
+    )
+
+    taux, audit = fr.taux_du_coffre(
+        tmp_path, coins=["BTC"], debut_ms=0, fin_ms=99_000_000
+    )
+
+    assert taux == {}
+    assert audit["status"] == "SHARDS_SANS_BORNES"
+    assert audit["shards_sans_bornes"] == 1
+
+
+def test_le_coffre_separe_admission_source_et_preuve_economique(
+    tmp_path, monkeypatch
+) -> None:
+    import json
+
+    from hl_observer.backtesting import coffre_tranches
+
+    coffre = tmp_path / "runtime/coffre_certifie"
+    coffre.mkdir(parents=True)
+    (coffre / "LOCAL_INDEX.json").write_text(
+        json.dumps({"shards": [{"famille": "funding_history", "shard": "safe"}]}),
+        encoding="utf-8",
+    )
+    shard = {
+        "famille": "funding_history",
+        "shard": "safe.jsonl",
+        "quality_status": "SAFE",
+        "replay_compatible": True,
+        "validation_allowed": True,
+        "asset_verified": True,
+        "sha256": "a" * 64,
+        "ts_min_ms": 0,
+        "ts_max_ms": 99_000_000,
+        "coins": ["BTC"],
+    }
+    monkeypatch.setattr(
+        coffre_tranches,
+        "selectionner",
+        lambda *args, **kwargs: {"shards": [shard], "sans_bornes": []},
+    )
+
+    def flux_verified(*_args, compteurs=None, **_kwargs):
+        compteurs["shards_lus"] = 1
+        return iter([
+            {"coin": "BTC", "ts_ms": 3_600_000, "funding": "0.0001", "interval": "1h"}
+        ])
+
+    monkeypatch.setattr(coffre_tranches, "flux", flux_verified)
+    rates, audit = fr.taux_du_coffre(
+        tmp_path, coins=["BTC"], debut_ms=0, fin_ms=99_000_000
+    )
+
+    assert rates["BTC"][0] == (3_600_000, Decimal("0.0001"))
+    assert audit["evidence_admission"] == "SAFE_REPLAY_ADMISSIBLE"
+    assert audit["economic_proof_allowed"] is False
+    assert audit["settlement_oracle_bound"] is False
+    assert audit["economic_proof_block_reason"] == "SETTLEMENT_ORACLE_PRICE_NOT_JOINED"
+    assert audit["economic_proof_block_reason"] == "SETTLEMENT_ORACLE_PRICE_NOT_JOINED"

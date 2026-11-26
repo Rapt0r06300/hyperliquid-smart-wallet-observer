@@ -268,6 +268,20 @@ def classify_manifest(manifest: Mapping[str, Any]) -> tuple[str, list[str]]:
         if isinstance(raw_transports, list):
             transports = {str(value).lower() for value in raw_transports if str(value).strip()}
 
+    if family == "copy_vault_broad_state":
+        semantics = {
+            str(value).lower()
+            for value in (provenance.get("timestamp_semantics") or [])
+        } if isinstance(provenance, Mapping) else set()
+        if manifest.get("source") != "hyperliquid_public_info":
+            reasons.append("BROAD_STATE_SOURCE_NOT_OFFICIAL")
+        if transports != {"https"}:
+            reasons.append("BROAD_STATE_HTTPS_REQUIRED")
+        if "receive_observation_time_only" not in semantics:
+            reasons.append("BROAD_STATE_RECEIVE_TIME_REQUIRED")
+        if manifest.get("proof_of_pnl_allowed") is not False:
+            reasons.append("BROAD_STATE_CANNOT_PROVE_PNL")
+
     if family == "capacity_tape":
         # Consistent hashes within a derived record do not verify its parent
         # immutable L2 shard. Never certify economic replay on derived-only
@@ -283,7 +297,7 @@ def classify_manifest(manifest: Mapping[str, Any]) -> tuple[str, list[str]]:
         elif reconciliation_status not in _CONTINUITY_RECONCILIATION:
             reasons.append("RECONCILIATION_MATCH_REQUIRED")
     elif (
-        family in {"copy_vault_positions", "copy_vault_selection"}
+        family in {"copy_vault_positions", "copy_vault_selection", "copy_vault_broad_state"}
         and transports
         and transports.issubset({"http", "https"})
         and "receive_observation_time_only" in {

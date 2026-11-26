@@ -12,7 +12,6 @@ from typing import Any
 from hl_observer.backtesting.copy_vault_book_index import (
     _first_at_or_after,
     _last_at_or_before,
-    _strict_nonnegative_int,
     _strict_positive_timestamp,
     index_des_carnets,
     liste_des_carnets,
@@ -28,6 +27,10 @@ from hl_observer.backtesting.copy_vault_execution_math import (
     _book_side,
     _walk_base_quantity,
     _walk_quote_notional,
+)
+from hl_observer.backtesting.copy_vault_funding_realise import (
+    champs_de_portage,
+    porte_de_funding,
 )
 from hl_observer.backtesting.copy_vault_protocol import (
     CHECKPOINT_COLLECTOR_PROTOCOL,
@@ -65,10 +68,6 @@ from hl_observer.economics.numeric import (
     decimal_value,
     float_not_above,
     float_not_below,
-)
-from hl_observer.backtesting.copy_vault_funding_realise import (
-    champs_de_portage,
-    porte_de_funding,
 )
 from hl_observer.normalization.l2_book import validate_l2_book_sides
 from hl_observer.simulation.economic_objective import STARTING_CAPITAL_USD
@@ -404,8 +403,8 @@ def execute_metaorder(
     direction = meta_direction * int(direction_multiplier)
     if direction not in (-1, 1):
         return None, "INVALID_DIRECTION"
-    # Frontiere de funding : ambigue -> refus ; interieure + taux observe -> chiffree ; sinon
-    # refus (defaut inchange). Regle et justification : `porte_de_funding`.
+    # Tout règlement traversé est refusé tant que le cashflow ne peut pas être valorisé
+    # avec quantité et oracle au point de règlement. Un taux seul n'ouvre pas la porte.
     carry, refus_funding = porte_de_funding(
         coin=str(entry.get("coin") or metaorder.get("coin") or ""),
         entree_ms=entry_ts_ms, sortie_ms=int(exit_book["ts_ms"]),

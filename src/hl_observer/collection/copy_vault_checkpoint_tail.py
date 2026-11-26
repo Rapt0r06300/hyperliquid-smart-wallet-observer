@@ -196,9 +196,17 @@ def coverage_receipt(counters: Mapping[str, Any], *, expected_lines: int) -> dic
         # Compteur absent des états antérieurs : absence = 0; présent mais invalide = reçu non prouvé.
         + (writer_outages if writer_outages_valid else 0)
     )
+    if not complete_counters:
+        reason = "COUNTERS_INCOMPLETE_OR_INVALID"
+    elif actual != expected_lines:
+        reason = "COMPLETE_LINES_MISMATCH"
+    elif gaps:
+        reason = "GAPS_PRESENT"
+    else:
+        reason = None
     return {
-        "status": "PROVEN" if complete_counters and actual == expected_lines and gaps == 0 else "UNMEASURABLE",
-        "reason": None if complete_counters else "COUNTERS_INCOMPLETE_OR_INVALID",
+        "status": "PROVEN" if reason is None else "UNMEASURABLE",
+        "reason": reason,
         "expected_lines": expected_lines,
         "complete_lines": actual,
         "checkpoints_captured": captured,
@@ -295,6 +303,7 @@ class CopyVaultCheckpointTail(VoiePreSignal):
             #    n'ouvre PAS le journal : le lecteur restera ferme, et la raison le dira. Aucune
             #    reparation retroactive : c'est exactement le cas du run du 16/11 (43 expirations,
             #    1 rotation) et il doit rester non certifiable.
+            rollover_reason: str | None = None
             if loaded.get("gap_windows_schema") != GAPS.SCHEMA_FENETRES:
                 anciens = [loaded["counters"].get(nom) for nom in GAPS.COMPTEUR_PAR_NATURE.values()]
                 if all(type(v) is int and v == 0 for v in anciens):
@@ -302,10 +311,16 @@ class CopyVaultCheckpointTail(VoiePreSignal):
                     loaded["gap_windows"] = []
                     loaded["gap_windows_dropped"] = 0
                 else:
-                    loaded["gap_windows_unavailable_reason"] = (
+                    rollover_reason = (
                         "TROUS_ANTERIEURS_SANS_FENETRE:" + ",".join(
                             f"{nom}={loaded['counters'].get(nom)}"
                             for nom in GAPS.COMPTEUR_PAR_NATURE.values()))
+            else:
+                coherent, reason = GAPS.journal_coherent(loaded)
+                if not coherent:
+                    rollover_reason = reason
+            if rollover_reason is not None:
+                return self._start_clean_gap_epoch(loaded, reason=rollover_reason)
             loaded.setdefault("last_input_received_ms", 0)
             if isinstance(loaded.get("gap_windows"), list):
                 # Un incident = un intervalle (union et sommes conservees) : voir GAPS.compacter.
@@ -340,6 +355,48 @@ class CopyVaultCheckpointTail(VoiePreSignal):
             state["input_file_identity"] = _file_identity(self.input_path.stat(), self.input_path)
         except OSError:
             state["input_file_identity"] = None
+        _atomic_write(self.state_path, state)
+        return state
+
+    def _start_clean_gap_epoch(self, previous: dict[str, Any], *, reason: str) -> dict[str, Any]:
+        """Archive an unprovable writer receipt and start a fresh, forward-only epoch.
+
+        Historical lines and counters stay in the archived state.  The new epoch starts at the
+        current ends of the live-fill and L2 tapes, so no old event can be silently recertified.
+        """
+
+        try:
+            offset = self.input_path.stat().st_size
+        except OSError:
+            offset = 0
+        try:
+            output_offset = self.output_path.stat().st_size
+        except OSError:
+            output_offset = 0
+        now_ms = self.clock_ms()
+        archived_state_path = self.state_path.with_name(
+            f"{self.state_path.name}.gap-epoch-{time.time_ns()}.json"
+        )
+        _atomic_write(archived_state_path, previous)
+        state = _default_state(
+            offset=offset,
+            output_offset=output_offset,
+            now_ms=now_ms,
+        )
+        try:
+            state["input_file_identity"] = _file_identity(
+                self.input_path.stat(), self.input_path
+            )
+        except OSError:
+            state["input_file_identity"] = None
+        state["gap_epoch_rollover"] = {
+            "reason": str(reason),
+            "previous_writer_run_id": previous.get("writer_run_id"),
+            "previous_clean_epoch_ms": previous.get("clean_epoch_ms"),
+            "preserved_state_path": str(archived_state_path.relative_to(self.root)),
+            "input_start_offset": offset,
+            "output_start_offset": output_offset,
+        }
         _atomic_write(self.state_path, state)
         return state
 
@@ -401,7 +458,7 @@ class CopyVaultCheckpointTail(VoiePreSignal):
             try:
                 row = json.loads(line.decode("utf-8"))
             except (UnicodeDecodeError, ValueError, TypeError):
-                self.state["counters"]["invalid_rejected"] += 1
+                self._record_invalid_input_rejection()
                 continue
             if isinstance(row, dict):
                 rows.append(row)
@@ -409,8 +466,28 @@ class CopyVaultCheckpointTail(VoiePreSignal):
                 if type(recu) is int and recu > int(self.state.get("last_input_received_ms") or 0):
                     self.state["last_input_received_ms"] = recu
             else:
-                self.state["counters"]["invalid_rejected"] += 1
+                self._record_invalid_input_rejection()
         return rows
+
+    def _record_invalid_input_rejection(self, received_at_ms: Any = None) -> None:
+        """Count and time-box rejected input; unknown timestamps quarantine since last good input."""
+        now_ms = int(self.clock_ms())
+        self.state["counters"]["invalid_rejected"] += 1
+        if type(received_at_ms) is int and 0 < received_at_ms <= now_ms:
+            start_ms = received_at_ms
+        else:
+            last_received = self.state.get("last_input_received_ms")
+            clean_epoch = self.state.get("clean_epoch_ms")
+            candidate = last_received if type(last_received) is int and last_received > 0 else clean_epoch
+            start_ms = candidate if type(candidate) is int and candidate > 0 else now_ms
+        GAPS.ajouter_fenetre(
+            self.state,
+            GAPS.fenetre(
+                GAPS.TROU_REJET_INVALIDE,
+                debut_ms=min(start_ms, now_ms),
+                fin_ms=max(start_ms, now_ms),
+            ),
+        )
 
     def _enqueue_checkpoints(self, additions: list[dict[str, Any]]) -> bool:
         """Admit one logical checkpoint batch or reject it visibly as a unit."""
@@ -446,7 +523,7 @@ class CopyVaultCheckpointTail(VoiePreSignal):
             fill_ts_ms = _strict_int(fill["ts_ms"], "ts_ms")
             received_at_ms = _strict_int(fill["received_at_ms"], "received_at_ms")
         except (KeyError, TypeError, ValueError, OverflowError):
-            self.state["counters"]["invalid_rejected"] += 1
+            self._record_invalid_input_rejection(fill.get("received_at_ms"))
             return
         if (
             fill.get("source") != "LIVE_WS"
@@ -458,7 +535,7 @@ class CopyVaultCheckpointTail(VoiePreSignal):
             or received_at_ms < fill_ts_ms
             or received_at_ms - fill_ts_ms > MAX_TARGET_LAG_MS
         ):
-            self.state["counters"]["invalid_rejected"] += 1
+            self._record_invalid_input_rejection(received_at_ms)
             return
         expected_direction = expected_open_direction(fill)
         if expected_direction is None:
@@ -758,6 +835,7 @@ class CopyVaultCheckpointTail(VoiePreSignal):
         collector_gap_count = receipt.get("gap_count")
         if type(collector_gap_count) is not int or collector_gap_count < 0:
             collector_gap_count = None
+        journal_coherent, journal_reason = GAPS.journal_coherent(self.state)
         return {
             "protocol": COMPANION_PROTOCOL,
             "identity_migration_reset": self.state.get("identity_migration_reset"),
@@ -768,6 +846,9 @@ class CopyVaultCheckpointTail(VoiePreSignal):
             "counters": counters,
             "collector_gap_count": collector_gap_count,
             "coverage_receipt_status": receipt["status"],
+            "coverage_receipt_reason": receipt["reason"],
+            "gap_journal_status": "PROVEN" if journal_coherent else "UNMEASURABLE",
+            "gap_journal_reason": journal_reason,
             "replay_evidence_complete": receipt["status"] == "PROVEN",
             "paper_read_only": True,
             "real_execution": False,

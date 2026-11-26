@@ -791,6 +791,18 @@ def test_l2_rejection_heartbeat_is_bounded_and_deterministic(monkeypatch):
     }
 
 
+def test_collector_error_context_keeps_repo_relative_windows_path(tmp_path):
+    path = tmp_path / "runtime" / "data" / "positions.json"
+    error = PermissionError(13, "Access is denied", str(path))
+
+    context = C._collector_error_context(error, tmp_path)
+
+    assert "PermissionError" in context
+    assert "positions.json" in context
+    assert str(tmp_path) not in context
+    assert len(context) <= 240
+
+
 def test_live_heartbeat_exports_l2_rejection_reasons(tmp_path, monkeypatch):
     emitted = {}
     monkeypatch.setattr(C.VI, "heartbeat", lambda *_args, **_kwargs: None)
@@ -822,8 +834,11 @@ def test_live_heartbeat_exports_l2_rejection_reasons(tmp_path, monkeypatch):
         },
     )
 
-    def capture_heartbeat(*_args, **kwargs):
+    real_battre = C.HB.battre
+
+    def capture_heartbeat(*args, **kwargs):
         emitted.update(kwargs)
+        real_battre(*args, **kwargs)
         raise asyncio.CancelledError
 
     monkeypatch.setattr(C.HB, "battre", capture_heartbeat)
@@ -835,6 +850,9 @@ def test_live_heartbeat_exports_l2_rejection_reasons(tmp_path, monkeypatch):
         "L2_BBO_INVALID": 1,
         "L2_TIMESTAMP_INVALID": 1,
     }
+    heartbeat_disque = C.HB.lire(tmp_path, "userfills-live")
+    assert heartbeat_disque["metriques"]["l2_reject_reasons"] == emitted["metriques"]["l2_reject_reasons"]
+    assert heartbeat_disque["metriques"]["l2_validation_rejections"] == 2
 
 
 def test_tape_copy_vault_refuse_overflow_capacite(tmp_path, monkeypatch):
@@ -1202,6 +1220,8 @@ def test_checkpoint_prefere_un_book_ws_reel_sans_appel_rest(tmp_path, monkeypatc
             "recv_mono": now_mono,
             "recv_wall_ms": now_wall,
             "resume": resume,
+            "connection_id": "test-ws-connection",
+            "l2_gap_epoch": 3,
         }]
     })
     monkeypatch.setattr(
@@ -1224,6 +1244,45 @@ def test_checkpoint_prefere_un_book_ws_reel_sans_appel_rest(tmp_path, monkeypatc
     assert row["metaorder_id"] == "mo-ws"
     assert row["collector_protocol"] == C.CHECKPOINT_COLLECTOR_PROTOCOL
     assert row["instrument_identity_schema"] == C.INSTRUMENT_IDENTITY_SCHEMA
+    assert row["connection_id"] == "test-ws-connection"
+    assert row["l2_gap_epoch"] == 3
+
+
+def test_checkpoint_ws_sans_identite_refuse_ws_et_replie_sur_info(tmp_path, monkeypatch):
+    now_mono = time.monotonic() * 1_000
+    now_wall = int(time.time() * 1_000)
+    monkeypatch.setattr(C, "_TAPE_BUFFER", {
+        "BTC": [{
+            "recv_mono": now_mono,
+            "recv_wall_ms": now_wall,
+            "resume": {
+                "bid": 99.0, "ask": 101.0, "book_exchange_time": now_wall,
+                "bids5": [[99.0, 2.0, 1]], "asks5": [[101.0, 2.0, 1]],
+            },
+            # Ancien buffer ou producteur incomplet : un tel frame ne peut pas
+            # être publié sous la source WS comme preuve de continuité.
+        }]
+    })
+    monkeypatch.setattr(C, "_COPY_VAULT_LAST_SAMPLE_MS", {})
+    monkeypatch.setattr(C, "_lecteur_l2_ondemand", lambda *_args, **_kwargs: {
+        "hl_bid": 99.5, "hl_ask": 100.5,
+        "received_ts_ms": now_wall, "exchange_ts_ms": now_wall - 5,
+        "bids": [(99.5, 2.0)], "asks": [(100.5, 3.0)],
+    })
+
+    result = asyncio.run(C._capture_copy_vault_checkpoint(tmp_path, {
+        "coin": "BTC", "metaorder_id": "mo-no-ws-identity", "stage": "REFERENCE",
+        "checkpoint_id": "mo-no-ws-identity:REFERENCE",
+        "target_mono_ms": now_mono - 10,
+        "target_wall_ms": now_wall - 10,
+        "attempts": 0,
+    }))
+
+    assert result["status"] == "CAPTURED_INFO"
+    row = json.loads((tmp_path / C.COPY_VAULT_L2_TAPE).read_text(encoding="utf-8"))
+    assert row["source"] == "HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT"
+    assert "connection_id" not in row
+    assert "l2_gap_epoch" not in row
 
 
 def test_checkpoint_ws_refuse_retombe_sur_info_public(tmp_path, monkeypatch):

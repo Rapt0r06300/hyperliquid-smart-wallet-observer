@@ -21,6 +21,7 @@ sys.path.insert(0, str(RACINE / "src"))
 sys.path.insert(0, str(RACINE / "tools"))
 
 from hl_observer.datasets.coffre_certifie import certifier_book, QUARANTAINE  # noqa: E402
+from hl_observer.collection.collecte_fiable import ajouter_atomique  # noqa: E402
 from telecharger_fills_lanes_github import _gh_reel, gh_disponible, telecharger_runs  # noqa: E402
 
 WORKFLOW = "copy-vault-l2-lanes.yml"
@@ -50,57 +51,84 @@ def _lire_jsonl(path: Path) -> list[dict]:
     return rows
 
 
-def fusionner_carnets(root: Path, artefacts: Path, *, now_ms: int | None = None) -> dict:
-    """Fusionne les carnets L2 locaux + ceux des lanes, validés et dédupliqués.
+# 26/11/2026 -- AJOUT SEUL, JAMAIS DE REECRITURE DU RUBAN VIVANT. Cette fusion reecrivait le ruban local (tri +
+# renommage) pendant que son collecteur l'alimentait. Mesure le 26/11 a 04:13 : `WinError 32` (le ruban etait ouvert
+# par un autre processus), et meme quand le renommage passait, les lignes ajoutees par le collecteur pendant la
+# fusion partaient dans le `.bak`, efface a la fusion suivante ; les lecteurs par decalage (explorer_autonome) et le
+# scelleur (suivi par prefixe) voyaient un fichier change sous eux. Desormais : le ruban local n'est QUE lu, les
+# lignes des lanes absentes sont AJOUTEES par `ajouter_atomique` (une ecriture que Windows place lui-meme en fin de
+# fichier ; le collecteur passe par la meme fonction).
 
-    Clé de dédup = (coin, exchange_ts_ms). On garde un carnet par instant d'echange.
+
+def _iter_jsonl(path: Path):
+    """Les objets JSON d'un fichier, un par un, sans tout charger."""
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except (ValueError, TypeError):
+                    continue
+                if isinstance(obj, dict):
+                    yield obj
+    except OSError:
+        return
+
+
+def _entier(valeur: Any) -> int:
+    try:
+        return int(valeur or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _carnet_certifie(row: dict, now_ms: int):
+    recv = row.get("received_at_ms")
+    return certifier_book(row, source=str(row.get("source") or "HYPERLIQUID_L2_WS"),
+                          now_ms=int(recv) if isinstance(recv, int) and recv > 0 else now_ms)
+
+
+def fusionner_carnets(root: Path, artefacts: Path, *, now_ms: int | None = None) -> dict:
+    """Ajoute au ruban local les carnets L2 des lanes, valides et absents (cle = coin, exchange_ts_ms).
+
+    Un carnet local n'est jamais reecrit ni retire ; seuls ses carnets VALIDES comptent comme deja presents (comme
+    l'ancienne fusion, qui gardait un carnet de lane quand le carnet local du meme instant etait invalide).
     ``now_ms`` injectable pour les tests (sinon l'instant courant).
     """
     import time as _t
     now_ms = int(now_ms if now_ms is not None else _t.time() * 1000)
     cible = root / CIBLE
-    sources: list[Path] = []
-    if cible.exists():
-        sources.append(cible)
+    connues: set[tuple[Any, Any]] = set()
+    locales = 0
+    for row in _iter_jsonl(cible):
+        locales += 1
+        norm, decision, _r = _carnet_certifie(row, now_ms)
+        if decision != QUARANTAINE:
+            connues.add((norm.get("coin"), norm.get("exchange_ts_ms")))
     lanes = sorted(p for p in artefacts.rglob(MOTIF) if p.resolve() != cible.resolve())
-    sources.extend(lanes)
-
-    par_cle: dict[tuple[Any, Any], dict] = {}
-    rejets = 0
-    entrees = 0
-    for src in sources:
-        for row in _lire_jsonl(src):
+    nouvelles: list[dict] = []
+    rejets = entrees = 0
+    for src in lanes:
+        for row in _iter_jsonl(src):
             entrees += 1
-            # valide/normalise le carnet ; borne la fraicheur sur les champs STOCKES
-            recv = row.get("received_at_ms")
-            norm, decision, _r = certifier_book(
-                row, source=str(row.get("source") or "HYPERLIQUID_L2_WS"),
-                now_ms=int(recv) if isinstance(recv, int) and recv > 0 else now_ms,
-            )
+            norm, decision, _r = _carnet_certifie(row, now_ms)
             if decision == QUARANTAINE:
                 rejets += 1
                 continue
             cle = (norm.get("coin"), norm.get("exchange_ts_ms"))
-            par_cle.setdefault(cle, norm)  # garde le premier vu pour cet instant
-
-    fusionnes = sorted(par_cle.values(),
-                       key=lambda r: (int(r.get("received_at_ms") or 0), str(r.get("coin"))))
-    doublons = entrees - len(fusionnes) - rejets
-
-    cible.parent.mkdir(parents=True, exist_ok=True)
-    tmp = cible.with_suffix(".jsonl.fusion.tmp")
-    with tmp.open("w", encoding="utf-8") as fh:
-        for row in fusionnes:
-            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
-    if cible.exists():
-        bak = cible.with_suffix(".jsonl.avant-fusion.bak")
-        if bak.exists():
-            bak.unlink()
-        cible.rename(bak)
-    tmp.rename(cible)
-    return {"lanes_trouvees": [str(p) for p in lanes], "entrees": entrees,
-            "rejets_qualite": rejets, "doublons_retires": max(0, doublons),
-            "total_final": len(fusionnes)}
+            if cle in connues:
+                continue
+            connues.add(cle)
+            nouvelles.append(norm)
+    nouvelles.sort(key=lambda r: (_entier(r.get("received_at_ms")), str(r.get("coin"))))
+    if nouvelles:
+        ajouter_atomique(cible, "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in nouvelles), fsync=True)
+    return {"mode": "AJOUT_SEUL", "lanes_trouvees": [str(p) for p in lanes], "entrees": entrees,
+            "locales": locales, "rejets_qualite": rejets, "ajoutees": len(nouvelles),
+            "doublons_retires": max(0, entrees - len(nouvelles) - rejets), "total_final": len(connues)}
 
 
 def _bbo_valide(r: dict, now_ms: int) -> bool:
@@ -117,38 +145,37 @@ def _bbo_valide(r: dict, now_ms: int) -> bool:
 
 
 def fusionner_bbo(root: Path, artefacts: Path, *, now_ms: int | None = None) -> dict:
-    """Fusionne les BBO locaux + ceux des lanes (schema v1), dédup (coin, exchange_ts)."""
+    """Ajoute au ruban BBO local les BBO des lanes (schema v1), valides et absents (cle = coin, exchange_ts_ms).
+
+    Meme regle que les carnets : AJOUT SEUL, le ruban local n'est que lu (voir la note au-dessus)."""
     import time as _t
     now_ms = int(now_ms if now_ms is not None else _t.time() * 1000)
     cible = root / CIBLE_BBO
-    sources: list[Path] = []
-    if cible.exists():
-        sources.append(cible)
-    sources.extend(sorted(p for p in artefacts.rglob(MOTIF_BBO) if p.resolve() != cible.resolve()))
-    par_cle: dict[tuple, dict] = {}
+    connues: set[tuple] = set()
+    locales = 0
+    for row in _iter_jsonl(cible):
+        locales += 1
+        if _bbo_valide(row, now_ms):
+            connues.add((row.get("coin"), row.get("exchange_ts_ms")))
+    nouvelles: list[dict] = []
     rejets = entrees = 0
-    for src in sources:
-        for row in _lire_jsonl(src):
+    for src in sorted(p for p in artefacts.rglob(MOTIF_BBO) if p.resolve() != cible.resolve()):
+        for row in _iter_jsonl(src):
             entrees += 1
             if not _bbo_valide(row, now_ms):
                 rejets += 1
                 continue
-            par_cle.setdefault((row.get("coin"), row.get("exchange_ts_ms")), row)
-    fusionnes = sorted(par_cle.values(), key=lambda r: (int(r.get("received_at_ms") or 0), str(r.get("coin"))))
-    cible.parent.mkdir(parents=True, exist_ok=True)
-    tmp = cible.with_suffix(".jsonl.fusion.tmp")
-    with tmp.open("w", encoding="utf-8") as fh:
-        for row in fusionnes:
-            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
-    if cible.exists():
-        bak = cible.with_suffix(".jsonl.avant-fusion.bak")
-        if bak.exists():
-            bak.unlink()
-        cible.rename(bak)
-    tmp.rename(cible)
-    return {"entrees": entrees, "rejets_qualite": rejets,
-            "doublons_retires": max(0, entrees - len(fusionnes) - rejets),
-            "total_final": len(fusionnes)}
+            cle = (row.get("coin"), row.get("exchange_ts_ms"))
+            if cle in connues:
+                continue
+            connues.add(cle)
+            nouvelles.append(row)
+    nouvelles.sort(key=lambda r: (_entier(r.get("received_at_ms")), str(r.get("coin"))))
+    if nouvelles:
+        ajouter_atomique(cible, "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in nouvelles), fsync=True)
+    return {"mode": "AJOUT_SEUL", "entrees": entrees, "locales": locales, "rejets_qualite": rejets,
+            "ajoutees": len(nouvelles), "doublons_retires": max(0, entrees - len(nouvelles) - rejets),
+            "total_final": len(connues)}
 
 
 def _lister_runs(gh, cwd: Path, limite: int) -> list[str]:

@@ -11,6 +11,10 @@ from hl_observer.economics.families import (
     build_copy_vault_contract,
     build_lead_lag_contract,
 )
+from hl_observer.simulation.economic_campaign_provenance import (
+    _sha256,
+    audit_frozen_dataset_provenance,
+)
 from hl_observer.simulation.economic_campaigns import (
     build_copy_campaign,
     build_cross_campaign,
@@ -33,6 +37,61 @@ def test_dataset_provenance_names_partial_hash_honestly(tmp_path: Path) -> None:
     assert len(result["dataset_fingerprint"]) == 64
     assert result["files"][0]["fingerprint_method"] == "FULL_SHA256"
     assert result["files"][1] == {"path": "missing.jsonl", "exists": False}
+
+
+def test_frozen_dataset_audit_allows_only_exact_full_hash_matches(tmp_path: Path) -> None:
+    data = tmp_path / "events.jsonl"
+    data.write_bytes(b'{"ts":1}\n')
+    frozen = {"freeze": {"dataset_provenance": dataset_provenance(tmp_path, ("events.jsonl",))}}
+
+    exact = audit_frozen_dataset_provenance(tmp_path, frozen)
+    assert exact["status"] == "EXACT_INPUT_MATCH"
+    assert exact["reproduction_allowed"] is True
+    assert exact["files"] == [{"path": "events.jsonl", "status": "MATCHED_FULL_SHA256"}]
+
+    data.write_bytes(b'{"ts":2}\n')
+    changed = audit_frozen_dataset_provenance(tmp_path, frozen)
+    assert changed["status"] == "FROZEN_INPUTS_MISMATCH"
+    assert changed["reproduction_allowed"] is False
+    assert changed["files"][0]["status"] == "INPUT_FINGERPRINT_MISMATCH"
+
+
+def test_frozen_dataset_audit_never_promotes_matching_edge_hash_to_exact(tmp_path: Path) -> None:
+    data = tmp_path / "large-tape.jsonl"
+    data.write_bytes(b"a" * 32)
+    digest, method = _sha256(data, full_limit_bytes=0)
+    frozen = {
+        "dataset_provenance": {
+            "files": [
+                {
+                    "path": "large-tape.jsonl",
+                    "exists": True,
+                    "size_bytes": data.stat().st_size,
+                    "fingerprint": digest,
+                    "fingerprint_method": method,
+                }
+            ]
+        }
+    }
+
+    audit = audit_frozen_dataset_provenance(tmp_path, frozen)
+
+    assert audit["status"] == "UNMEASURABLE_PARTIAL_FINGERPRINT"
+    assert audit["reproduction_allowed"] is False
+    assert audit["files"][0]["status"] == "MATCHED_PARTIAL_EDGE_SHA256"
+
+
+def test_frozen_dataset_audit_rejects_paths_outside_root(tmp_path: Path) -> None:
+    frozen = {
+        "dataset_provenance": {
+            "files": [{"path": "../outside.jsonl", "exists": False}]
+        }
+    }
+
+    audit = audit_frozen_dataset_provenance(tmp_path, frozen)
+
+    assert audit["reproduction_allowed"] is False
+    assert audit["files"][0]["status"] == "PATH_OUTSIDE_ROOT"
 
 
 def test_parameter_freeze_is_physical_and_immutable(tmp_path: Path) -> None:
@@ -581,7 +640,7 @@ def test_protocol_freeze_reuses_oldest_boundary_after_dataset_growth(tmp_path: P
     assert reused["parameters"]["walk_forward_bounds"]["oos_start_ms"] == 100
 
 
-def test_markdown_starts_each_family_with_exact_objective_verdict() -> None:
+def test_markdown_separates_proof_status_from_the_informational_daily_reference() -> None:
     rows = [
         {"family": "copy_vault", "objective_status": "NON_ATTEINT", "objective_reasons": []},
         {"family": "lead_lag", "objective_status": "NON_ATTEINT", "objective_reasons": []},
@@ -593,9 +652,11 @@ def test_markdown_starts_each_family_with_exact_objective_verdict() -> None:
     ]
     report = render_campaign_report(rows)
 
-    assert "Copy-Vault - OBJECTIF +5 USD / JOUR : NON_ATTEINT" in report
-    assert "Cross-Venue (Lead-Lag) - OBJECTIF +5 USD / JOUR : NON_ATTEINT" in report
-    assert "Arbitrage (Cross-Venue Dislocation v2) - OBJECTIF +5 USD / JOUR : NON_ATTEINT" in report
+    assert "Le repere historique de +5 USD nets/jour est informatif" in report
+    assert "Copy-Vault - STATUT DE PREUVE : NON_ATTEINT" in report
+    assert "Cross-Venue (Lead-Lag) - STATUT DE PREUVE : NON_ATTEINT" in report
+    assert "Arbitrage (Cross-Venue Dislocation v2) - STATUT DE PREUVE : NON_ATTEINT" in report
+    assert "Repere journalier utilise comme gate: False" in report
     assert "Carry OFF" in report
     assert "PnL net eligible a la preuve: NON ELIGIBLE A LA PREUVE" in report
 
@@ -606,7 +667,10 @@ def test_markdown_never_presents_provisional_positive_pnl_as_proven() -> None:
             {
                 "family": "copy_vault",
                 "objective_status": "NON_ATTEINT",
-                "objective_reasons": ["PARAMETERS_NOT_FROZEN_BEFORE_EVALUATION"],
+                "objective_reasons": [
+                    "PARAMETERS_NOT_FROZEN_BEFORE_EVALUATION",
+                    "TARGET_NET_USD_NOT_REACHED",
+                ],
                 "net_pnl_usd": 9.0,
                 "eligible_net_pnl_usd": None,
                 "parameters_frozen": False,
@@ -619,7 +683,9 @@ def test_markdown_never_presents_provisional_positive_pnl_as_proven() -> None:
 
     assert "PnL net observe (diagnostic): +9.000000 USD" in report
     assert "PnL net eligible a la preuve: NON ELIGIBLE A LA PREUVE" in report
-    assert "OBJECTIF +5 USD / JOUR : ATTEINT" not in report
+    assert "Raisons bloquantes: PARAMETERS_NOT_FROZEN_BEFORE_EVALUATION" in report
+    assert "Reperes informatifs non atteints: TARGET_NET_USD_NOT_REACHED" in report
+    assert "STATUT DE PREUVE : ATTEINT" not in report
 
 
 def test_markdown_separe_les_couts_de_preuve_des_couts_globaux() -> None:

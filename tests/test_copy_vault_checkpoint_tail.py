@@ -29,6 +29,77 @@ from hl_observer.collection.vault_fills_backfill import canonical_fill_id
 VAULT = "0x" + "a" * 40
 
 
+def test_missing_checkpoint_state_explains_closed_replay_gate(tmp_path: Path) -> None:
+    _, audit = load_observed_books(tmp_path)
+
+    receipt = audit["clean_epoch_receipt"]
+    assert receipt["receipt_valid"] is False
+    assert receipt["receipt_invalid_reason"] == "CHECKPOINT_STATE_MISSING"
+    assert audit["replay_grade_status"] == "UNMEASURABLE"
+
+
+def test_incoherent_legacy_gap_state_rolls_to_archived_forward_only_epoch(
+    tmp_path: Path,
+) -> None:
+    input_path = tmp_path / INPUT_RELPATH
+    output_path = tmp_path / OUTPUT_RELPATH
+    input_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    input_path.write_bytes(b"old-input\n")
+    output_path.write_bytes(b"old-output\n")
+
+    previous = checkpoint_module._default_state(
+        offset=0, output_offset=0, now_ms=1_000,
+    )
+    previous["counters"]["input_rotations"] = 1
+    state_path = tmp_path / STATE_RELPATH
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(json.dumps(previous), encoding="utf-8")
+
+    now = [2_000]
+    engine = CopyVaultCheckpointTail(
+        tmp_path,
+        fetch_book=lambda _coin: _book(now[0]),
+        clock_ms=lambda: now[0],
+    )
+
+    rollover = engine.state["gap_epoch_rollover"]
+    archived_path = tmp_path / rollover["preserved_state_path"]
+    archived = json.loads(archived_path.read_text(encoding="utf-8"))
+    assert archived["counters"]["input_rotations"] == 1
+    assert rollover["reason"].startswith("FENETRES_INCOMPLETES:")
+    assert engine.state["clean_epoch_ms"] == 2_000
+    assert engine.state["input_offset"] == input_path.stat().st_size
+    assert engine.state["output_start_offset"] == output_path.stat().st_size
+    assert checkpoint_module.GAPS.journal_coherent(engine.state) == (True, "OK")
+    assert engine.poll_once()["lines"] == 0, "l'ancienne entrée n'est pas rejouée après rollover"
+    now[0] += 1_000
+    _append(input_path, _fill(now[0], event="post-rollover-live"))
+    post_rollover = engine.poll_once()
+    assert post_rollover["lines"] == 1
+    assert post_rollover["gap_journal_status"] == "PROVEN"
+
+
+def test_checkpoint_output_offset_must_be_an_exact_nonnegative_integer(
+    tmp_path: Path,
+) -> None:
+    state = checkpoint_module._default_state(
+        offset=0, output_offset=0, now_ms=1_000,
+    )
+    state["updated_at_ms"] = 2_000
+    state["output_start_offset"] = "0"
+    state_path = tmp_path / STATE_RELPATH
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+
+    _, audit = load_observed_books(tmp_path)
+
+    receipt = audit["clean_epoch_receipt"]
+    assert receipt["receipt_valid"] is False
+    assert receipt["receipt_invalid_reason"] == "CHECKPOINT_OUTPUT_OFFSET_INVALID"
+    assert audit["replay_grade_status"] == "UNMEASURABLE"
+
+
 @pytest.mark.parametrize(
     "incident",
     ("checkpoints_expired", "pending_overflow_rejected", "input_rotations", "invalid_rejected"),
@@ -44,7 +115,23 @@ def test_recu_couverture_refuse_les_incidents_meme_si_lignes_completes(incident:
     counters[incident] = 1
     result = coverage_receipt(counters, expected_lines=10)
     assert result["status"] == "UNMEASURABLE"
+    assert result["reason"] == "GAPS_PRESENT"
     assert result["gap_count"] == 1
+
+
+def test_recu_couverture_explique_un_ecart_de_lignes_sans_inventer_un_trou() -> None:
+    counters = {
+        "complete_lines": 9, "checkpoints_captured": 20,
+        "reconnect_backfill_blocked": 0, "invalid_rejected": 0,
+        "input_rotations": 0, "checkpoints_expired": 0,
+        "pending_overflow_rejected": 0,
+    }
+
+    receipt = coverage_receipt(counters, expected_lines=10)
+
+    assert receipt["status"] == "UNMEASURABLE"
+    assert receipt["reason"] == "COMPLETE_LINES_MISMATCH"
+    assert receipt["gap_count"] == 0
 
 
 def test_recu_couverture_refuse_un_compteur_manquant_ou_invalide() -> None:
@@ -253,7 +340,40 @@ def test_checkpoint_rejette_les_marqueurs_snapshot_contradictoires(tmp_path: Pat
     assert result["counters"]["invalid_rejected"] == 1
     assert result["collector_gap_count"] == 1
     assert result["coverage_receipt_status"] == "UNMEASURABLE"
+    assert result["coverage_receipt_reason"] == "GAPS_PRESENT"
+    assert result["gap_journal_status"] == "PROVEN"
+    assert result["gap_journal_reason"] == "OK"
+    assert result["counters"]["invalid_rejected"] == engine.state["gap_windows"][-1]["n"]
     assert result["replay_evidence_complete"] is False
+
+
+def test_chargeur_compte_tous_les_trous_du_collecteur_dans_le_recu(tmp_path: Path) -> None:
+    now = [2_000]
+    engine = CopyVaultCheckpointTail(
+        tmp_path,
+        fetch_book=lambda _coin: None,
+        clock_ms=lambda: now[0],
+    )
+    fill = _fill(now[0], event="invalid-snapshot-in-loader")
+    fill["is_snapshot"] = True
+    _append(tmp_path / INPUT_RELPATH, fill)
+
+    engine.poll_once()
+    now[0] += 42 * 60_000
+    writer_result = engine.poll_once()
+    _, audit = load_observed_books(tmp_path, coins={"BTC"})
+
+    assert writer_result["counters"]["invalid_rejected"] == 1
+    assert writer_result["counters"]["writer_outages"] == 1
+    assert writer_result["collector_gap_count"] == 2
+    assert writer_result["coverage_receipt_status"] == "UNMEASURABLE"
+    assert writer_result["gap_journal_status"] == "PROVEN"
+    assert audit["clean_epoch_receipt"]["receipt_valid"] is True
+    assert audit["clean_epoch_receipt"]["gap_segmentation_reason"] == "OK"
+    assert (
+        audit["clean_epoch_receipt"]["collector_gap_count"]
+        == writer_result["collector_gap_count"]
+    )
 
 
 @pytest.mark.parametrize(
@@ -277,6 +397,27 @@ def test_checkpoint_rejette_direction_et_timestamps_non_stricts(
 
     assert result["captured"] == 0
     assert result["counters"]["invalid_rejected"] == 1
+    assert engine.state["gap_windows"][-1]["nature"] == checkpoint_module.GAPS.TROU_REJET_INVALIDE
+    assert result["gap_journal_status"] == "PROVEN"
+    assert result["gap_journal_reason"] == "OK"
+
+
+def test_checkpoint_quarantines_une_ligne_jsonl_corrompue_sans_horodatage(tmp_path: Path) -> None:
+    engine = CopyVaultCheckpointTail(tmp_path, fetch_book=lambda _coin: None, clock_ms=lambda: 2_000)
+    input_path = tmp_path / INPUT_RELPATH
+    input_path.parent.mkdir(parents=True, exist_ok=True)
+    input_path.write_bytes(b"{not-json}\n")
+
+    result = engine.poll_once()
+
+    assert result["counters"]["invalid_rejected"] == 1
+    assert result["gap_journal_status"] == "PROVEN"
+    assert engine.state["gap_windows"] == [{
+        "nature": checkpoint_module.GAPS.TROU_REJET_INVALIDE,
+        "debut_ms": 2_000,
+        "fin_ms": 2_000,
+        "n": 1,
+    }]
 
 
 def test_forward_fill_captures_reference_entry_and_real_exit_without_lookahead(
@@ -623,6 +764,9 @@ def test_file_replacement_is_recovered_and_SEGMENTS_the_clean_epoch(tmp_path: Pa
     assert result["counters"]["reconnect_backfill_blocked"] == 1
     assert result["collector_gap_count"] == 1
     assert result["coverage_receipt_status"] == "UNMEASURABLE"
+    assert result["coverage_receipt_reason"] == "GAPS_PRESENT"
+    assert result["gap_journal_status"] == "PROVEN"
+    assert result["gap_journal_reason"] == "OK"
     assert result["replay_evidence_complete"] is False
 
     # The replacement file's pre-existing contents are a reconnect snapshot or

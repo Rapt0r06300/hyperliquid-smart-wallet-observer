@@ -45,7 +45,16 @@ def test_local_quant_runner_is_cpu_first_and_hides_gpu_by_default(tmp_path: Path
     module.evaluate = evaluate
     sys.modules[module.__name__] = module
 
-    def optimizer(evaluer_params, espace, *, outil, n_trials, storage_dir, seed):
+    def optimizer(
+        evaluer_params,
+        espace,
+        *,
+        outil,
+        n_trials,
+        storage_dir,
+        seed,
+        max_wall_seconds,
+    ):
         metrics = evaluer_params({"threshold": 1.0}, budget=1.0)
         return {
             "disponible": True,
@@ -56,6 +65,11 @@ def test_local_quant_runner_is_cpu_first_and_hides_gpu_by_default(tmp_path: Path
             "trials_echoues": 0,
             "meilleur_score": 1.0,
             "meilleur": {"params": {"threshold": 1.0}, "metriques": metrics},
+            "wall_budget_seconds": max_wall_seconds,
+            "wall_budget_enforced": True,
+            "wall_budget_enforcement": "between_trials",
+            "wall_budget_exhausted": False,
+            "wall_budget_overrun": False,
         }
 
     summary = run_experiment(

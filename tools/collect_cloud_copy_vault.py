@@ -2396,6 +2396,7 @@ def broad_state_envelope(
     phase: str,
     receive_wall_ms: int,
     receive_mono_ns: int,
+    request_send_wall_ms: int | None = None,
 ) -> tuple[TickEnvelope | None, dict[str, Any] | None]:
     """Normalize one broad clearinghouseState observation into one compact family.
 
@@ -2407,10 +2408,9 @@ def broad_state_envelope(
     if parsed is None:
         return None, None
     fingerprint = _position_fingerprint(parsed)
-    try:
-        exchange_ts_ms = int(payload.get("time")) if payload.get("time") is not None else None
-    except (TypeError, ValueError, OverflowError):
-        exchange_ts_ms = None
+    # clearinghouseState is a state observation, not a discrete exchange event.
+    # Preserve any server-side `time` only in the immutable raw payload; the
+    # observation becomes available to this process at receive_wall_ms.
     summary = {
         "vault": str(vault).lower(),
         "phase": str(phase).upper(),
@@ -2432,7 +2432,7 @@ def broad_state_envelope(
             "phase": str(phase).upper(),
             "clearinghouseState": dict(payload),
         },
-        exchange_ts_ms=exchange_ts_ms,
+        exchange_ts_ms=None,
         received_ts_ms=receive_wall_ms,
         local_monotonic_ns=receive_mono_ns,
         connection_id=None,
@@ -2445,6 +2445,9 @@ def broad_state_envelope(
             "authenticated": False,
             "request_type": "clearinghouseState",
             "broad_sweep": True,
+            "timestamp_semantics": "receive_observation_time_only",
+            "request_send_wall_ms": request_send_wall_ms,
+            "request_receive_wall_ms": receive_wall_ms,
         },
         parsed_summary=summary,
     )
@@ -2491,6 +2494,7 @@ async def collect_broad_state(
                 try:
                     if pacer is not None:
                         await pacer.acquire_weight(2)
+                    request_send_wall_ms = int(time.time() * 1_000)
                     response = await client.post(
                         "/info",
                         json={"type": "clearinghouseState", "user": vault},
@@ -2515,6 +2519,7 @@ async def collect_broad_state(
                     phase=phase,
                     receive_wall_ms=receive_wall_ms,
                     receive_mono_ns=receive_mono_ns,
+                    request_send_wall_ms=request_send_wall_ms,
                 )
                 if envelope is None or state is None:
                     failures["UNPARSABLE_STATE"] += 1
@@ -4086,6 +4091,13 @@ def build_copy_vault_bundle(
             preliminary["reconciliation"] = {
                 "status": infer_reconciliation_status(preliminary),
                 "method": "observed_public_http_state_v1",
+            }
+        elif family == "copy_vault_broad_state":
+            preliminary["reconciliation"] = {
+                "status": infer_reconciliation_status(preliminary),
+                "method": "observed_public_http_clearinghouse_state_v1",
+                "forward_evidence_allowed": True,
+                "proof_of_pnl_allowed": False,
             }
         elif family in {"copy_vault_funding", "copy_vault_ledger"}:
             history_report = (historical_backfill or {}).get(vault, {})

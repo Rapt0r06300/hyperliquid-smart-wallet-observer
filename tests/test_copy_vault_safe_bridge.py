@@ -32,7 +32,7 @@ def _envelope(
                 "isSnapshot": is_snapshot,
                 "fills": [{
                     "coin": "BTC", "px": "100", "sz": "1", "side": "B",
-                    "time": 100_000, "dir": "Open Long",
+                    "time": 100_000, "dir": "Open Long", "closedPnl": "0.5",
                     "tid": 321, "oid": 123, "hash": "0x123", "fee": "0.01",
                 }],
             },
@@ -84,6 +84,47 @@ def _envelope(
     }
 
 
+def _broad_state_envelope() -> dict:
+    address = "0x" + "1" * 40
+    raw = json.dumps({
+        "vault": address,
+        "phase": "START",
+        "clearinghouseState": {
+            "marginSummary": {"accountValue": "1000"},
+            "assetPositions": [],
+            "time": 99_990,
+        },
+    }, sort_keys=True, separators=(",", ":"))
+    return {
+        "schema_version": "hypersmart.tick.v1",
+        "source_id": "hyperliquid_public_info",
+        "channel": "copy_vault_broad_state",
+        "instrument": "*",
+        "event_kind": "SNAPSHOT",
+        "exchange_ts_ms": None,
+        "received_ts_ms": 100_050,
+        "local_monotonic_ns": 12345678,
+        "connection_id": None,
+        "read_only": True,
+        "real_execution": False,
+        "raw_payload": raw,
+        "raw_sha256": _sha(raw.encode("utf-8")),
+        "parsed_summary": {"vault": address, "phase": "START", "nav_usd": 1000.0},
+        "provenance": {
+            "url": "https://api.hyperliquid.xyz/info",
+            "network": "mainnet",
+            "access": "read_only",
+            "transport": "https",
+            "authenticated": False,
+            "request_type": "clearinghouseState",
+            "broad_sweep": True,
+            "timestamp_semantics": "receive_observation_time_only",
+            "request_send_wall_ms": 100_000,
+            "request_receive_wall_ms": 100_050,
+        },
+    }
+
+
 def _corpus(
     tmp_path: Path, envelopes: list[dict], *, release_tag: str = "test-release",
     long_dataset_names: bool = False,
@@ -101,7 +142,8 @@ def _corpus(
         [("run_status", "COMPLETE"), ("active_catalog_sha256", catalog)],
     )
     db.execute(
-        "CREATE TABLE current_safe_shards (relative_path TEXT, bytes INTEGER, "
+        "CREATE TABLE current_safe_shards (dataset_id TEXT, release_tag TEXT, "
+        "relative_path TEXT, bytes INTEGER, "
         "sha256 TEXT, stat_dev INTEGER, stat_ino INTEGER, "
         "stat_mtime_ns INTEGER, stat_ctime_ns INTEGER)"
     )
@@ -114,8 +156,9 @@ def _corpus(
         canonical_windows_io_path(plain).write_bytes(data)
         gz = recovery / "usable" / "shards" / tag / (name + ".gz")
         canonical_windows_io_path(gz).parent.mkdir(parents=True, exist_ok=True)
-        with gzip.open(canonical_windows_io_path(gz), "wb") as stream:
-            stream.write(data)
+        # Stable gzip metadata makes the physical SAFE fixture identical across
+        # the archive-read and extracted-JSONL paths below.
+        canonical_windows_io_path(gz).write_bytes(gzip.compress(data, mtime=0))
         compressed = canonical_windows_io_path(gz).read_bytes()
         canonical_windows_io_path(plain.parent / (name + ".alina.json")).write_text(
             json.dumps({
@@ -127,8 +170,9 @@ def _corpus(
         )
         stat = canonical_windows_io_path(gz).stat()
         db.execute(
-            "INSERT INTO current_safe_shards VALUES (?,?,?,?,?,?,?)",
+            "INSERT INTO current_safe_shards VALUES (?,?,?,?,?,?,?,?,?)",
             (
+                name.removesuffix(".jsonl"), tag,
                 f"usable/shards/{tag}/{name}.gz", len(compressed), _sha(compressed),
                 stat.st_dev, stat.st_ino, stat.st_mtime_ns, stat.st_ctime_ns,
             ),
@@ -170,8 +214,25 @@ def test_bridge_uses_real_safe_envelopes_and_reports_provenance(tmp_path: Path) 
     assert fill["vault"] == "0xabc"
     assert fill["source"] == "LIVE_WS"
     assert fill["received_at_ms"] == 100_050
+    assert fill["isSnapshot"] is False
+    assert fill["is_snapshot"] is False
+    assert fill["closed_pnl"] == "0.5"
+    assert fill["source_quality_status"] == "SAFE"
+    assert fill["source_manifest_verified"] is True
+    assert fill["source_replay_compatible"] is True
+    assert fill["source_catalog_sha256"] == report["catalog_sha256"]
+    assert fill["source_shard_sha256"] == _sha(
+        (tmp_path / "runtime/recovery/full/usable/shards/test-release/safe-0.jsonl.gz").read_bytes()
+    )
+    assert fill["source_dataset_id"] == "safe-0"
+    assert fill["source_frame_number"] == 1
+    assert len(fill["source_frame_sha256"]) == 64
+    assert len(fill["source_raw_sha256"]) == 64
     assert book["causal_observation"] is True
     assert book["received_at_ms"] == 100_050
+    assert book["source_quality_status"] == "SAFE"
+    assert book["source_manifest_verified"] is True
+    assert book["source_replay_compatible"] is True
     assert len(book["bids5"]) == len(book["asks5"]) == 5
     # Prove downstream canonical source discovery and causal book loader consume
     # the generated payload, not just that its files exist.
@@ -180,7 +241,8 @@ def test_bridge_uses_real_safe_envelopes_and_reports_provenance(tmp_path: Path) 
 
     sources = discover_family_sources(workspace)
     assert {p.name for p in sources["copy_vault"]} == {
-        "vault_fills.jsonl", "vault_fills_live.jsonl", "copy_vault_l2_tape.jsonl",
+        "vault_fills.jsonl", "vault_fills_live.jsonl", "vault_snapshots.jsonl",
+        "copy_vault_l2_tape.jsonl",
     }
     books, book_audit = load_observed_books(workspace, coins={"BTC"})
     assert len(books.get("BTC", [])) == 1
@@ -188,6 +250,12 @@ def test_bridge_uses_real_safe_envelopes_and_reports_provenance(tmp_path: Path) 
     assert books["BTC"][0]["causal_observation"] is True
     assert books["BTC"][0]["connection_id"] == "live-test-1"
     assert books["BTC"][0]["l2_gap_epoch"] == 3
+    assert books["BTC"][0]["source_evidence_status"] == "STRUCTURALLY_COMPLETE"
+    from hl_observer.backtesting.copy_vault_chargeurs_safe import charger_leader_fills_safe
+
+    assert charger_leader_fills_safe(workspace) == [
+        {"vault": "0xabc", "ts_ms": 100_050, "closed_pnl": 0.5}
+    ]
     proof = json.loads((
         workspace / "runtime/reports/datasets/SELECTION_PROVENANCE.json"
     ).read_text())
@@ -284,8 +352,11 @@ def test_copy_vault_scope_keeps_only_active_registry_rows_in_memory(
 
     shard_paths = sorted((recovery / "usable" / "shards" / "test-release").glob("*.gz"))
     active = {
-        path: (path.stat().st_size, _sha(path.read_bytes()))
-        for path in shard_paths[:2]
+        path: (
+            path.stat().st_size, _sha(path.read_bytes()), f"safe-{index}",
+            "copy_vault_fills" if index == 0 else "copy_vault_l2", "test-release",
+        )
+        for index, path in enumerate(shard_paths[:2])
     }
     monkeypatch.setattr(
         unpack_module,
@@ -370,6 +441,31 @@ def test_bridge_excludes_snapshot_fills(tmp_path: Path) -> None:
         build_safe_copy_workspace(tmp_path)
 
 
+def test_bridge_propagates_collector_proof_when_live_snapshot_flag_is_omitted(
+    tmp_path: Path,
+) -> None:
+    from hl_observer.backtesting.copy_vault_chargeurs_safe import charger_leader_fills_safe
+
+    live = _envelope("copy_vault_fills")
+    message = json.loads(live["raw_payload"])
+    del message["data"]["isSnapshot"]
+    live["raw_payload"] = json.dumps(message, sort_keys=True, separators=(",", ":"))
+    live["raw_sha256"] = _sha(live["raw_payload"].encode("utf-8"))
+    live["parsed_summary"] = {"is_snapshot": False}
+    _corpus(tmp_path, [live, _envelope("copy_vault_l2")])
+
+    report = build_safe_copy_workspace(tmp_path)
+
+    workspace = Path(report["workspace"])
+    fill = json.loads((workspace / "runtime/data/vault_fills_live.jsonl").read_text())
+    assert fill["isSnapshot"] is False
+    assert fill["source_quality_status"] == "SAFE"
+    assert fill["source_frame_number"] == 1
+    assert charger_leader_fills_safe(workspace) == [
+        {"vault": "0xabc", "ts_ms": 100_050, "closed_pnl": 0.5}
+    ]
+
+
 def test_bridge_keeps_historical_snapshot_fills_separate_from_forward(tmp_path: Path) -> None:
     _corpus(tmp_path, [
         _envelope("copy_vault_fills"),
@@ -398,6 +494,76 @@ def test_bridge_keeps_historical_snapshot_fills_separate_from_forward(tmp_path: 
     assert report["counts"]["historical_fill_observations"] == 1
     assert provenance["snapshot_fills_train_only"] is True
     assert provenance["snapshot_fills_excluded_from_forward"] is True
+
+
+def test_bridge_materializes_only_proven_safe_broad_state_asof_nav(tmp_path: Path) -> None:
+    _corpus(tmp_path, [
+        _envelope("copy_vault_fills"),
+        _broad_state_envelope(),
+        _envelope("copy_vault_l2"),
+    ])
+
+    report = build_safe_copy_workspace(tmp_path)
+    workspace = Path(report["workspace"])
+    nav_path = workspace / "runtime/data/vault_snapshots.jsonl"
+    nav = json.loads(nav_path.read_text(encoding="utf-8"))
+    provenance = json.loads(
+        (workspace / "runtime/reports/datasets/SELECTION_PROVENANCE.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert report["counts"]["copy_vault_broad_state"] == 1
+    assert report["counts"]["snapshot_nav_observations"] == 1
+    assert nav["vault"] == "0x" + "1" * 40
+    assert nav["nav_usd"] == 1000.0
+    assert nav["ts_ms"] == 100_050  # availability is the observed receive time
+    assert nav["source_family"] == "copy_vault_broad_state"
+    assert nav["source_quality_status"] == "SAFE"
+    assert nav["source_manifest_verified"] is True
+    assert nav["source_replay_compatible"] is True
+    assert nav["source_frame_sha256"] == _sha(
+        (json.dumps(_broad_state_envelope(), sort_keys=True) + "\n").encode("utf-8")
+    )
+    assert provenance["economic_proof"] is False
+
+
+def test_safe_bridge_nav_is_consumable_by_copy_vault_asof_pipeline(tmp_path: Path) -> None:
+    """The bridge's verified output must pass the real downstream SAFE NAV reader."""
+    import tools.pipeline_copie_reel as pipeline
+
+    _corpus(tmp_path, [
+        _envelope("copy_vault_fills"),
+        _broad_state_envelope(),
+        _envelope("copy_vault_l2"),
+    ])
+    report = build_safe_copy_workspace(tmp_path)
+
+    assert pipeline._nav_history(Path(report["workspace"])) == {
+        "0x" + "1" * 40: [(100_050, 1_000.0)],
+    }
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ("receive_time", "raw_hash", "summary_nav", "exchange_time", "source_url"),
+)
+def test_broad_state_nav_rejects_incomplete_or_inconsistent_evidence(mutation: str) -> None:
+    record = _broad_state_envelope()
+    if mutation == "receive_time":
+        record["provenance"]["request_receive_wall_ms"] += 1
+    elif mutation == "raw_hash":
+        record["raw_sha256"] = "0" * 64
+    elif mutation == "summary_nav":
+        record["parsed_summary"]["nav_usd"] = 2_000.0
+    elif mutation == "exchange_time":
+        record["exchange_ts_ms"] = 99_990
+    else:
+        record["provenance"]["url"] = "https://example.invalid/info"
+
+    with pytest.raises(SafeBridgeError):
+        bridge_module._broad_state_snapshot(record)
+
 
 def test_bridge_rejects_corrupted_extracted_data(tmp_path: Path) -> None:
     recovery = _corpus(tmp_path, [_envelope("copy_vault_fills"), _envelope("copy_vault_l2")])
@@ -573,6 +739,22 @@ def test_bridge_l2_freshness_and_depth_match_canonical_replay_contract() -> None
         bridge_module._book(record)
 
 
+def test_bridge_preserves_top_level_l2_gap_epoch() -> None:
+    record = _envelope("copy_vault_l2")
+    record["parsed_summary"] = {}
+    record["l2_gap_epoch"] = 7
+
+    assert bridge_module._book(record)["l2_gap_epoch"] == 7
+
+
+def test_bridge_rejects_conflicting_l2_gap_epochs() -> None:
+    record = _envelope("copy_vault_l2")
+    record["l2_gap_epoch"] = 4
+
+    with pytest.raises(SafeBridgeError, match="conflicting L2 gap epoch"):
+        bridge_module._book(record)
+
+
 
 def test_bridge_records_bad_l2_as_quarantined_without_dropping_the_frame(tmp_path: Path) -> None:
     bad = _envelope("copy_vault_l2")
@@ -664,7 +846,13 @@ def _perimetre_copy_vault(tmp_path: Path, monkeypatch, unpacked_shards: int) -> 
     rapport = json.loads((recovery / "UNPACK_REPORT.json").read_text())
     rapport.update({"unpack_scope": "COPY_VAULT_ONLY", "unpacked_shards": unpacked_shards})
     (recovery / "UNPACK_REPORT.json").write_text(json.dumps(rapport), encoding="utf-8")
-    actifs = {recovery / "usable" / "shards" / "test-release" / f"safe-{n}.jsonl.gz": (1, "x") for n in (0, 1)}
+    actifs = {}
+    for n, family in ((0, "copy_vault_fills"), (1, "copy_vault_l2")):
+        archive = recovery / "usable" / "shards" / "test-release" / f"safe-{n}.jsonl.gz"
+        compressed = canonical_windows_io_path(archive).read_bytes()
+        actifs[archive] = (
+            len(compressed), _sha(compressed), f"safe-{n}", family, "test-release",
+        )
     monkeypatch.setattr(U, "_catalog_safe_bytes", lambda *a, **k: (actifs, ["copy_vault_fills", "copy_vault_l2"]))
     return recovery
 
@@ -683,6 +871,24 @@ def test_le_pont_refuse_un_perimetre_et_un_deballage_qui_divergent(tmp_path: Pat
 
     _perimetre_copy_vault(tmp_path, monkeypatch, unpacked_shards=3)
     with pytest.raises(SafeBridgeError, match="disagree"):
+        build_safe_copy_workspace(tmp_path)
+
+
+def test_bridge_rejects_safe_registry_identity_that_disagrees_with_catalog(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sqlite3
+
+    recovery = _perimetre_copy_vault(tmp_path, monkeypatch, unpacked_shards=2)
+    registry = sqlite3.connect(recovery / "SAFE_SHARDS.sqlite3")
+    registry.execute(
+        "UPDATE current_safe_shards SET sha256=? WHERE relative_path=?",
+        ("f" * 64, "usable/shards/test-release/safe-0.jsonl.gz"),
+    )
+    registry.commit()
+    registry.close()
+
+    with pytest.raises(SafeBridgeError, match="registry identity differs from catalog"):
         build_safe_copy_workspace(tmp_path)
 
 

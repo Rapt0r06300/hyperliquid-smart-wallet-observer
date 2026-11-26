@@ -15,26 +15,27 @@ from decimal import Decimal
 from typing import Any
 
 from hl_observer.backtesting import copy_vault_executable as cv
+from hl_observer.backtesting import copy_vault_funding_realise as _FUNDING_REEL
 from hl_observer.backtesting.copy_vault_book_index import index_des_carnets, liste_des_carnets
 from hl_observer.backtesting.copy_vault_execution_math import (
     _book_side,
     _walk_base_quantity,
 )
 from hl_observer.backtesting.copy_vault_protocol import (
-    COPY_DELAY_MS,
+    COPY_DELAY_MS,  # noqa: F401 -- re-exported for the freeze verifier's lazy import
     MAX_GROSS_EXPOSURE_USD,
-    MAX_REFERENCE_LAG_MS,
-    MAX_TARGET_LAG_MS,
+    MAX_REFERENCE_LAG_MS,  # noqa: F401 -- re-exported for the freeze verifier's lazy import
+    MAX_TARGET_LAG_MS,  # noqa: F401 -- re-exported for the freeze verifier's lazy import
     PAPER_EQUITY_USD,
+    PAPER_LEVERAGE,
 )
-from hl_observer.backtesting import copy_vault_funding_realise as _FUNDING_REEL
 from hl_observer.backtesting.copy_vault_v4_train import assess_train_variant
 from hl_observer.backtesting.train_statistics import (
     UTC_DAY_MS,
     summarize_complete_utc_days,
 )
 from hl_observer.config.frais_venues import frais_taker_bps
-from hl_observer.economics.numeric import decimal_value
+from hl_observer.economics.numeric import decimal_sum, decimal_value, float_not_above
 from hl_observer.funding.funding_times import next_funding_time_ms
 from hl_observer.normalization.l2_book import (
     normalize_l2_levels,
@@ -42,9 +43,12 @@ from hl_observer.normalization.l2_book import (
 )
 from hl_observer.simulation.economic_freeze_registry import parameter_hash
 
-SCHEMA_VERSION = "hypersmart.copy_vault_v21_frozen_evaluation.v3"
+SCHEMA_VERSION = "hypersmart.copy_vault_v21_frozen_evaluation.v5"
 PROTOCOL = "copy_v21_entry_capacity_daily_lock_v1"
 REFERENCE_DAILY_OBJECTIVE_USD = 5.0
+# Legacy frozen fields remain hash-verifiable; this protocol sentinel tells the
+# replay to disable the retired ceiling rather than merely raise its threshold.
+NO_PROFIT_CEILING_USD = 1_000_000.0
 FROZEN_COPY_DELAY_MS = 60_000
 FROZEN_MAX_REFERENCE_LAG_MS = 30_000
 FROZEN_MAX_TARGET_LAG_MS = 30_000
@@ -277,24 +281,15 @@ def _funding_receipt(
     trades: Sequence[Mapping[str, Any]],
     taux_funding_par_coin: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Reçu de funding. Deux modes, le défaut étant INCHANGÉ.
+    """
+Build a funding receipt, distinguishing exact zero from estimate-only crossings.
 
-    ``taux_funding_par_coin is None`` (DÉFAUT, comportement historique) : le funding n'est prouvé
-    que d'une seule façon — « zéro, car aucune position n'a traversé de règlement ». Un seul
-    franchissement rend ``UNMEASURABLE``.
-
-    Taux fournis : on délègue à ``copy_vault_funding_realise.funding_des_trades``, qui **MESURE**
-    le carry réellement payé/reçu en ``Decimal`` depuis les règlements OBSERVÉS du coffre
-    (``funding_history``), refuse tout intervalle autre que ``1h`` au lieu de le supposer, et
-    produit le statut canonique ``MEASURED`` déjà attendu par ``_reference_objective_status``.
-    Répare une porte pratiquement infranchissable : le funding se règle toutes les heures et les
-    horizons vont jusqu'à 1 h, donc exiger « aucun franchissement » rejetait structurellement les
-    candidats. FAIL-CLOSED conservé : une seule inconnue rend le total inconnu, jamais un zéro
-    favorable.
+With no crossed settlement, the verified hourly schedule can prove zero carry. With crossed settlements, observed rates multiplied by entry notional are only a proxy because the settlement-time position quantity and oracle price are not joined. Those receipts are ESTIMATED for diagnostics and cannot satisfy an economic proof; incomplete coverage remains UNMEASURABLE.
     """
 
     trade_count = len(trades)
     franchissements = 0
+    bornes_ambigues: list[dict[str, int | bool]] = []
     for index, trade in enumerate(trades):
         if not isinstance(trade, Mapping):
             return {
@@ -332,6 +327,10 @@ def _funding_receipt(
                 entry_raw - 1,
                 interval_hours=1,
             )
+            last_possible_funding_ms = next_funding_time_ms(
+                exit_raw - 1,
+                interval_hours=1,
+            )
         except (KeyError, TypeError, ValueError, ArithmeticError) as exc:
             return {
                 "status": "UNMEASURABLE",
@@ -357,41 +356,171 @@ def _funding_receipt(
                 "reason": "FUNDING_SETTLEMENT_RULE_UNMEASURABLE",
                 "trade_index": index,
             }
+        entree_ambigue = first_possible_funding_ms == entry_raw
+        sortie_ambigue = last_possible_funding_ms == exit_raw
+        if entree_ambigue or sortie_ambigue:
+            bornes_ambigues.append({
+                "trade_index": index,
+                "entry_boundary": entree_ambigue,
+                "exit_boundary": sortie_ambigue,
+            })
         if first_possible_funding_ms <= exit_raw:
-            franchissements += 1
-            if taux_funding_par_coin is None:
-                # Mode historique : un franchissement suffit à rendre le segment inéligible.
-                return {
-                    "status": "UNMEASURABLE",
-                    "carry_pnl_usd": None,
-                    "trade_count": trade_count,
-                    "settlement_crossing_count": 1,
-                    "settlement_interval_hours": 1,
-                    "reason": "ACCEPTED_TRADE_CROSSES_FUNDING_BOUNDARY",
-                    "trade_index": index,
-                    "funding_boundary_ms": first_possible_funding_ms,
-                }
-    if taux_funding_par_coin is not None and franchissements:
-        # On MESURE au lieu d'exiger l'absence. Le module dédié tient la comptabilité exacte
-        # (Decimal), refuse un intervalle inattendu, et ne rend MEASURED que si CHAQUE épisode
-        # est lisible : une seule inconnue emporte le verdict (jamais un zéro flatteur).
+            settlement_ms = first_possible_funding_ms
+            while settlement_ms <= exit_raw:
+                franchissements += 1
+                settlement_ms += 3_600_000
+    if bornes_ambigues:
+        return {
+            "status": "UNMEASURABLE",
+            "carry_pnl_usd": None,
+            "trade_count": trade_count,
+            "settlement_crossing_count": franchissements,
+            "settlement_interval_hours": 1,
+            "reason": "FUNDING_BOUNDARY_UNPRICED",
+            "ambiguous_boundary_trade_count": len(bornes_ambigues),
+            "ambiguous_boundary_trades": bornes_ambigues,
+        }
+    if franchissements and taux_funding_par_coin is None:
+        # No rate/oracle input means the settlement cannot be costed.
+        return {
+            "status": "UNMEASURABLE",
+            "carry_pnl_usd": None,
+            "trade_count": trade_count,
+            "settlement_crossing_count": franchissements,
+            "settlement_interval_hours": 1,
+            "reason": "ACCEPTED_TRADE_CROSSES_FUNDING_BOUNDARY",
+        }
+    if franchissements:
+        # Rates can support a proxy estimate only. Preserve the full crossed-settlement count
+        # even when one rate is missing, so downstream proof admission sees the exposure.
         mesure = _FUNDING_REEL.funding_des_trades(trades, taux_funding_par_coin)
         return {
             **mesure,
             "trade_count": trade_count,
             "settlement_interval_hours": 1,
+            "settlement_crossing_count": franchissements,
             "reason": mesure.get("reason")
-            or ("MEASURED_FROM_OBSERVED_FUNDING_HISTORY" if mesure.get("status") == "MEASURED"
-                else "FUNDING_RATE_NOT_OBSERVED_AT_CROSSED_BOUNDARY"),
+            or (
+                "SETTLEMENT_ORACLE_PRICE_NOT_JOINED"
+                if mesure.get("status") == "ESTIMATED"
+                else "FUNDING_RATE_NOT_OBSERVED_AT_CROSSED_BOUNDARY"
+            ),
+        }
+    mesure_zero = _FUNDING_REEL.funding_des_trades(
+        trades, taux_funding_par_coin or {}
+    )
+    if mesure_zero.get("status") != "MEASURED":
+        return {
+            **mesure_zero,
+            "trade_count": trade_count,
+            "settlement_interval_hours": 1,
+            "reason": mesure_zero.get("reason") or "FUNDING_PNL_UNMEASURABLE",
         }
     return {
+        **mesure_zero,
         "status": "MEASURED_ZERO_NO_SETTLEMENT_CROSSED",
         "carry_pnl_usd": 0.0,
+        "carry_pnl_usd_exact_decimal": "0",
         "trade_count": trade_count,
         "settlement_crossing_count": 0,
         "settlement_interval_hours": 1,
         "reason": "NO_EXECUTED_POSITIONS" if trade_count == 0 else "NO_SETTLEMENT_CROSSED",
     }
+
+
+def _attach_funding_net(
+    trades: Sequence[Mapping[str, Any]], receipt: Mapping[str, Any]
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Attach exact settled net, or separately labelled proxy diagnostics."""
+    estimate_only = receipt.get("status") == "ESTIMATED"
+    empty_score = [
+        {
+            **dict(trade),
+            "net_after_funding_usd": None,
+            "net_after_funding_usd_exact_decimal": None,
+            "funding_estimate_usd": None,
+            "funding_estimate_usd_exact_decimal": None,
+            "net_after_funding_estimate_usd": None,
+            "net_after_funding_estimate_usd_exact_decimal": None,
+        }
+        for trade in trades
+    ]
+    if receipt.get("status") not in {
+        "MEASURED",
+        "MEASURED_ZERO_NO_SETTLEMENT_CROSSED",
+        "ESTIMATED",
+    }:
+        return empty_score, str(
+            receipt.get("reason") or "FUNDING_RECEIPT_UNMEASURABLE"
+        )
+    rows = receipt.get("trade_receipts")
+    if (
+        not isinstance(rows, Sequence)
+        or isinstance(rows, (str, bytes, bytearray))
+        or len(rows) != len(trades)
+    ):
+        return empty_score, "FUNDING_TRADE_RECEIPTS_INCOMPLETE"
+    adjusted: list[dict[str, Any]] = []
+    for index, (trade, funding) in enumerate(zip(trades, rows, strict=True)):
+        if not isinstance(funding, Mapping) or funding.get("status") not in {
+            "MEASURED", "ESTIMATED"
+        }:
+            return empty_score, "FUNDING_TRADE_UNMEASURABLE"
+        if funding.get("trade_index") != index:
+            return empty_score, "FUNDING_TRADE_RECEIPT_ORDER_MISMATCH"
+        trade_id = trade.get("trade_id")
+        if trade_id is not None and funding.get("trade_id") != trade_id:
+            return empty_score, "FUNDING_TRADE_RECEIPT_ID_MISMATCH"
+        execution_net = decimal_value(
+            trade.get("net_pnl_usd_exact_decimal")
+            if trade.get("net_pnl_usd_exact_decimal") is not None
+            else trade.get("net_pnl_usd")
+        )
+        carry = decimal_value(
+            funding.get("estimated_carry_pnl_usd_exact_decimal")
+            if estimate_only and funding.get("status") == "ESTIMATED"
+            else funding.get("carry_pnl_usd_exact_decimal")
+        )
+        after_funding = (
+            decimal_sum((execution_net, carry))
+            if execution_net is not None and carry is not None
+            else None
+        )
+        after_float = (
+            float_not_above(after_funding) if after_funding is not None else None
+        )
+        carry_float = float_not_above(carry) if carry is not None else None
+        if after_funding is None or after_float is None or carry_float is None:
+            return empty_score, "FUNDING_ADJUSTED_NET_INVALID"
+        if estimate_only:
+            adjusted.append(
+                {
+                    **dict(trade),
+                    "funding_pnl_usd": None,
+                    "funding_pnl_usd_exact_decimal": None,
+                    "funding_estimate_usd": carry_float,
+                    "funding_estimate_usd_exact_decimal": format(carry, "f"),
+                    "net_after_funding_usd": None,
+                    "net_after_funding_usd_exact_decimal": None,
+                    "net_after_funding_estimate_usd": after_float,
+                    "net_after_funding_estimate_usd_exact_decimal": format(after_funding, "f"),
+                }
+            )
+        else:
+            adjusted.append(
+                {
+                    **dict(trade),
+                    "funding_pnl_usd": carry_float,
+                    "funding_pnl_usd_exact_decimal": format(carry, "f"),
+                    "net_after_funding_usd": after_float,
+                    "net_after_funding_usd_exact_decimal": format(after_funding, "f"),
+                    "funding_estimate_usd": None,
+                    "funding_estimate_usd_exact_decimal": None,
+                    "net_after_funding_estimate_usd": None,
+                    "net_after_funding_estimate_usd_exact_decimal": None,
+                }
+            )
+    return adjusted, None
 
 
 def _not_evaluated_funding_receipt(reason: str) -> dict[str, Any]:
@@ -407,6 +536,7 @@ def _not_evaluated_funding_receipt(reason: str) -> dict[str, Any]:
 
 def _aggregate_funding_receipt(
     segments: Mapping[str, Mapping[str, Any]],
+    taux_funding_par_coin: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     receipts: dict[str, dict[str, Any]] = {}
     for name in REQUIRED_FUNDING_SEGMENTS:
@@ -450,7 +580,11 @@ def _aggregate_funding_receipt(
             continue
 
         receipt = dict(raw)
-        if receipt.get("status") == "MEASURED_ZERO_NO_SETTLEMENT_CROSSED":
+        if receipt.get("status") in {
+            "MEASURED_ZERO_NO_SETTLEMENT_CROSSED",
+            "MEASURED",
+            "ESTIMATED",
+        }:
             trades = segment.get("trades")
             if not isinstance(trades, Sequence) or isinstance(
                 trades, (str, bytes, bytearray)
@@ -462,16 +596,27 @@ def _aggregate_funding_receipt(
                     "reason": "SEGMENT_TRADES_MISSING_FOR_FUNDING_PROOF",
                 }
             else:
-                verified = _funding_receipt(trades)
+                verified = _funding_receipt(trades, taux_funding_par_coin)
                 top_level_carry = segment.get("carry_pnl_usd")
                 if (
-                    verified.get("status")
-                    != "MEASURED_ZERO_NO_SETTLEMENT_CROSSED"
+                    verified.get("status") != receipt.get("status")
                     or receipt.get("carry_pnl_usd") != verified.get("carry_pnl_usd")
                     or receipt.get("trade_count") != verified.get("trade_count")
                     or receipt.get("settlement_crossing_count")
                     != verified.get("settlement_crossing_count")
                     or top_level_carry != verified.get("carry_pnl_usd")
+                    or receipt.get("estimated_carry_pnl_usd")
+                    != verified.get("estimated_carry_pnl_usd")
+                    or (
+                        receipt.get("carry_pnl_usd_exact_decimal") is not None
+                        and receipt.get("carry_pnl_usd_exact_decimal")
+                        != verified.get("carry_pnl_usd_exact_decimal")
+                    )
+                    or (
+                        receipt.get("estimated_carry_pnl_usd_exact_decimal") is not None
+                        and receipt.get("estimated_carry_pnl_usd_exact_decimal")
+                        != verified.get("estimated_carry_pnl_usd_exact_decimal")
+                    )
                 ):
                     receipt = {
                         **verified,
@@ -519,6 +664,9 @@ def _aggregate_funding_receipt(
     if any(receipt.get("status") == "UNMEASURABLE" for receipt in receipts.values()):
         status = "UNMEASURABLE"
         reason = "AT_LEAST_ONE_SEGMENT_FUNDING_UNMEASURABLE"
+    elif any(receipt.get("status") == "ESTIMATED" for receipt in receipts.values()):
+        status = "UNMEASURABLE"
+        reason = "SETTLEMENT_ORACLE_PRICE_NOT_JOINED"
     else:
         status = "NOT_EVALUATED"
         reason = "AT_LEAST_ONE_REQUIRED_SEGMENT_NOT_EVALUATED"
@@ -694,23 +842,26 @@ def _settle(
         sizing_scale = capital_scenario_usd / float(PAPER_EQUITY_USD)
     else:
         sizing_scale = 1.0
-    # #3 — levier cherchable : aligne la PREUVE sur le DÉPLOIEMENT. Défaut 1.0 (absent
-    # des params v21 incumbent) -> plafond = MAX_GROSS_EXPOSURE_USD inchangé. Un candidat
-    # peut proposer 10.0 (= moteur) : le plafond d'exposition brute monte en conséquence,
-    # donc la stratégie est jugée dans les conditions réelles. N'affecte PAS le scénario
-    # capacité (déjà piloté par capital_scenario_usd).
+    # Le levier est fixe dans le contrat paper. Un gel ou candidat qui demande
+    # davantage doit être refusé, jamais évalué avec une exposition supérieure.
+    raw_paper_leverage = params.get("paper_leverage", PAPER_LEVERAGE)
+    if isinstance(raw_paper_leverage, bool):
+        raise ValueError("COPY_V21_PAPER_LEVERAGE_OUTSIDE_CONTRACT")
     try:
-        _paper_leverage = float(params.get("paper_leverage", 1.0))
-    except (TypeError, ValueError, OverflowError):
-        _paper_leverage = 1.0
-    if not math.isfinite(_paper_leverage) or _paper_leverage <= 0.0:
-        _paper_leverage = 1.0
+        paper_leverage = float(raw_paper_leverage)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("COPY_V21_PAPER_LEVERAGE_OUTSIDE_CONTRACT") from exc
+    if not math.isfinite(paper_leverage) or paper_leverage != PAPER_LEVERAGE:
+        raise ValueError("COPY_V21_PAPER_LEVERAGE_OUTSIDE_CONTRACT")
     gross_exposure_limit = (
         float(capital_scenario_usd)
         if capital_scenario_usd is not None
-        else float(MAX_GROSS_EXPOSURE_USD) * _paper_leverage
+        else float(MAX_GROSS_EXPOSURE_USD)
     )
     scenario_params = dict(params)
+    profit_ceiling_active = (
+        float(params["daily_profit_lock_usd"]) < NO_PROFIT_CEILING_USD
+    )
     scenario_params["core_notional_usd"] = float(params["core_notional_usd"]) * sizing_scale
     scenario_params["probe_notional_usd"] = float(params["probe_notional_usd"]) * sizing_scale
     scenario_params["daily_profit_lock_usd"] = float(params["daily_profit_lock_usd"]) * sizing_scale
@@ -775,7 +926,9 @@ def _settle(
             ):
                 audit["DAILY_LOSS_CAP_REJECTED"] += 1
                 continue
-        locked = realized_today >= float(scenario_params["daily_profit_lock_usd"])
+        locked = profit_ceiling_active and realized_today >= float(
+            scenario_params["daily_profit_lock_usd"]
+        )
         notional_usd = (
             float(scenario_params["probe_notional_usd"])
             if locked
@@ -881,6 +1034,7 @@ def _settle(
             "sizing_state": sizing_state,
             "realized_daily_pnl_before_entry_usd": realized_today,
             "daily_profit_lock_usd": float(scenario_params["daily_profit_lock_usd"]),
+            "daily_profit_lock_active": profit_ceiling_active,
             "risk_exit_trigger": actual_trigger,
             "placebo_risk_exit_trigger": placebo_trigger,
             "frozen_policy": True,
@@ -920,6 +1074,17 @@ def _evaluate_segment(
     prepared_cache: dict[Any, Any] | None = None,
     taux_funding_par_coin: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    try:
+        frozen_profit_lock_usd = float(params["daily_profit_lock_usd"])
+    except (KeyError, TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("COPY_V21_DAILY_PROFIT_LOCK_INVALID") from exc
+    if not math.isfinite(frozen_profit_lock_usd) or frozen_profit_lock_usd <= 0.0:
+        raise ValueError("COPY_V21_DAILY_PROFIT_LOCK_INVALID")
+    # The immutable freeze is validated with its original hash above.  Apply the
+    # current no-profit-ceiling rule to a private evaluation copy; never rewrite
+    # the freeze or its recorded provenance.
+    effective_params = dict(params)
+    effective_params["daily_profit_lock_usd"] = NO_PROFIT_CEILING_USD
     # #5 — fenêtre causale (lag) cherchable : absente des params (v21 incumbent)
     # -> constante gelée -> comportement strictement identique.
     _reference_lag_ms = int(params.get("reference_lag_ms", FROZEN_MAX_REFERENCE_LAG_MS))
@@ -937,21 +1102,41 @@ def _evaluate_segment(
         candidates,
         books_by_coin,
         segment=segment,
-        params=params,
+        params=effective_params,
         capital_scenario_usd=capital_scenario_usd,
         execution_delay_ms=execution_delay_ms,
         fee_bps=fee_bps,
         max_reference_lag_ms=_reference_lag_ms,
     )
+    funding_receipt = _funding_receipt(trades, taux_funding_par_coin)
+    placebo_funding_receipt = _funding_receipt(
+        placebos, taux_funding_par_coin
+    )
+    scored_trades, funding_error = _attach_funding_net(
+        trades, funding_receipt
+    )
+    scored_placebos, placebo_funding_error = _attach_funding_net(
+        placebos, placebo_funding_receipt
+    )
+    funding_estimate_only = (
+        funding_receipt.get("status") == "ESTIMATED"
+        or placebo_funding_receipt.get("status") == "ESTIMATED"
+    )
+    scoring_value_key = (
+        "net_after_funding_estimate_usd"
+        if funding_estimate_only
+        else "net_after_funding_usd"
+    )
     assessment = assess_train_variant(
-        trades,
-        placebos,
+        scored_trades,
+        scored_placebos,
         trial_count=int(params["bonferroni_trial_count"]),
         # #6 — limites de concentration cherchables : absentes des params (cas v21
         # incumbent) -> None -> constantes gelées -> comportement strictement identique.
         max_coin_share=params.get("max_coin_trade_share"),
         max_vault_share=params.get("max_vault_trade_share"),
         max_top_positive_share=params.get("max_top_positive_share"),
+        net_value_key=scoring_value_key,
     )
     daily_mean = _mean_daily(assessment["statistics"])
     fully_covered_days = None
@@ -975,37 +1160,47 @@ def _evaluate_segment(
                 continue
             fully_covered_days.append(day)
     calendar_stats = summarize_complete_utc_days(
-        trades,
-        value_key="net_pnl_usd",
+        scored_trades,
+        value_key=scoring_value_key,
         timestamp_key="exit_ts_ms",
         complete_day_starts_ms=fully_covered_days,
     )
-    funding_receipt = _funding_receipt(trades, taux_funding_par_coin)
+    calendar_stats["valuation_status"] = (
+        "ESTIMATE_ONLY" if funding_estimate_only else "SETTLED_OR_NO_CROSSING"
+    )
     reasons = list(assessment["reasons"])
     if calendar_stats.get("status") != "MEASURABLE":
-        receipt_reason = (
-            funding_receipt.get("reason")
-            if funding_receipt.get("status") == "UNMEASURABLE"
-            else "SEGMENT_COVERAGE_UNMEASURABLE"
-        )
-        funding_receipt = {
-            **funding_receipt,
-            "status": "UNMEASURABLE",
-            "carry_pnl_usd": None,
-            "reason": receipt_reason,
-            "coverage_status": calendar_stats.get("status"),
-            "coverage_reason": calendar_stats.get("reason"),
-        }
         reasons.append("CALENDAR_PNL_UNMEASURABLE")
-    # Deux statuts seulement sont acceptables, et les deux sont des MESURES :
-    #  - zéro prouvé (aucun règlement franchi) : le cas historique ;
-    #  - carry mesuré depuis les taux OBSERVÉS, possible uniquement si un index funding a été
-    #    fourni ET que chaque frontière franchie avait un taux observé (sinon fail-closed).
+    if funding_error is not None:
+        reasons.append("FUNDING_PNL_UNMEASURABLE")
+    if placebo_funding_error is not None:
+        reasons.append("PLACEBO_FUNDING_PNL_UNMEASURABLE")
+    if funding_receipt.get("status") == "ESTIMATED":
+        reasons.append("FUNDING_SETTLEMENT_ORACLE_UNAVAILABLE")
+    if placebo_funding_receipt.get("status") == "ESTIMATED":
+        reasons.append("PLACEBO_FUNDING_SETTLEMENT_ORACLE_UNAVAILABLE")
     if funding_receipt["status"] not in {
         "MEASURED_ZERO_NO_SETTLEMENT_CROSSED",
         "MEASURED",
+        "ESTIMATED",
     }:
         reasons.append("FUNDING_PNL_UNMEASURABLE")
+    if placebo_funding_receipt["status"] not in {
+        "MEASURED_ZERO_NO_SETTLEMENT_CROSSED",
+        "MEASURED",
+        "ESTIMATED",
+    }:
+        reasons.append("PLACEBO_FUNDING_PNL_UNMEASURABLE")
+    # Per-trade funding is retained on the scored rows; the internal receipt list is
+    # intentionally omitted from the aggregate receipt to avoid duplicating large arrays.
+    funding_receipt = {
+        key: value for key, value in funding_receipt.items()
+        if key != "trade_receipts"
+    }
+    placebo_funding_receipt = {
+        key: value for key, value in placebo_funding_receipt.items()
+        if key != "trade_receipts"
+    }
     return {
         **assessment,
         "segment": segment,
@@ -1017,18 +1212,53 @@ def _evaluate_segment(
         "candidate_count": len(candidates),
         "candidate_audit": candidate_audit,
         "replay_audit": replay_audit,
-        "daily_mean_net_pnl_usd": calendar_stats["calendar_day_mean_net_pnl_usd"],
-        "active_day_mean_net_pnl_usd": daily_mean,
+        "daily_mean_net_pnl_usd": (
+            None if funding_estimate_only else calendar_stats["calendar_day_mean_net_pnl_usd"]
+        ),
+        "daily_mean_net_pnl_estimate_usd": (
+            calendar_stats["calendar_day_mean_net_pnl_usd"]
+            if funding_estimate_only
+            else None
+        ),
+        "daily_mean_net_pnl_status": (
+            "ESTIMATE_ONLY" if funding_estimate_only else calendar_stats.get("status")
+        ),
+        "active_day_mean_net_pnl_usd": None if funding_estimate_only else daily_mean,
+        "active_day_mean_net_pnl_estimate_usd": daily_mean if funding_estimate_only else None,
         "daily_mean_net_pnl_scope": "COMPLETE_UTC_CALENDAR_DAYS",
         "calendar_day_statistics": calendar_stats,
-        "trades": trades,
-        "placebos": placebos,
+        "trades": scored_trades,
+        "placebos": scored_placebos,
         "heldout_evaluated": True,
         "retuned_on_heldout": False,
+        "daily_profit_ceiling_policy": "NEUTRALIZED_AT_EVALUATION_V1",
+        "frozen_daily_profit_lock_usd": frozen_profit_lock_usd,
+        "effective_daily_profit_lock_base_usd": effective_params[
+            "daily_profit_lock_usd"
+        ],
+        "effective_parameters_sha256": parameter_hash(effective_params),
         "paper_read_only": True,
         "real_execution": False,
         "carry_pnl_usd": funding_receipt["carry_pnl_usd"],
+        "estimated_carry_pnl_usd": funding_receipt.get("estimated_carry_pnl_usd"),
         "funding_receipt": funding_receipt,
+        "placebo_carry_pnl_usd": placebo_funding_receipt.get("carry_pnl_usd"),
+        "placebo_estimated_carry_pnl_usd": placebo_funding_receipt.get(
+            "estimated_carry_pnl_usd"
+        ),
+        "placebo_funding_receipt": placebo_funding_receipt,
+        "execution_only_statistics": assessment.get(
+            "execution_statistics", assessment.get("statistics")
+        ),
+        "scoring_value_key": scoring_value_key,
+        "economic_valuation_status": (
+            "ESTIMATE_ONLY" if funding_estimate_only else "MEASURED_OR_NO_SETTLEMENT"
+        ),
+        "settlement_valuation_basis": (
+            "ENTRY_NOTIONAL_RATE_PROXY"
+            if funding_estimate_only
+            else "NO_SETTLEMENT_CROSSED_OR_EXACT_SETTLEMENT"
+        ),
         "economic_scope": "DIAGNOSTIC_ONLY" if capital_scenario_usd is not None else "FROZEN_POLICY_EVALUATION",
         "economically_proven": False if capital_scenario_usd is not None else None,
     }
@@ -1304,9 +1534,12 @@ def evaluate_frozen_v21(
     freeze_payload: Mapping[str, Any],
     *,
     input_audit: Mapping[str, Any] | None = None,
+    taux_funding_par_coin: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     freeze = _verified_freeze(freeze_payload)
     params = dict(freeze["parameters"])
+    effective_parameters = dict(params)
+    effective_parameters["daily_profit_lock_usd"] = NO_PROFIT_CEILING_USD
     bounds = dict(params.get("bounds") or {})
 
     validation = _evaluate_segment(
@@ -1317,6 +1550,7 @@ def evaluate_frozen_v21(
         end_ms=int(bounds["validation_end_ms"]),
         params=params,
         complete_utc_day_starts_ms=(input_audit or {}).get("complete_utc_day_starts_ms"),
+        taux_funding_par_coin=taux_funding_par_coin,
     )
     if validation["eligible"]:
         oos = _evaluate_segment(
@@ -1327,6 +1561,7 @@ def evaluate_frozen_v21(
             end_ms=int(bounds["oos_end_ms"]),
             params=params,
             complete_utc_day_starts_ms=(input_audit or {}).get("complete_utc_day_starts_ms"),
+            taux_funding_par_coin=taux_funding_par_coin,
         )
     else:
         oos = {
@@ -1350,6 +1585,7 @@ def evaluate_frozen_v21(
             end_ms=None,
             params=params,
             complete_utc_day_starts_ms=(input_audit or {}).get("complete_utc_day_starts_ms"),
+            taux_funding_par_coin=taux_funding_par_coin,
         )
     else:
         forward = {
@@ -1365,7 +1601,37 @@ def evaluate_frozen_v21(
         }
 
     funding_receipt = _aggregate_funding_receipt(
-        {"validation": validation, "oos": oos, "forward": forward}
+        {"validation": validation, "oos": oos, "forward": forward},
+        taux_funding_par_coin=taux_funding_par_coin,
+    )
+    def _uses_crossed_funding(segment: Mapping[str, Any]) -> bool:
+        receipt = segment.get("funding_receipt")
+        if not isinstance(receipt, Mapping):
+            return False
+        crossings = receipt.get("settlement_crossing_count")
+        return (
+            isinstance(crossings, int)
+            and not isinstance(crossings, bool)
+            and crossings > 0
+        )
+
+    funding_used = any(
+        _uses_crossed_funding(segment)
+        for segment in (validation, oos, forward)
+    )
+    funding_estimate_used = any(
+        isinstance(segment.get("funding_receipt"), Mapping)
+        and segment["funding_receipt"].get("status") == "ESTIMATED"
+        for segment in (validation, oos, forward)
+    )
+    funding_audit = (input_audit or {}).get("funding")
+    source_proof_allowed = (
+        funding_audit.get("economic_proof_allowed") is True
+        if isinstance(funding_audit, Mapping)
+        else False
+    )
+    funding_evidence_admissible = (
+        (source_proof_allowed or not funding_used) and not funding_estimate_used
     )
     proven = bool(
         validation.get("eligible") is True
@@ -1373,6 +1639,7 @@ def evaluate_frozen_v21(
         and forward.get("eligible") is True
         and funding_receipt.get("status")
         in {"MEASURED_ZERO_NO_SETTLEMENT_CROSSED", "MEASURED"}
+        and funding_evidence_admissible
     )
     capacity_diagnostic = (
         evaluate_capacity_scenarios(
@@ -1417,13 +1684,42 @@ def evaluate_frozen_v21(
         "reference_feature_policy": "LATEST_CAUSAL_RECEIVED_BOOK_AT_OR_BEFORE_SIGNAL_V1",
         "objective_net_usd_per_day": REFERENCE_DAILY_OBJECTIVE_USD,
         "objective_is_informational_reference_only": True,
-        "objective_status": _reference_objective_status(validation, oos, forward),
+        "objective_status": (
+            _reference_objective_status(validation, oos, forward)
+            if funding_evidence_admissible
+            else "UNMEASURABLE"
+        ),
         "economically_proven": proven,
+        "funding_proof_admission": {
+            "economic_proof_allowed": funding_evidence_admissible,
+            "crossed_funding_used": funding_used,
+            "funding_estimate_used": funding_estimate_used,
+            "source_admission_status": (
+                funding_audit.get("evidence_admission")
+                if isinstance(funding_audit, Mapping)
+                else "NOT_SPECIFIED"
+            ),
+            "reason": (
+                None
+                if funding_evidence_admissible
+                else (
+                    "SETTLEMENT_ORACLE_PRICE_NOT_JOINED"
+                    if funding_estimate_used
+                    else "FUNDING_SOURCE_NOT_SAFE_REPLAY_ADMISSIBLE"
+                )
+            ),
+        },
         "selection_scope": "IMMUTABLE_FROZEN_POLICY_SEQUENTIAL_HELDOUT",
         "heldout_used_for_retuning": False,
         "frozen_at_ms": int(freeze["frozen_at_ms"]),
         "parameters_sha256": str(freeze["parameters_sha256"]),
         "parameters": params,
+        "effective_parameters_sha256": parameter_hash(effective_parameters),
+        "evaluation_policy_overrides": {
+            "daily_profit_ceiling_policy": "NEUTRALIZED_AT_EVALUATION_V1",
+            "frozen_daily_profit_lock_usd": params["daily_profit_lock_usd"],
+            "effective_daily_profit_lock_base_usd": NO_PROFIT_CEILING_USD,
+        },
         "input_audit": dict(input_audit or {}),
         "validation": validation,
         "oos": oos,
@@ -1439,6 +1735,7 @@ def evaluate_frozen_v21(
 
 __all__ = [
     "CAPACITY_SCENARIOS_USD",
+    "NO_PROFIT_CEILING_USD",
     "PROTOCOL",
     "SCHEMA_VERSION",
     "evaluate_capacity_scenarios",

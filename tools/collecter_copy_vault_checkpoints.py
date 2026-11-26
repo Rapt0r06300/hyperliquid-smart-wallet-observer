@@ -13,6 +13,9 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "tools"))
 
 from heartbeat_collecteur import battre  # noqa: E402
+from hl_observer.collection.copy_vault_checkpoint_socle import (  # noqa: E402
+    copy_vault_checkpoint_source_lock,
+)
 from hl_observer.collection.copy_vault_checkpoint_tail import (  # noqa: E402
     COMPANION_PROTOCOL,
     CopyVaultCheckpointTail,
@@ -20,6 +23,13 @@ from hl_observer.collection.copy_vault_checkpoint_tail import (  # noqa: E402
 
 
 def run(root: Path, *, interval_s: float = 0.5) -> int:
+    # Acquire before reading the input identity/offset. A concurrent atomic lane
+    # merge either completes first or is deferred until this process exits.
+    with copy_vault_checkpoint_source_lock(root, wait_s=10.0):
+        return _run_locked(root, interval_s=interval_s)
+
+
+def _run_locked(root: Path, *, interval_s: float = 0.5) -> int:
     engine = CopyVaultCheckpointTail(root)
     wrapper_pid = os.getppid()
     while True:
@@ -36,6 +46,14 @@ def run(root: Path, *, interval_s: float = 0.5) -> int:
             "coverage_receipt_status": coverage_status,
             "stale": False,
         }
+        for metric in (
+            "coverage_receipt_reason",
+            "gap_journal_status",
+            "gap_journal_reason",
+        ):
+            value = result.get(metric)
+            if value is not None:
+                metriques[metric] = value
         for metric, counter in (
             ("checkpoint_expirations", "checkpoints_expired"),
             ("checkpoint_queue_rejections", "pending_overflow_rejected"),

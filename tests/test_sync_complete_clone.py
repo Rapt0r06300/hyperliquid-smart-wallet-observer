@@ -611,7 +611,15 @@ def test_safe_summary_reads_only_complete_catalog_bound_l2_admission(tmp_path):
         )
         connection.executemany(
             "INSERT INTO l2_certification_meta(key, value) VALUES (?, ?)",
-            [("run_status", "COMPLETE"), ("active_catalog_sha256", digest)],
+            [
+                ("run_status", "COMPLETE"),
+                ("active_catalog_sha256", digest),
+                ("catalog_indexed_shards", "3"),
+                ("catalog_audited_shards", "3"),
+                ("catalog_not_downloaded_locally", "0"),
+                ("catalog_limit_applied", "false"),
+                ("catalog_scope_complete", "true"),
+            ],
         )
         connection.execute("""
             CREATE TABLE l2_certifications(
@@ -662,6 +670,58 @@ def test_safe_summary_reads_only_complete_catalog_bound_l2_admission(tmp_path):
     assert summary["l2_blocked_shards"] == 1
     assert summary["l2_reanchored_segment_assets"] == 1
     assert summary["l2_catalog_sha256"] == digest
+    assert summary["l2_indexed_shards"] == 3
+    assert summary["l2_audited_shards"] == 3
+    assert summary["l2_scope_complete"] is True
+
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "UPDATE l2_certification_meta SET value='PARTIAL_LOCAL' "
+            "WHERE key='run_status'"
+        )
+        connection.execute(
+            "UPDATE l2_certification_meta SET value='2' "
+            "WHERE key='catalog_audited_shards'"
+        )
+        connection.execute(
+            "UPDATE l2_certification_meta SET value='1' "
+            "WHERE key='catalog_not_downloaded_locally'"
+        )
+        connection.execute(
+            "UPDATE l2_certification_meta SET value='false' "
+            "WHERE key='catalog_scope_complete'"
+        )
+    partial = module._read_safe_shard_summary(
+        report, expected_catalog_sha256=digest,
+    )
+    assert partial["l2_certification_status"] == "PARTIAL_LOCAL"
+    assert partial["l2_scope_complete"] is False
+    assert partial["l2_indexed_shards"] == 3
+    assert partial["l2_audited_shards"] == 2
+    assert partial["l2_not_downloaded_locally"] == 1
+    assert partial["l2_continuous_replayable_shards"] == 0
+
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "UPDATE l2_certification_meta SET value='COMPLETE' "
+            "WHERE key='run_status'"
+        )
+        connection.executemany(
+            "DELETE FROM l2_certification_meta WHERE key=?",
+            [
+                ("catalog_indexed_shards",),
+                ("catalog_audited_shards",),
+                ("catalog_not_downloaded_locally",),
+                ("catalog_limit_applied",),
+                ("catalog_scope_complete",),
+            ],
+        )
+    legacy = module._read_safe_shard_summary(
+        report, expected_catalog_sha256=digest,
+    )
+    assert legacy["l2_certification_status"] == "STALE_OR_INCOMPLETE"
+    assert legacy["l2_scope_complete"] is False
+    assert legacy["l2_continuous_replayable_shards"] == 0
 
 
 def test_github_restore_workflow_runs_real_full_worktree_clone_contract():

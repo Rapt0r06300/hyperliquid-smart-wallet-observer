@@ -1,14 +1,9 @@
-"""La porte funding : INCHANGÉE par défaut, MESURABLE quand les règlements observés sont fournis.
-
-Le reçu gelé ne savait prouver le funding que d'une façon — « zéro, car aucun règlement franchi ».
-Comme le funding se règle toutes les heures et que les horizons vont jusqu'à 1 h, un seul trade
-franchissant une frontière rendait le segment INÉLIGIBLE : porte pratiquement infranchissable
-(100 % des essais refusés). La mesure est déléguée à ``copy_vault_funding_realise``, qui existait
-déjà et n'était branché nulle part. Ces tests verrouillent les deux versants.
-"""
+"""Funding receipts distinguish measured no-crossing zero from proxy estimates."""
 from __future__ import annotations
 
 from decimal import Decimal
+
+import pytest
 
 import hl_observer.backtesting.copy_vault_v21_frozen as V21
 
@@ -41,20 +36,48 @@ def test_defaut_inchange_un_franchissement_reste_inmesurable():
     assert recu["carry_pnl_usd"] is None
 
 
+def test_sans_taux_compte_tous_les_reglements_de_tous_les_trades():
+    recu = V21._funding_receipt([
+        _trade(H + 10, 2 * H + 10),
+        _trade(3 * H + 10, 5 * H + 10),
+    ])
+    assert recu["status"] == "UNMEASURABLE"
+    assert recu["trade_count"] == 2
+    assert recu["settlement_crossing_count"] == 3
+    assert recu["reason"] == "ACCEPTED_TRADE_CROSSES_FUNDING_BOUNDARY"
+
+
+@pytest.mark.parametrize(
+    "trade",
+    [
+        _trade(H, H + 10),
+        _trade(H + 10, 2 * H),
+    ],
+)
+def test_borne_de_trade_sur_reglement_reste_inmesurable_meme_avec_taux(trade):
+    recu = V21._funding_receipt([trade], _taux({2: "0.001"}))
+    assert recu["status"] == "UNMEASURABLE"
+    assert recu["reason"] == "FUNDING_BOUNDARY_UNPRICED"
+    assert recu["settlement_crossing_count"] == 1
+    assert recu["ambiguous_boundary_trade_count"] == 1
+
+
 def test_defaut_inchange_zero_prouve_sans_franchissement():
     recu = V21._funding_receipt([_trade(H + 10, H + 20)])
     assert recu["status"] == "MEASURED_ZERO_NO_SETTLEMENT_CROSSED"
     assert recu["carry_pnl_usd"] == 0.0
 
 
-def test_avec_reglements_observes_le_franchissement_devient_mesure():
-    """Le cas qui bloquait tout : un trade franchit une frontière -> désormais MESURÉ."""
+def test_rates_observes_ne_remplacent_pas_oracle_et_quantite_au_reglement():
+    """Taux observé x notionnel d'entrée reste une estimation, pas un carry mesuré."""
     recu = V21._funding_receipt([_trade(H + 10, 2 * H + 10)], _taux({2: "0.001"}))
-    assert recu["status"] == "MEASURED"                       # statut CANONIQUE du dépôt
-    assert recu["carry_pnl_usd"] is not None
+    assert recu["status"] == "ESTIMATED"
+    assert recu["carry_pnl_usd"] is None
+    assert recu["estimated_carry_pnl_usd"] is not None
     assert recu["settlement_crossing_count"] >= 1
     assert recu["provenance"]                                  # la provenance est dite, pas supposée
-    assert "carry_pnl_usd_exact_decimal" in recu               # comptabilité exacte conservée
+    assert recu["settlement_valuation_basis"] == "ENTRY_NOTIONAL_RATE_PROXY"
+    assert recu["reason"] == "SETTLEMENT_ORACLE_PRICE_NOT_JOINED"
 
 
 def test_fail_closed_hors_fenetre_lue_ne_devient_jamais_zero():
@@ -66,6 +89,7 @@ def test_fail_closed_hors_fenetre_lue_ne_devient_jamais_zero():
     recu = V21._funding_receipt([_trade(20 * H + 10, 21 * H + 10)], _taux({2: "0.001"}))
     assert recu["status"] == "UNMEASURABLE"
     assert recu["carry_pnl_usd"] is None
+    assert recu["settlement_crossing_count"] == 1
     assert recu.get("reasons")                                 # on dit COMBIEN et POURQUOI
 
 
@@ -81,20 +105,23 @@ def test_un_seul_episode_inconnu_emporte_le_verdict():
     taux = _taux({2: "0.001"})
     bon = _trade(H + 10, 2 * H + 10)
     inconnu = _trade(20 * H + 10, 21 * H + 10)        # hors fenetre lue
-    assert V21._funding_receipt([bon], taux)["status"] == "MEASURED"
+    assert V21._funding_receipt([bon], taux)["status"] == "ESTIMATED"
     assert V21._funding_receipt([bon, inconnu], taux)["status"] == "UNMEASURABLE"
 
 
-def test_la_porte_accepte_exactement_les_deux_statuts_mesures():
-    """Le segment n'accepte que des MESURES, et les mêmes que `_reference_objective_status`."""
-    acceptes = {"MEASURED_ZERO_NO_SETTLEMENT_CROSSED", "MEASURED"}
+def test_les_recus_separent_zero_estimation_et_inconnu():
+    """Un franchissement n'est jamais confondu avec un carry réglé."""
     produits = {
         V21._funding_receipt([_trade(H + 10, H + 20)])["status"],
         V21._funding_receipt([_trade(H + 10, 2 * H + 10)])["status"],
         V21._funding_receipt([_trade(H + 10, 2 * H + 10)], _taux({2: "0.001"}))["status"],
         V21._funding_receipt([_trade(9 * H + 10, 10 * H + 10)], _taux({2: "0.001"}))["status"],
     }
-    assert produits == acceptes | {"UNMEASURABLE"}
+    assert produits == {
+        "MEASURED_ZERO_NO_SETTLEMENT_CROSSED",
+        "UNMEASURABLE",
+        "ESTIMATED",
+    }
 
 
 def test_trade_malforme_reste_inmesurable_avec_ou_sans_taux():
@@ -103,13 +130,12 @@ def test_trade_malforme_reste_inmesurable_avec_ou_sans_taux():
     assert V21._funding_receipt(casse, _taux({2: "0.001"}))["status"] == "UNMEASURABLE"
 
 
-def test_le_garde_de_couverture_distingue_non_lu_et_rien_a_payer():
-    """Hors de la fenêtre LUE : inconnu. Dans la fenêtre, entre deux règlements : zéro MESURÉ."""
-    # un seul règlement connu -> fenêtre lue réduite à cet instant : l'épisode en sort
+def test_une_rate_presente_ne_devient_pas_pour_autant_un_pnl_regle():
+    """Un taux connu au crossing ne suffit pas à prouver sa valeur en USD."""
     etroit = {"BTC": [(2 * H, Decimal("0.001"))]}
     hors = V21._funding_receipt([_trade(H + 10, 2 * H + 10)], etroit)
-    assert hors["status"] == "UNMEASURABLE"
-    assert "FUNDING_RATES_DO_NOT_COVER_EPISODE" in (hors.get("reasons") or {})
+    assert hors["status"] == "ESTIMATED"
+    assert hors["reason"] == "SETTLEMENT_ORACLE_PRICE_NOT_JOINED"
     # dans la fenêtre lue mais sans règlement traversé -> 0 MESURÉ, pas une ignorance
     dedans = V21._funding_receipt([_trade(3 * H + 10, 3 * H + 20)], _taux({2: "0.001"}))
     assert dedans["status"] == "MEASURED_ZERO_NO_SETTLEMENT_CROSSED"   # mesure, pas ignorance

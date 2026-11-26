@@ -30,8 +30,6 @@ from hl_observer.backtesting.copy_vault_protocol import (  # noqa: E402
     CHECKPOINT_COLLECTOR_PROTOCOL,
     UNBOUND_L2_SOURCE_PROTOCOL,
 )
-from progress_display import ProgressTracker  # noqa: E402
-
 try:
     import collecteurs_balayage as _balayage  # noqa: E402
 except ImportError:  # importe comme `tools.watch_economic_collectors`
@@ -165,6 +163,9 @@ def detail_des_trous(root: Path) -> dict[str, Any] | None:
         "invalid_rejected",
         "writer_outages",
         "coverage_receipt_status",
+        "coverage_receipt_reason",
+        "gap_journal_status",
+        "gap_journal_reason",
         "stale",
     )
     return {clef: metrics[clef] for clef in cles_detail if clef in metrics}

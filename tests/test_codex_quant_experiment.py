@@ -17,6 +17,7 @@ from hl_observer.research.experiment_protocol import (
     write_goal_state_atomic,
     write_summary_atomic,
 )
+from tools import outils_recherche
 from tools.codex_quant_experiment import run_experiment
 
 
@@ -71,6 +72,9 @@ def test_candidate_champion_requires_oos_paths():
         ("data_fingerprint", ""),
         ("cost_model", {}),
         ("split_config", {}),
+        ("budget", {"max_trials": 1, "max_wall_seconds": float("inf")}),
+        ("budget", {"max_trials": 1, "max_wall_seconds": float("nan")}),
+        ("budget", {"max_trials": 1, "max_wall_seconds": 10**1000}),
     ],
 )
 def test_spec_rejects_invalid_scientific_contract(field: str, value: object) -> None:
@@ -156,7 +160,16 @@ def test_run_experiment_delegates_trials_and_writes_compact_summary(tmp_path: Pa
     spec = ExperimentSpec.from_mapping(spec_payload())
     seen: dict = {}
 
-    def optimizer(evaluer_params, espace, *, outil, n_trials, storage_dir, seed):
+    def optimizer(
+        evaluer_params,
+        espace,
+        *,
+        outil,
+        n_trials,
+        storage_dir,
+        seed,
+        max_wall_seconds,
+    ):
         seen.update(
             {
                 "space": espace,
@@ -164,6 +177,7 @@ def test_run_experiment_delegates_trials_and_writes_compact_summary(tmp_path: Pa
                 "n_trials": n_trials,
                 "storage_dir": Path(storage_dir),
                 "seed": seed,
+                "max_wall_seconds": max_wall_seconds,
             }
         )
         metrics = evaluer_params({"score": 3.0}, budget=1.0)
@@ -175,6 +189,11 @@ def test_run_experiment_delegates_trials_and_writes_compact_summary(tmp_path: Pa
             "trials_termines": n_trials - 3,
             "trials_prunes": 2,
             "trials_echoues": 1,
+            "wall_budget_seconds": max_wall_seconds,
+            "wall_budget_enforced": True,
+            "wall_budget_enforcement": "between_trials",
+            "wall_budget_exhausted": False,
+            "wall_budget_overrun": False,
             "meilleur_score": 3.5,
             "meilleur": {"params": {"score": 3.0}, "metriques": metrics},
             "cpu_s": 0.25,
@@ -191,11 +210,16 @@ def test_run_experiment_delegates_trials_and_writes_compact_summary(tmp_path: Pa
     assert seen["engine"] == "tpe"
     assert seen["n_trials"] == 24
     assert seen["seed"] == 17
+    assert seen["max_wall_seconds"] == 120.0
     assert seen["space"] == spec.search_space
     assert summary["trials"] == {"proposed": 24, "completed": 21, "pruned": 2, "failed": 1}
     assert summary["verdict"] == "FREEZE_CANDIDATE"
     assert summary["best_candidate"]["metrics"]["net_usd"] == 3.0
     assert summary["cache_hit"] is False
+    assert summary["wall_budget_enforced"] is True
+    assert summary["wall_budget_enforcement"] == "between_trials"
+    assert summary["wall_budget_exhausted"] is False
+    assert summary["wall_budget_overrun"] is False
 
     result_path = Path(summary["artifacts"]["summary"])
     detail_path = Path(summary["artifacts"]["optimizer_result"])
@@ -209,6 +233,102 @@ def test_run_experiment_delegates_trials_and_writes_compact_summary(tmp_path: Pa
     state = json.loads(state_path.read_text(encoding="utf-8"))
     assert state["last_result_signature"] == spec.signature()
     assert state["next_action"] == "review_result_summary"
+
+
+def test_wall_budget_partial_search_cannot_freeze_candidate(tmp_path: Path) -> None:
+    _install_fake_evaluator()
+    spec = ExperimentSpec.from_mapping(spec_payload())
+
+    def optimizer(
+        evaluer_params,
+        espace,
+        *,
+        outil,
+        n_trials,
+        storage_dir,
+        seed,
+        max_wall_seconds,
+    ):
+        assert max_wall_seconds == 120.0
+        metrics = evaluer_params({"score": 3.0}, budget=1.0)
+        return {
+            "disponible": True,
+            "lance": True,
+            "trials_proposes": 1,
+            "trials_termines": 1,
+            "trials_prunes": 0,
+            "trials_echoues": 0,
+            "meilleur_score": 3.0,
+            "meilleur": {"params": {"score": 3.0}, "metriques": {
+                **metrics, "candidate_verdict": "FREEZE_CANDIDATE"
+            }},
+            "wall_budget_seconds": max_wall_seconds,
+            "wall_budget_enforced": True,
+            "wall_budget_enforcement": "between_trials",
+            "wall_budget_exhausted": True,
+            "wall_budget_overrun": True,
+        }
+
+    summary = run_experiment(
+        spec,
+        runtime_root=tmp_path / "codex_experiments",
+        optimizer=optimizer,
+        current_sha="a" * 40,
+    )
+
+    assert summary["verdict"] == "ITERATE"
+    assert "budget reached or exceeded" in summary["reasons"][0]
+    assert summary["wall_budget_exhausted"] is True
+    assert summary["wall_budget_overrun"] is True
+
+
+def test_run_refuses_optimizer_that_cannot_enforce_wall_budget(tmp_path: Path) -> None:
+    _install_fake_evaluator()
+    spec = ExperimentSpec.from_mapping(spec_payload())
+
+    def unbounded_optimizer(evaluer_params, espace, *, outil, n_trials, storage_dir, seed):
+        raise AssertionError("unbounded optimizer must not be called")
+
+    with pytest.raises(SpecValidationError, match="cannot enforce budget.max_wall_seconds"):
+        run_experiment(
+            spec,
+            runtime_root=tmp_path / "codex_experiments",
+            optimizer=unbounded_optimizer,
+            current_sha="a" * 40,
+        )
+    assert not (tmp_path / "codex_experiments" / spec.experiment_id).exists()
+
+
+def test_pure_optimizer_stops_between_trials_and_generates_lazily(monkeypatch) -> None:
+    ticks = iter((0.0, 0.0, 2.0, 2.0))
+    monkeypatch.setattr(outils_recherche, "_optuna", lambda: None)
+    monkeypatch.setattr(outils_recherche.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(
+        outils_recherche,
+        "objectif_multicritere",
+        lambda metrics: float(metrics["net_usd"]),
+    )
+    calls = {"count": 0}
+
+    def evaluate(params, *, budget=1.0):
+        calls["count"] += 1
+        return {"net_usd": float(params["threshold"]) * budget}
+
+    result = outils_recherche.optimiser(
+        evaluate,
+        {"threshold": [1.0, 2.0, 3.0]},
+        outil="random",
+        n_trials=100_000,
+        seed=7,
+        max_wall_seconds=1.0,
+    )
+
+    assert calls["count"] == 1
+    assert result["trials_proposes"] == 1
+    assert result["trials_termines"] == 1
+    assert result["wall_budget_enforced"] is True
+    assert result["wall_budget_exhausted"] is True
+    assert result["wall_budget_enforcement"] == "between_trials"
 
 
 def test_identical_signature_uses_cache_without_rerun(tmp_path: Path) -> None:

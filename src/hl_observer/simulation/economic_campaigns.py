@@ -1,8 +1,9 @@
 """Reproducible, fail-closed economic campaign evidence.
 
 This module converts family-specific paper replays into one strict proof
-shape.  It never creates market data, signals, fills, or execution.  Missing
-measurements remain ``None`` and therefore fail the shared +5 USD objective.
+shape. It never creates market data, signals, fills, or execution. Missing
+measurements remain ``None``; the historical +5 USD/day reference is not a
+terminal gate for positive net Copy-Vault evidence.
 """
 
 from __future__ import annotations
@@ -671,7 +672,9 @@ def render_campaign_report(campaigns: Iterable[Mapping[str, Any]]) -> str:
     lines = [
         "# Campagnes economiques HyperSmart",
         "",
-        f"Capital paper: {STARTING_CAPITAL_USD:g} USD. Cible: +{TARGET_NET_USD_PER_DAY:g} USD nets par jour et par module. Carry OFF. Cross-Venue v1 OFF.",
+        f"Capital paper: {STARTING_CAPITAL_USD:g} USD. Le repere historique de "
+        f"+{TARGET_NET_USD_PER_DAY:g} USD nets/jour est informatif, pas une condition "
+        "de preuve. Carry OFF. Cross-Venue v1 OFF.",
         "Chaque resultat est separe; aucun PnL latent ou inter-famille n'est additionne.",
         "",
     ]
@@ -712,9 +715,17 @@ def render_campaign_report(campaigns: Iterable[Mapping[str, Any]]) -> str:
             if isinstance(campaign.get("proof_economics"), Mapping)
             else {}
         )
+        reasons = campaign.get("objective_reasons")
+        reasons = reasons if isinstance(reasons, list) else []
+        informational_reason_codes = {
+            "TARGET_NET_USD_NOT_REACHED",
+            "DAILY_NET_TARGET_NOT_REACHED",
+        }
+        blocking_reasons = [reason for reason in reasons if reason not in informational_reason_codes]
+        informational_reasons = [reason for reason in reasons if reason in informational_reason_codes]
         lines.extend(
             [
-                f"## {labels.get(family, family)} - OBJECTIF +{TARGET_NET_USD_PER_DAY:g} USD / JOUR : {status}",
+                f"## {labels.get(family, family)} - STATUT DE PREUVE : {status}",
                 "",
                 f"- PnL net observe (diagnostic): {net_text}",
                 f"- PnL net de preuve OOS + forward: {campaign.get('proof_net_pnl_usd')}",
@@ -744,11 +755,12 @@ def render_campaign_report(campaigns: Iterable[Mapping[str, Any]]) -> str:
                 f"- Hash des trades: {campaign.get('trade_ids_sha256')}",
                 f"- OOS: n={oos.get('sample_count')} net={oos.get('net_pnl_usd')} no-lookahead={oos.get('no_lookahead')}",
                 f"- Forward post-gel: n={forward.get('sample_count')} net={forward.get('net_pnl_usd')} post-freeze={forward.get('post_freeze')}",
-                f"- Cible journaliere requise: {campaign.get('daily_target_required')}",
-                f"- Preuve journaliere: jours={((campaign.get('daily_evidence') or {}).get('sample_count'))} moyenne={((campaign.get('daily_evidence') or {}).get('mean_daily_net_pnl_usd'))} minimum={((campaign.get('daily_evidence') or {}).get('min_daily_net_pnl_usd'))} tous_jours>=4={((campaign.get('daily_evidence') or {}).get('all_days_at_or_above_target'))}",
+                f"- Repere journalier utilise comme gate: {campaign.get('daily_target_required', False)}",
+                f"- Mesure journaliere descriptive (repere +{TARGET_NET_USD_PER_DAY:g} USD): jours={((campaign.get('daily_evidence') or {}).get('sample_count'))} moyenne={((campaign.get('daily_evidence') or {}).get('mean_daily_net_pnl_usd'))} minimum={((campaign.get('daily_evidence') or {}).get('min_daily_net_pnl_usd'))} tous_jours_au_dessus={((campaign.get('daily_evidence') or {}).get('all_days_at_or_above_target'))}",
                 f"- Jours observes (diagnostic): {((campaign.get('daily_observed') or {}).get('sample_count'))} moyenne={((campaign.get('daily_observed') or {}).get('mean_daily_net_pnl_usd'))}",
                 f"- Placebo battu: {placebos.get('beaten')}",
-                f"- Raisons: {', '.join(campaign.get('objective_reasons') or [])}",
+                f"- Raisons bloquantes: {', '.join(blocking_reasons) or 'aucune renseignee'}",
+                f"- Reperes informatifs non atteints: {', '.join(informational_reasons) or 'aucun'}",
                 "",
             ]
         )

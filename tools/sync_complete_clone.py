@@ -691,6 +691,10 @@ def _read_safe_shard_summary(
         "l2_continuous_replayable_shards": 0,
         "l2_reanchored_segment_assets": 0,
         "l2_blocked_shards": 0,
+        "l2_indexed_shards": 0,
+        "l2_audited_shards": 0,
+        "l2_not_downloaded_locally": 0,
+        "l2_scope_complete": False,
     }
     try:
         if report_path.is_symlink() or not report_path.is_file():
@@ -742,6 +746,10 @@ def _read_safe_shard_summary(
         "l2_continuous_replayable_shards": 0,
         "l2_reanchored_segment_assets": 0,
         "l2_blocked_shards": 0,
+        "l2_indexed_shards": 0,
+        "l2_audited_shards": 0,
+        "l2_not_downloaded_locally": 0,
+        "l2_scope_complete": False,
     }
     if database_name is None:
         return summary
@@ -769,15 +777,42 @@ def _read_safe_shard_summary(
         with closing(sqlite3.connect(uri, uri=True, timeout=5.0)) as connection:
             meta = dict(connection.execute(
                 "SELECT key, value FROM l2_certification_meta "
-                "WHERE key IN ('run_status', 'active_catalog_sha256')"
+                "WHERE key IN ('run_status', 'active_catalog_sha256', "
+                "'catalog_indexed_shards', 'catalog_audited_shards', "
+                "'catalog_not_downloaded_locally', 'catalog_limit_applied', "
+                "'catalog_scope_complete')"
             ))
             active_catalog = meta.get("active_catalog_sha256")
+            run_status = meta.get("run_status")
+            try:
+                scope_counts = {
+                    "l2_indexed_shards": int(meta["catalog_indexed_shards"]),
+                    "l2_audited_shards": int(meta["catalog_audited_shards"]),
+                    "l2_not_downloaded_locally": int(
+                        meta["catalog_not_downloaded_locally"]
+                    ),
+                }
+                scope_metadata_valid = all(value >= 0 for value in scope_counts.values())
+            except (KeyError, TypeError, ValueError):
+                scope_counts = {}
+                scope_metadata_valid = False
+            if run_status in {"PARTIAL_LOCAL", "LIMITED"}:
+                summary["l2_certification_status"] = run_status
+                summary["l2_catalog_sha256"] = active_catalog
+                summary.update(scope_counts)
+                return summary
             if (
-                meta.get("run_status") != "COMPLETE"
+                run_status != "COMPLETE"
                 or not isinstance(expected_catalog, str)
                 or active_catalog != expected_catalog
+                or not scope_metadata_valid
+                or meta.get("catalog_scope_complete") != "true"
+                or meta.get("catalog_limit_applied") != "false"
+                or scope_counts.get("l2_audited_shards")
+                != scope_counts.get("l2_indexed_shards")
             ):
                 summary["l2_certification_status"] = "STALE_OR_INCOMPLETE"
+                summary.update(scope_counts)
                 return summary
             counts = connection.execute("""
                 SELECT
@@ -803,6 +838,8 @@ def _read_safe_shard_summary(
     summary.update({
         "l2_certification_status": "COMPLETE",
         "l2_catalog_sha256": active_catalog,
+        **scope_counts,
+        "l2_scope_complete": True,
         "l2_snapshot_backtestable_shards": int(counts[0] or 0),
         "l2_continuous_replayable_shards": int(counts[1] or 0),
         "l2_reanchored_segment_assets": int(repaired_count or 0),

@@ -23,6 +23,7 @@ from typing import Any
 
 RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
+from hl_observer.collection.collecte_fiable import ajouter_atomique  # noqa: E402
 
 from hl_observer.collection.forward_poll_fills import shard_leaders  # noqa: E402
 from hl_observer.instrument_identity import preserve_native_instrument_symbol  # noqa: E402
@@ -129,8 +130,8 @@ class LaneMarche:
             return
         self._vus_trade.add(cle)
         async with self._lock:
-            with self.trades_out.open("a", encoding="utf-8") as h:
-                h.write(json.dumps(row, ensure_ascii=False) + "\n")
+            # 26/11/2026 : ajout ATOMIQUE -- ce ruban a un autre ecrivain (AlinaSync et/ou un autre collecteur) ; deux ajouts "a" simultanes perdent des lignes sous Windows (mesure). Memes octets qu'avant.
+            ajouter_atomique(self.trades_out, json.dumps(row, ensure_ascii=False) + "\n")
             self.trades += 1
 
     def bougie_close(self, row: dict[str, Any]) -> dict[str, Any] | None:
@@ -163,12 +164,10 @@ class LaneMarche:
         close = self.bougie_close(row)
         if close is not None:
             async with self._lock:
-                with self.candle_out.open("a", encoding="utf-8") as h:
-                    h.write(json.dumps(close, ensure_ascii=False) + "\n")
+                ajouter_atomique(self.candle_out, json.dumps(close, ensure_ascii=False) + "\n")   # 26/11 : atomique
             self.cloturees += 1
         async with self._lock:
-            with self.candle_out.open("a", encoding="utf-8") as h:
-                h.write(json.dumps(row, ensure_ascii=False) + "\n")
+            ajouter_atomique(self.candle_out, json.dumps(row, ensure_ascii=False) + "\n")     # 26/11 : atomique
             self.candles += 1
 
 

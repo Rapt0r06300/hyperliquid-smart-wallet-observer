@@ -39,6 +39,22 @@ def test_eco_002_small_positive_result_is_retained() -> None:
     result = evaluate_objective_independent(0.25, target_usd_per_day=5.0)
     assert result["status"] == "PROMISING"
     assert result["discovery_filter_applied"] is False
+    assert result["target_is_terminal"] is False
+    assert result["economic_proof_required"] is True
+
+
+def test_daily_reference_cannot_certify_a_large_positive_result() -> None:
+    result = evaluate_objective_independent(7.0, target_usd_per_day=5.0)
+    assert result["status"] == "PROMISING"
+    assert result["target_reached"] is True
+    assert result["target_is_terminal"] is False
+    assert result["economic_proof_required"] is True
+
+
+def test_negative_daily_reference_is_rejected_as_invalid() -> None:
+    result = evaluate_objective_independent(1.0, target_usd_per_day=-1.0)
+    assert result["status"] == "UNMEASURABLE"
+    assert result["reason"] == "INVALID_OBJECTIVE_REFERENCE"
 
 
 def test_eco_003_relative_improvement_is_not_profitability() -> None:

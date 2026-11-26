@@ -169,6 +169,42 @@ def test_pytest_ne_peut_pas_ecrire_runtime(tmp_path, monkeypatch):
     assert CO._ecriture_permise(tmp_path) is True
 
 
+def test_charger_store_initializes_only_for_a_missing_file(tmp_path, monkeypatch):
+    import json
+    import pytest
+    from pathlib import Path
+
+    _setup(tmp_path)
+    path = CO._p(CO.ALPHA, tmp_path, "positions.json")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('{"cash": 100, "ouvertes": {"SOL": {"notional_usd": 20}}}', encoding="utf-8")
+    original_read_text = Path.read_text
+
+    def deny_positions_read(candidate, *args, **kwargs):
+        if candidate == path:
+            raise PermissionError(13, "Access is denied", str(path))
+        return original_read_text(candidate, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", deny_positions_read)
+    with pytest.raises(PermissionError):
+        CO.charger_store(CO.ALPHA, tmp_path)
+    monkeypatch.setattr(Path, "read_text", original_read_text)
+
+    path.write_text("{corrupt", encoding="utf-8")
+    with pytest.raises(json.JSONDecodeError):
+        CO.charger_store(CO.ALPHA, tmp_path)
+
+
+def test_charger_store_still_initializes_on_first_run(tmp_path):
+    _setup(tmp_path)
+
+    store = CO.charger_store(CO.ALPHA, tmp_path)
+
+    assert store["cash"] == CO.ALPHA.budget_usd
+    assert store["ouvertes"] == {}
+    assert store["realise_total_usd"] == 0.0
+
+
 def test_run_id_et_provenance_dans_ledger(tmp_path):
     _setup(tmp_path)
     etat = CO.etat_initial(CO.ALPHA, tmp_path, run_id="run-abc123")
