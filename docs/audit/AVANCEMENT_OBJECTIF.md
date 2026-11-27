@@ -3381,3 +3381,26 @@ Le banc du moteur passe désormais à 48 mondes par défaut, ce qui donne 96 pai
 
 **Poussée différée.** Codex fait un `git status` sur le même dépôt, et deux `git` orphelins traînent depuis le 24/11. Une poussée en parallèle risquerait un conflit de verrou ; or une poussée coupée est pire qu'une poussée en retard. En attente localement : l'option `essais_effectifs`, le banc multi-tailles, la boucle permanente, l'hypothèse déclarée, les tests et cette page.
 
+### 27/11, 14 h 40 : le labo ADOPTE la méthode v2, par sa propre règle
+
+Commande : `tools/decouverte_copyvault.py --banc --confirmer essais_effectifs=true --mondes 48`. C'est la confirmation d'UNE variante, annoncée avant le test, sur des graines NEUVES (4000 à 4047). Le test compte 96 paires, deux tailles d'avantage mises bout à bout.
+
+| | Rappel 40 bps | Rappel 80 bps | Rappel moyen | Fausses découvertes | Mondes nuls avec faux |
+|---|---:|---:|---:|---:|---:|
+| Méthode v1 | 31,2 % | 68,8 % | 50,0 % | 0 | 0 |
+| Variante | 43,8 % | 75,0 % | 59,4 % | 0 | 0 |
+
+- **Test apparié : p = 0,00195** (Bonferroni sur une seule variante : seuil 0,10).
+- **Décision : ADOPTEE.** `METHODE_COURANTE.json` passe en v2 (`essais_effectifs: true`). La décision est journalisée dans `METHODES.ndjson`, et le retour arrière est automatique si un banc ultérieur trouve plus de 5 % de faux.
+- **Puissance de la méthode retenue, sur d'autres graines (24 mondes) :** 40 bps à 21 % de rappel, 80 bps à 54 %, 160 bps à 83 %. Les mondes nuls restent sans faux.
+- **⚠ Point à surveiller :** à 40 bps, 12,5 % des gels de ces mondes étaient sans rapport avec l'avantage planté. C'est noté. La promotion exige de toute façon 30 jours de suivi et Benjamini-Hochberg.
+
+**Campagne 4 (méthode v2, juge v3, écarts mesurés).**
+- 219 cellules, soit 71 essais effectifs (Li & Ji). **N du DSR = 156**, contre 440 en comptant les essais bruts.
+- Meilleur DSR : 0,061, contre 0,0006 auparavant, pour la cellule suivre 24 h, action CLOSE et tendance CONTRE. Le mécanisme « contre la tendance 24 h » occupe les trois premières places.
+- Le PBO reste au-dessus de 0,5 dans les 6 groupes (0,57 à 0,80). Donc aucun gel et aucune surveillance : rien ne bat encore le hasard.
+- **Suivi PAPER réel :** 1 challenger actif. C'est l'hypothèse DÉCLARÉE « suivre 24 h, tendance contre », gelée le 27/11 et jugée seulement sur les jours postérieurs. Champion : AUCUN_TRADE.
+- Passage complet : 102 s, pic 0,73 Go.
+
+**Poussé.** Commit `6c4fd17` (7 chemins) : l'option des essais effectifs, le banc multi-tailles et sa confirmation, la boucle permanente, l'hypothèse déclarée, les tests et cette page.
+
