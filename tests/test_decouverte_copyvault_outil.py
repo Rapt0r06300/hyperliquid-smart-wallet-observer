@@ -163,3 +163,15 @@ def test_la_boucle_du_labo_relance_le_moteur_seulement_quand_il_faut(tmp_path):
         raise OSError("panne")
 
     assert LAB._decouverte_periodique(tmp_path, maintenant=99_999_999.0, lancer=casse)["lance"] is True  # jamais d'exception
+
+
+
+def test_un_seul_passage_a_la_fois(tmp_path, capsys):
+    import os
+
+    _faux_coffre(tmp_path, jours=45)
+    verrou = tmp_path / T.ETAT_DIR / "decouverte.lock"
+    verrou.write_text(json.dumps({"pid": os.getpid(), "ts": __import__("time").time()}), encoding="utf-8")
+    assert T.main(["--root", str(tmp_path), "--campagne", "--sans-ecarts-mesures"]) == 0
+    assert "[OCCUPE]" in capsys.readouterr().out
+    assert not (tmp_path / "runtime/data/registre_essais.jsonl").exists()

@@ -94,7 +94,10 @@ DIMENSIONS: dict[str, tuple[tuple[str, ...], str]] = {
 class DecouverteConfig:
     """Parametres declares AVANT la mesure (couts, causalite, populations, statistiques)."""
 
-    horizons_h: tuple[int, ...] = (4, 12, 24)
+    # 27/11 soir : horizon 48 h AJOUTE avant tout regard sur ses chiffres (mecanisme : la derive du meilleur predicat,
+    # « contre la tendance », grandit de 4 a 24 h alors que le cout par aller-retour est fixe). Ses cellules sont
+    # pre-enregistrees et comptees dans le N du DSR comme les autres.
+    horizons_h: tuple[int, ...] = (4, 12, 24, 48)
     gap_ms: int = 300_000
     min_decision_usd: float = 1_000.0
     reaction_ms: int = 60_000

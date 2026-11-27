@@ -3411,3 +3411,33 @@ Commande : `tools/decouverte_copyvault.py --banc --confirmer essais_effectifs=tr
 - **Puissance :** sous environ 40 à 80 bps par décision, seuls de nouveaux jours de décisions observées feront baisser l'effet minimal détectable. Le long historique `fills_forward` (depuis 2025-04) ne concerne que les vaults choisis en novembre : il est biaisé pro-survivants.
 - **Verdict actuel : MORE_DATA**, sans avantage démontré.
 
+### 27/11 soir : le labo tourne seul en continu, 5 candidats suivis en PAPER
+
+**Labo lancé en mode continu** (demande de Florent : « occupe-toi du labo, lance-le, gère-le »).
+- `tools/alina_quant_lab_console.py --safe-research`, PID 12100, fenêtre réduite dans la barre des tâches ; on l'arrête en fermant sa fenêtre.
+- Mêmes variables que `LANCER_LAB_QUANT_COPY_VAULT.cmd` : aucun trading réel ni testnet, 4 ouvriers.
+- L'étude de copiabilité lourde du démarrage, qui charge tous les fills, a été sautée comme le permet `ALINA_LAB_COPIABILITE=0` : la machine n'avait que 3 Go libres.
+
+**1er passage AUTONOME de la boucle (sans aucune intervention).**
+- `_decouverte_periodique` a lancé `decouverte_copyvault.py` en sous-processus. Il s'est terminé en 490 s avec le code 0, et `BOUCLE_LABO.json` est écrit.
+- Son banc 5 (48 mondes neufs, 2 tailles) **confirme la méthode v2** : rappel 51,0 %, contre 45,8 % pour le retour au comptage brut et pour 6 autres variantes, toutes inférieures ou égales. Décision CONSERVEE.
+
+**Verrou.** `decouverte.lock` (via `verrou_pid`) empêche la boucle et un passage manuel d'écrire ensemble.
+
+**Horizon 48 h ajouté AVANT tout regard sur ses chiffres** (cellules comptées dans le DSR). Campagne 6 : 280 cellules, 80 essais effectifs, N = 165.
+- Le mécanisme « contre la tendance » ne grandit PAS à 48 h : −5,3 bps, IC95 [−81 ; +61]. L'hypothèse d'un avantage croissant avec l'horizon n'est pas confirmée.
+- Copie naïve à 48 h : −27,3 bps.
+- Pour la 1re fois, un groupe passe la porte PBO : suivre 12 h, à 0,43. Ses 4 meilleures cellules saines entrent en **SURVEILLANCE**.
+
+**Suivi PAPER : 5 challengers actifs, gelés le 27/11**, jugés seulement sur les décisions postérieures. Champion : AUCUN_TRADE.
+
+| Palier | Direction | Horizon | Prédicats | Référence (bps) |
+|---|---|---:|---|---:|
+| HYPOTHESE_DECLAREE | suivre | 24 h | tendance contre | +18,9 |
+| SURVEILLANCE | suivre | 12 h | action OPEN + historique gagnant | +29,4 |
+| SURVEILLANCE | suivre | 12 h | funding paie + historique gagnant | +7,2 |
+| SURVEILLANCE | suivre | 12 h | tendance contre | +2,3 |
+| SURVEILLANCE | suivre | 12 h | action ADD + historique gagnant | +0,9 |
+
+Promotion seulement après ≥ 30 jours de suivi, IC95 > 0, Benjamini-Hochberg sur les 5, et mieux que le champion. Invalidation et retour arrière automatiques sinon.
+

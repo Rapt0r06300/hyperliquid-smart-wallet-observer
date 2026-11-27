@@ -18,7 +18,8 @@ from hl_observer.backtesting import copy_vault_decouverte_banc as B  # noqa: E40
 from hl_observer.backtesting.copy_vault_copiability_entrees import build_candle_panel  # noqa: E402
 
 H, J = D.HEURE_MS, D.JOUR_MS
-CAL = {"par_horizon": {str(h): {"sd_jour": 40.0, "sd_jour_unite": 40.0, "sd_decision": 120.0} for h in (4, 12, 24)}}
+CAL = {"par_horizon": {str(h): {"sd_jour": 40.0, "sd_jour_unite": 40.0, "sd_decision": 120.0}
+                       for h in D.DecouverteConfig().horizons_h}}
 T0 = 20_000 * J
 
 
@@ -111,7 +112,7 @@ def _table(seed=0, n_units=8, n_jours=80, par_jour=6, plantee=None, delta=0.0):
     for dim, (valeurs, _) in D.DIMENSIONS.items():
         if dim != "historique":
             df[dim] = rng.choice(valeurs, n)
-    for h in (4, 12, 24):
+    for h in D.DecouverteConfig().horizons_h:
         df[f"historique_{h}h"] = rng.choice(["gagnant", "perdant"], n)
     out = D.attribuer_populations(df, coupure_ms=None)
     for dim in ("volatilite",):
@@ -125,7 +126,7 @@ def test_generer_cellules_deterministe_et_dans_la_grammaire():
     assert [c["id"] for c in a] == [c["id"] for c in b]
     assert all(len({p[0] for p in c["predicats"]}) == len(c["predicats"]) for c in a)
     un = D.generer_cellules(D.Methode(profondeur=1), cfg)
-    assert len(un) == 2 * 3 * (1 + len(D.predicats_disponibles())) and len(a) > len(un)
+    assert len(un) == 2 * len(cfg.horizons_h) * (1 + len(D.predicats_disponibles())) and len(a) > len(un)
 
 
 def test_une_methode_qui_affaiblit_un_garde_fou_est_refusee():
@@ -265,13 +266,13 @@ def test_une_copie_deja_tenue_n_est_pas_comptee_deux_fois():
 def test_pbo_par_direction_et_horizon():
     r = D.juger_campagne(_table(seed=7), D.generer_cellules(D.Methode(profondeur=1), D.DecouverteConfig()),
                          D.Methode(profondeur=1), D.DecouverteConfig())
-    assert set(r["pbo_par_groupe"]) == {f"{d}_{h}h" for d in D.DIRECTIONS for h in (4, 12, 24)}
+    assert set(r["pbo_par_groupe"]) == {f"{d}_{h}h" for d in D.DIRECTIONS for h in D.DecouverteConfig().horizons_h}
     assert r["juge_version"] == D.JUGE_VERSION and r["jours_selection"] > r["jours_exploration"]
 
 
 def test_jamais_refutee_sur_des_couts_supposes():
     table = _table(seed=8)
-    for h in (4, 12, 24):
+    for h in D.DecouverteConfig().horizons_h:
         table[f"net_suivre_{h}h"] = table[f"net_suivre_{h}h"] - 300.0       # nettement perdant partout
     cellules = D.generer_cellules(D.Methode(profondeur=1), D.DecouverteConfig())
     suppose = D.juger_campagne(table, cellules, D.Methode(profondeur=1), D.DecouverteConfig())
@@ -295,7 +296,7 @@ def test_le_calibrage_reproduit_l_ecart_type_journalier_reel():
     cfg = D.DecouverteConfig()
     cal = B.calibrer_banc(table, cfg)
     verif = B.verifier_calibrage(table, cfg, cal)
-    for h in ("4", "12", "24"):
+    for h in [str(x) for x in D.DecouverteConfig().horizons_h]:
         assert 0.75 <= verif[h]["synthetique"] / verif[h]["reel"] <= 1.25          # recale sur le reel
 
 

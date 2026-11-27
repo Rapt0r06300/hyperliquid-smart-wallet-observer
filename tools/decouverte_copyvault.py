@@ -418,6 +418,22 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _main(args: argparse.Namespace) -> int:
+    """Un seul passage a la fois (verrou partage du depot) : la boucle du labo et un lancement manuel ne peuvent pas
+    ecrire ensemble dans le registre des essais ni dans l'etat du champion."""
+    from hl_observer.ops import verrou_pid as VP
+
+    verrou = args.root.resolve() / ETAT_DIR / "decouverte.lock"
+    obtenu, pourquoi = VP.prendre(verrou, perime_s=4 * 3600, quoi="un passage du moteur de decouverte")
+    if not obtenu:
+        print(f"[OCCUPE] {pourquoi} : etape ignoree, le labo continue.", flush=True)
+        return 0
+    try:
+        return _passage(args)
+    finally:
+        VP.rendre(verrou)
+
+
+def _passage(args: argparse.Namespace) -> int:
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except (AttributeError, ValueError):
