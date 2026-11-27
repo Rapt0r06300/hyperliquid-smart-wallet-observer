@@ -34,6 +34,8 @@ on:
       - "docs/superpowers/specs/2026-09-25-manual-phase-orchestrator-design.md"
 env:
   GH_TOKEN: "${{ github.token }}"
+  # Direct tools/*.py commands need src/ when run without an editable install.
+  PYTHONPATH: src
 
 permissions:
   # contents: read is the baseline; publication jobs elevate only where required.
