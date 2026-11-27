@@ -3404,3 +3404,10 @@ Commande : `tools/decouverte_copyvault.py --banc --confirmer essais_effectifs=tr
 
 **Poussé.** Commit `6c4fd17` (7 chemins) : l'option des essais effectifs, le banc multi-tailles et sa confirmation, la boucle permanente, l'hypothèse déclarée, les tests et cette page.
 
+**Boucle dans le cloud ? Pas sans décision de Florent (27/11).** Toutes les entrées du moteur sont au tier LOCAL du coffre : épisodes (54 shards), bougies 1 h (131), funding (120), carnets (4 203). Aucune n'est au tier SAFE-cloud. Le workflow `labo-continu-ci` ne lance que des tests, sans données. Faire tourner le moteur sur GitHub demanderait donc de PUBLIER ces données : c'est une décision d'architecture et de publication qui appartient à Florent. D'ici là, la boucle permanente vit dans le mode continu du labo local.
+
+**Ce qui reste, et pourquoi on ne peut pas le forcer :**
+- **Promotion :** il faut 30 jours de suivi de l'hypothèse déclarée (ou d'un futur gel) sur des décisions POSTÉRIEURES au 27/11.
+- **Puissance :** sous environ 40 à 80 bps par décision, seuls de nouveaux jours de décisions observées feront baisser l'effet minimal détectable. Le long historique `fills_forward` (depuis 2025-04) ne concerne que les vaults choisis en novembre : il est biaisé pro-survivants.
+- **Verdict actuel : MORE_DATA**, sans avantage démontré.
+
