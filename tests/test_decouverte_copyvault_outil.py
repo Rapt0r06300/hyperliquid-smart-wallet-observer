@@ -187,3 +187,16 @@ def test_les_attentes_du_labo_relancent_aussi_le_moteur():
     source = inspect.getsource(LAB)
     attentes = source.count("time.sleep(10)")
     assert attentes >= 3 and source.count("_decouverte_pendant_l_attente(ROOT)") == attentes
+
+
+
+def test_pas_de_passage_si_la_memoire_manque(tmp_path, monkeypatch):
+    import types
+
+    (tmp_path / "runtime/coffre_certifie").mkdir(parents=True)
+    (tmp_path / "runtime/coffre_certifie/LOCAL_INDEX.json").write_text("{}", encoding="utf-8")
+    faux = types.SimpleNamespace(virtual_memory=lambda: types.SimpleNamespace(available=0.5 * 1024 ** 3))
+    monkeypatch.setitem(sys.modules, "psutil", faux)
+    r = T.periodique(tmp_path, maintenant=10_000.0)
+    assert r["lance"] is False and "memoire basse" in r["raison"]
+    assert not (tmp_path / T.ETAT_DIR / "BOUCLE_LABO.json").exists()       # rien d'ecrit : il reessaiera

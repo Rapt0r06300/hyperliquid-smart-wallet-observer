@@ -3447,3 +3447,14 @@ Promotion seulement après ≥ 30 jours de suivi, IC95 > 0, Benjamini-Hochberg s
 
 Le labo a été redémarré avec ce code (PID 37636, même environnement, étude lourde du démarrage sautée).
 
+**27/11, 19 h 20 : labo complet arrêté pour protéger les collecteurs, puis boucle LÉGÈRE en continu.**
+
+*Pourquoi l'arrêt.* La reconstitution SAFE du labo (`labo_materialiser_safe.py`) occupait 8,4 à 8,95 Go depuis 37 min, avec le garde-mémoire du labo au ROUGE. La machine était tombée à 1,1 Go libre, et les collecteurs passent avant. Le labo (PID 37636) et sa reconstitution ont été arrêtés. Elle est idempotente et reprend à la prochaine ouverture. 10,2 Go libres ensuite ; tous les collecteurs sont restés intacts.
+
+*Ce qui tourne désormais.* `tools/decouverte_copyvault.py --en-continu` (PID 33700, fenêtre réduite) : seulement le moteur de découverte, sans la reconstitution SAFE.
+- Contrôle toutes les 60 s, et passage en sous-processus : quand le coffre a changé (au plus toutes les 30 min), sinon toutes les 6 h.
+- Aucun passage sous 2 Go libres : il est reporté.
+- La règle de rythme (`periodique`) est UNIQUE : la console du labo l'appelle aussi. L'état est partagé (`BOUCLE_LABO.json`) et le verrou commun.
+- 70 tests passent.
+- **2e passage autonome observé** : lancé seul à 19 h 23 min 49 s.
+

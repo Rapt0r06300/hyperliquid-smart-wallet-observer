@@ -386,6 +386,62 @@ def rendre_rapport(resultat: dict[str, Any]) -> str:
     return "\n".join(lignes)
 
 
+def periodique(root: Path, *, maintenant: float | None = None, lancer=None, ram_min_go: float = 2.0) -> dict[str, Any]:
+    """Faut-il un passage maintenant ? Coffre change (au plus toutes les 30 min), sinon toutes les 6 h. Le passage
+    tourne dans un SOUS-PROCESSUS (memoire rendue a chaque fois) et n'est lance que si la machine a au moins
+    ``ram_min_go`` Go libres : sinon il est REPORTE (les collecteurs passent avant). Partage par la boucle du labo
+    (``alina_quant_lab_console``) et par ``--en-continu`` : un seul etat, ``BOUCLE_LABO.json``, et le verrou du passage."""
+    import subprocess
+
+    maintenant = time.time() if maintenant is None else maintenant
+    etat_path = root / ETAT_DIR / "BOUCLE_LABO.json"
+    index = root / "runtime" / "coffre_certifie" / "LOCAL_INDEX.json"
+    etat = _lire_json(etat_path, {})
+    try:
+        empreinte = f"{index.stat().st_mtime_ns}:{index.stat().st_size}"
+    except OSError:
+        return {"lance": False, "raison": "coffre LOCAL absent"}
+    depuis = maintenant - float(etat.get("dernier_lancement", 0.0))
+    neuf = empreinte != etat.get("empreinte_coffre")
+    if not ((neuf and depuis >= 1800) or depuis >= 6 * 3600):
+        return {"lance": False, "raison": "rien de neuf ou trop tot", "depuis_s": round(depuis)}
+    if lancer is None:
+        try:
+            import psutil
+
+            libre = psutil.virtual_memory().available / 1024 ** 3
+        except Exception:  # noqa: BLE001 -- sans mesure, on ne bloque pas
+            libre = float("inf")
+        if libre < ram_min_go:
+            return {"lance": False, "raison": f"memoire basse ({libre:.1f} Go libres < {ram_min_go} Go) : passage reporte"}
+        lancer = lambda cmd: subprocess.run(cmd, cwd=str(root), timeout=3600, check=False).returncode  # noqa: E731
+    try:
+        code = lancer([sys.executable, "-X", "utf8", str(Path(__file__).resolve()), "--root", str(root)])
+    except Exception as erreur:  # noqa: BLE001 -- le moteur ne doit jamais interrompre la boucle qui l'appelle
+        code = f"{type(erreur).__name__}: {erreur}"
+    try:
+        _ecrire_json(etat_path, {"dernier_lancement": maintenant, "empreinte_coffre": empreinte, "dernier_code": code})
+    except OSError:
+        pass
+    return {"lance": True, "code": code}
+
+
+def en_continu(root: Path, *, pause_s: float = 60.0) -> int:
+    """Boucle LEGERE : seulement le moteur de decouverte, sans la reconstitution SAFE du labo (qui peut occuper ~9 Go
+    pendant des heures). Ctrl+C ou fermer la fenetre l'arrete ; un passage en cours finit ou rend son verrou."""
+    print(f"[EN CONTINU] moteur de decouverte en boucle (controle toutes les {pause_s:.0f} s ; coffre change = passage "
+          "au plus toutes les 30 min, sinon toutes les 6 h ; jamais sous 2 Go libres). Ctrl+C pour arreter.", flush=True)
+    try:
+        while True:
+            r = periodique(root)
+            if r.get("lance") or "memoire basse" in str(r.get("raison")):
+                print(f"[EN CONTINU] {time.strftime('%d/%m %H:%M')} {r}", flush=True)
+            time.sleep(pause_s)
+    except KeyboardInterrupt:
+        print("[EN CONTINU] arrete.", flush=True)
+        return 130
+
+
 def main(argv: list[str] | None = None) -> int:
     """Une erreur inattendue est JOURNALISEE et l'etape rend 0 : les etapes suivantes du labo tournent quand meme."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -398,9 +454,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--mondes", type=int, default=48)
     parser.add_argument("--sans-ecarts-mesures", action="store_true", help="ne lit pas les carnets (8 bps partout)")
     parser.add_argument("--sans-ecriture", action="store_true")
+    parser.add_argument("--en-continu", action="store_true",
+                        help="boucle LEGERE : seulement le moteur, au rythme de la boucle du labo (Ctrl+C pour arreter)")
     parser.add_argument("--confirmer", default=None, metavar="CHAMP=VALEUR",
                         help="banc de CONFIRMATION d'une seule variante de methode annoncee (ex. essais_effectifs=true)")
     args = parser.parse_args(argv)
+    if args.en_continu:
+        return en_continu(args.root.resolve())
     try:
         return _main(args)
     except Exception as erreur:  # noqa: BLE001 -- l'etape ne doit jamais interrompre le lanceur du labo
