@@ -175,3 +175,15 @@ def test_un_seul_passage_a_la_fois(tmp_path, capsys):
     assert T.main(["--root", str(tmp_path), "--campagne", "--sans-ecarts-mesures"]) == 0
     assert "[OCCUPE]" in capsys.readouterr().out
     assert not (tmp_path / "runtime/data/registre_essais.jsonl").exists()
+
+
+
+def test_les_attentes_du_labo_relancent_aussi_le_moteur():
+    import inspect
+
+    sys.path.insert(0, str(RACINE / "tools"))
+    import alina_quant_lab_console as LAB
+
+    source = inspect.getsource(LAB)
+    attentes = source.count("time.sleep(10)")
+    assert attentes >= 3 and source.count("_decouverte_pendant_l_attente(ROOT)") == attentes

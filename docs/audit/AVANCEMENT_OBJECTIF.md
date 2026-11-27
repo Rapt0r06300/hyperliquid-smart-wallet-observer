@@ -3441,3 +3441,9 @@ Commande : `tools/decouverte_copyvault.py --banc --confirmer essais_effectifs=tr
 
 Promotion seulement après ≥ 30 jours de suivi, IC95 > 0, Benjamini-Hochberg sur les 5, et mieux que le champion. Invalidation et retour arrière automatiques sinon.
 
+**Défaut de la boucle trouvé et corrigé (27/11 soir).** Le contrôle périodique n'était appelé qu'en tête du grand tour de la boucle continue. Or les TROIS attentes du labo (des pauses de 10 s jusqu'à des données neuves) ne remontent jamais à ce tour : pendant une attente, le moteur n'aurait jamais été relancé, même au bout de 6 h.
+
+`_decouverte_pendant_l_attente` est maintenant appelé à chaque pause, et un test vérifie que chaque `time.sleep(10)` de la console en est suivi. 175 tests de la console et du labo continu passent.
+
+Le labo a été redémarré avec ce code (PID 37636, même environnement, étude lourde du démarrage sautée).
+

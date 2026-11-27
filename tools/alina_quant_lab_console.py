@@ -1782,6 +1782,14 @@ def _decouverte_periodique(root: Path, *, maintenant: float | None = None, lance
     return {"lance": True, "code": code}
 
 
+def _decouverte_pendant_l_attente(root: Path) -> None:
+    """27/11/2026 : les ATTENTES du labo (pauses de 10 s jusqu'a des donnees neuves) ne remontaient jamais au tour de
+    boucle : le moteur de decouverte n'y etait jamais relance. Meme controle, tres leger quand rien n'est du."""
+    passage = _decouverte_periodique(root)
+    if passage.get("lance"):
+        print(f"[DECOUVERTE] moteur de decouverte relance pendant l'attente (code {passage.get('code')})", flush=True)
+
+
 def _run_continuous_safe_lab(
     report_dir: Path, *, run_id: str, head: str, continuous: bool,
 ) -> int:
@@ -1931,6 +1939,7 @@ def _run_continuous_safe_lab(
                 while True:
                     time.sleep(10)
                     waiting_seconds += 10
+                    _decouverte_pendant_l_attente(ROOT)
                     if _local_safe_watch_fingerprint(ROOT, watch_files) != fingerprint:
                         print("Changement local détecté; nouvelle vérification des shards SAFE.", flush=True)
                         break
@@ -2068,6 +2077,7 @@ def _run_continuous_safe_lab(
                 persist()
                 while not dataset_changed():
                     time.sleep(10)
+                    _decouverte_pendant_l_attente(ROOT)
                     persist()
                 update_summary(fields={"status": "RUNNING"}, live={
                     "stage": "NOUVELLE VERSION SAFE DÉTECTÉE",
@@ -2089,6 +2099,7 @@ def _run_continuous_safe_lab(
                 persist()
                 while not dataset_changed():
                     time.sleep(10)
+                    _decouverte_pendant_l_attente(ROOT)
                     persist()
                 continue
     except KeyboardInterrupt:
