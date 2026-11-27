@@ -134,18 +134,23 @@ def _jaccard(a: np.ndarray, b: np.ndarray) -> float:
 
 def evaluer_methode(table: pd.DataFrame, methode: D.Methode, config: D.DecouverteConfig, *, graines: Sequence[int],
                     plantees: Sequence[Mapping[str, Any]], calibrage: Mapping[str, Any],
-                    delta_bps: float = 40.0) -> dict[str, Any]:
-    """Rappel (cellule plantee gelee) et fausses decouvertes, sur des mondes FOURNIS (les memes pour toutes les methodes)."""
+                    delta_bps: float = 40.0, juge: Any = None, generer: Any = None) -> dict[str, Any]:
+    """Rappel (cellule plantee gelee) et fausses decouvertes, sur des mondes FOURNIS (les memes pour toutes les methodes).
+
+    ``juge`` / ``generer`` : par defaut ceux du moteur courant ; une AUTRE version du juge peut etre passee pour mesurer,
+    sur les memes mondes, si une version nouvelle decouvre mieux que l'ancienne (progres prouve, pas affirme)."""
+    juge = juge or D.juger_campagne
+    generer = generer or D.generer_cellules
     if not plantees:
         return {"rappel": None, "fdr": None, "mondes_nuls_avec_faux": None, "raison": "aucune cellule plantable",
                 "touches_par_monde": []}
     sel, _, _ = _codes(table)
-    cellules = D.generer_cellules(methode, config, graine=0)
+    cellules = generer(methode, config, graine=0)
     touches, faux, geles_total, nuls_faux, par_monde = 0, 0, 0, 0, []
     for g, plantee in zip(graines, plantees):
         mp = D.masque_cellule(table, plantee) & sel
         monde = monde_synthetique(table, config, graine=int(g), calibrage=calibrage, plantee=plantee, delta_bps=delta_bps)
-        r = D.juger_campagne(monde, cellules, methode, config, rapide=True)
+        r = juge(monde, cellules, methode, config, rapide=True)
         geles_total += len(r["geles"])
         trouve = False
         for x in r["geles"]:
@@ -157,8 +162,8 @@ def evaluer_methode(table: pd.DataFrame, methode: D.Methode, config: D.Decouvert
                 faux += 1
         touches += trouve
         par_monde.append(bool(trouve))
-        nul = D.juger_campagne(monde_synthetique(table, config, graine=int(g) + 7_777, calibrage=calibrage), cellules,
-                               methode, config, rapide=True)
+        nul = juge(monde_synthetique(table, config, graine=int(g) + 7_777, calibrage=calibrage), cellules,
+                   methode, config, rapide=True)
         geles_total += len(nul["geles"])
         faux += len(nul["geles"])
         nuls_faux += bool(nul["geles"])

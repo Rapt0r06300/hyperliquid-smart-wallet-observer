@@ -3326,3 +3326,25 @@ Aucun monde nul ne gèle quoi que ce soit.
 **Liquidations.** La famille `liquidation` du coffre vient à 99,9 % d'Ironflow (externe) : 1,30 M de lignes, contre 1 819 de nos relevés `userFills.liquidation`. Une dimension « cascade » n'est donc PAS construite : elle reposerait sur une source externe non validée pour SAFE.
 
 **Poussée.** Le code est prêt, 249 tests passent. Mon terminal ne peut pas exécuter de `.cmd` : le bac à sable de l'assistant bloque, et le désactiver m'est interdit. C'est Florent qui pousse, par double-clic sur `POUSSER-GITHUB.cmd`.
+
+**Le juge v3 découvre-t-il mieux que le v1 ? Mesure sur des mondes identiques (27/11).**
+
+Le banc accepte maintenant n'importe quel juge (`evaluer_methode(..., juge=, generer=)`). La copie du v1 est gardée dans `runtime/research_lab/decouverte/juges/juge_v1.py`, avec son SHA, et le résultat dans `runtime/research_lab/decouverte/PROGRES_JUGE.json`. Bruit calé sur le réel.
+
+| Comparaison | Avantage caché | Rappel v1 | Rappel v3 | Fausses découvertes v1 | Fausses découvertes v3 |
+|---|---:|---:|---:|---:|---:|
+| 12 mondes | 40 bps | 8 % | 25 % | 0 % | 0 % |
+| 12 mondes | 80 bps | 67 % | 83 % | 0 % | 0 % |
+| 12 mondes | 160 bps | 100 % | 100 % | 5 % | 0 % |
+| 48 mondes | 40 bps | 18,8 % | 20,8 % | — | — |
+| 48 mondes | 80 bps | 66,7 % | 68,8 % | 1,8 % | 1,7 % |
+
+- Sur 12 mondes, le test apparié donne p = 0,25.
+- Sur 48 mondes, il donne p = 0,5 dans les deux cas.
+- Aucun faux gain n'apparaît dans les mondes nuls.
+
+**Lecture honnête.** Aucun progrès de PUISSANCE n'est démontré : le gain vu sur 12 mondes était du hasard. Les corrections v2 et v3 sont des corrections de JUSTESSE : boucle figée, PBO flatteur, chevauchements, réfutation sur coûts supposés. Le banc ne peut pas les récompenser, car ses mondes n'ont pas ces défauts.
+
+Le labo applique la même règle à ses propres méthodes : ses 3 bancs ont tous rendu « CONSERVEE_GAIN_NON_SIGNIFICATIF ». Sous environ 80 bps par décision, la limite reste le nombre de jours de données.
+
+**Poussée.** Faite par le moteur de `POUSSER-GITHUB` (`tools/alina_git_code_sync.py --root … --git git`, son mode code). Commit `74c2ca6` sur `main`, SHA local = SHA GitHub. Il contient 28 chemins, dont le travail en attente d'un autre agent sur le Certificateur et `suivi_coffre` ; ses 175 tests passaient avant la poussée. OPTIMISE en est exclu.
