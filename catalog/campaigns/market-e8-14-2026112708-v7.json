@@ -1,11 +1,11 @@
 {
   "analysis_stage": null,
-  "attempts": 0,
+  "attempts": 1,
   "campaign_id": "market-e8-14-2026112708-v7",
   "checkpoint_lineage": [],
   "chunk_index": 0,
   "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
-  "code_sha": "69f7a5939e63a796f859a61f10782854687e7ac1",
+  "code_sha": "1a13ab1c2b03c823b406d090b4e206418ab284b4",
   "collection_cutoff_at_utc": null,
   "completed_units": {},
   "config_sha256": "38b744c2e42db79f408d969f06088881ee19508f3a764692fbe3aca0e67a8ee2",
@@ -33,6 +33,15 @@
     {
       "event": "operator_request",
       "request_id": "867683cb3364809801cc1ca4b2028333b805257062249941185bc8ead53cac39"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e8-14-2026112708-v7.pending.69f7a5939e63.639d408a4f5afff48d91f57815312fcc6304f7a96120c568f0f1d3425399c128.json",
+      "archived_manifest_sha256": "639d408a4f5afff48d91f57815312fcc6304f7a96120c568f0f1d3425399c128",
+      "at": "2026-11-27T18:09:30.841712Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "69f7a5939e63a796f859a61f10782854687e7ac1",
+      "prior_status": "PENDING",
+      "prior_status_reason": "created"
     }
   ],
   "kind": "market_collection",
@@ -55,8 +64,8 @@
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
   "status": "PENDING",
-  "status_reason": "created",
+  "status_reason": "refresh_collect_after_code_fix",
   "terminal_evidence_digest": null,
-  "updated_at": "2026-11-27T08:09:38.397052Z",
+  "updated_at": "2026-11-27T18:09:30.841735Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
