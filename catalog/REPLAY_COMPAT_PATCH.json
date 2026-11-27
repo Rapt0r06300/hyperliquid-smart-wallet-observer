@@ -3,14 +3,14 @@
   "processed_assets": 2999,
   "progress": {
     "certification_rejected": 2338,
-    "definitive_rejects": 499,
+    "definitive_rejects": 553,
     "eta_available": false,
     "eta_seconds": null,
     "known_scope_candidate_total": 1190,
-    "known_scope_processed": 198,
-    "progress_percent_known_scope": 16.638655,
+    "known_scope_processed": 270,
+    "progress_percent_known_scope": 22.689076,
     "reject_payloads_deleted": 0,
-    "remaining_candidates_known": 992,
+    "remaining_candidates_known": 920,
     "repair_attempts_unique": 2999,
     "repaired_safe": 0,
     "replay_verified": 661,
@@ -18,7 +18,7 @@
     "volume_analyzed_bytes": 2567338724,
     "volume_deleted_bytes": 0,
     "volume_recovered_bytes": 0,
-    "volume_rejected_bytes": 1057583443
+    "volume_rejected_bytes": 1167484380
   },
   "progress_by_filter": {
     "activeassetctx,capacity_tape,funding,funding_settlement,instrument_metadata,mark_price,open_interest,ticker": {
@@ -95,14 +95,14 @@
       "attempted_this_run": 72,
       "candidate_total": 1136,
       "failed_this_run": 0,
-      "github_run_id": "45920000312",
-      "processed_cumulative": 144,
-      "remaining": 992,
-      "source_commit": "bb3f1ff91f509f64c39cc24d78aff12e3ebfba19",
+      "github_run_id": "45975617456",
+      "processed_cumulative": 216,
+      "remaining": 920,
+      "source_commit": "abe50264e7d31e4a1e7091c44b5db5590633b085",
       "updated_this_run": 72
     }
   },
-  "remaining_candidates_for_filter": 992,
+  "remaining_candidates_for_filter": 920,
   "results": {
     "binance-usdm-official-archive-trades-btcusdt-1789776000141-1789798765030-80d6b0a5dacb": {
       "asset_sha256": "80d6b0a5dacb433a2f84cae16cbfa3e37669856895f19cff98224476a7a274b7",
@@ -357,6 +357,8 @@
       "invalid_record_count": 232,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 0,
+      "quality_status_after": "PARTIAL",
+      "quality_status_before": "PARTIAL",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 232,
@@ -366,7 +368,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "bitget-derived-capacity-capacity-tape-beatusdt-1790994405724-1790994491180-5719eff96f4b": {
       "asset_sha256": "5719eff96f4bbe4fbc92534c8abb745ac01e8258c5ff3741763a0926116ca2a1",
@@ -933,6 +935,8 @@
       "invalid_record_count": 96,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 0,
+      "quality_status_after": "PARTIAL",
+      "quality_status_before": "PARTIAL",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 96,
@@ -942,7 +946,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "bitget-derived-capacity-capacity-tape-soonusdt-1790994406019-1790994491086-4494775637b0": {
       "asset_sha256": "4494775637b011bde251e57dcea74d60f25d747d90c3f986b146dde54d5e9254",
@@ -1509,6 +1513,8 @@
       "invalid_record_count": 538,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 0,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 9617,
@@ -1518,7 +1524,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-2z-1791511377245-1791514873399-d8fb46b6f997": {
       "asset_sha256": "d8fb46b6f99714e90af85d4149881a36e20e3eee6d10a54bdb800d494c1ede6f",
@@ -1664,6 +1670,8 @@
       "invalid_record_count": 540,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 0,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 8611,
@@ -1673,7 +1681,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-aave-1791675286697-1791676125109-d900f3bb1325": {
       "asset_sha256": "d900f3bb1325cc9f789135974802e9ff1816fbd6f78b655ad57b0fd5cce350f7",
@@ -1861,6 +1869,8 @@
       "invalid_record_count": 532,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 2,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 9587,
@@ -1870,7 +1880,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-ada-1791676320218-1791676820320-4983299491d6": {
       "asset_sha256": "4983299491d66c21b5664bdf4b6126f23ee41457b7808cac60bcfa7eb6ffa6ec",
@@ -1882,6 +1892,8 @@
       "invalid_record_count": 382,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 1,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 6859,
@@ -1891,7 +1903,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-ada-1791679408355-1791680160889-91865e4634ae": {
       "asset_sha256": "91865e4634ae3f467636d45510696af82f7c49a54262e3047eb634e7d9fe8f05",
@@ -2058,6 +2070,8 @@
       "invalid_record_count": 537,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 0,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 9591,
@@ -2067,7 +2081,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-aero-1791679327852-1791680410963-7170382e26d7": {
       "asset_sha256": "7170382e26d701f6e4f5c940e5b7ef7297a902dd5654486faa67d92564d839b6",
@@ -2261,6 +2275,8 @@
       "invalid_record_count": 136,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 1,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 2157,
@@ -2270,7 +2286,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-anime-1791415435907-1791418907968-268f760b6dc7": {
       "asset_sha256": "268f760b6dc7de23566adf6cad54d7ea992530e57d9a5250ec670157aff01493",
@@ -3241,6 +3257,8 @@
       "invalid_record_count": 695,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 6,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 7729,
@@ -3250,7 +3268,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-apt-1791679413977-1791680186900-d399f48e4998": {
       "asset_sha256": "d399f48e4998d759cd74e02b285d4994c40b719766f8192698e48bbdefb350f5",
@@ -3574,6 +3592,8 @@
       "invalid_record_count": 406,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 0,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 7782,
@@ -3583,7 +3603,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-ar-1791679505029-1791682988386-462d4ea40323": {
       "asset_sha256": "462d4ea40323321dcfd4f40fd2a96341c17f2a0f83afc1880636df9f686e8298",
@@ -3819,6 +3839,8 @@
       "invalid_record_count": 405,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 1,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 7137,
@@ -3828,7 +3850,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-aster-1791679413952-1791682912296-f4c51e875c43": {
       "asset_sha256": "f4c51e875c43bea8845c5ad7d931c571d7f4b52b0f814079fb5b00dbc7e1dc61",
@@ -4282,6 +4304,8 @@
       "invalid_record_count": 229,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 0,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 4375,
@@ -4291,7 +4315,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-aztec-1791679349654-1791681905168-0b0ee701c808": {
       "asset_sha256": "0b0ee701c8089a632fd76dbded693d855dfb770f3b6539b2ae1136f835d8e522",
@@ -4934,6 +4958,8 @@
       "invalid_record_count": 381,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 1,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 6381,
@@ -4943,7 +4969,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-bome-1791667700575-1791670278469-9e563d475a16": {
       "asset_sha256": "9e563d475a161a7e2389e08ddaf39626edec47fe0f1c2b624bfbcc76791b92e3",
@@ -5393,6 +5419,8 @@
       "invalid_record_count": 318,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 0,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 4884,
@@ -5402,7 +5430,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-brett-1791679413994-1791681423379-43a8873e0ec1": {
       "asset_sha256": "43a8873e0ec17c016be6d7aa14fa84aacfc64819b379a900c9f810bef460d060",
@@ -5722,6 +5750,8 @@
       "invalid_record_count": 166,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 0,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 3164,
@@ -5731,7 +5761,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-celo-1791679414012-1791682911900-d8078b5b825f": {
       "asset_sha256": "d8078b5b825feb8750aa3e745de6ee1241003c5fb389318da9c920ba8f55f876",
@@ -5871,6 +5901,8 @@
       "invalid_record_count": 613,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 0,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 9083,
@@ -5880,7 +5912,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-chip-1791673302164-1791673778511-03c60b57d159": {
       "asset_sha256": "03c60b57d159a0a24ff037c2cdec31341263143e5e2ac7e1e323969e505ffc03",
@@ -5997,6 +6029,8 @@
       "invalid_record_count": 611,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 2,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 9603,
@@ -6006,7 +6040,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-chip-1791676383010-1791676798110-1d3b1b966244": {
       "asset_sha256": "1d3b1b96624406ba8b40ed58dc328fa49e77598e4d787e1a762a97ca29b6fe06",
@@ -6018,6 +6052,8 @@
       "invalid_record_count": 475,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 1,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 7239,
@@ -6027,7 +6063,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-crv-1791673480864-1791676044260-ca8b06e3f55b": {
       "asset_sha256": "ca8b06e3f55b92bd51e0cf301f109cefefb0dd46dd17ae303edcd7620cc1fe3b",
@@ -7433,6 +7469,8 @@
       "invalid_record_count": 298,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 1,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 5872,
@@ -7442,7 +7480,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-ena-1791673491539-1791674531502-439bfe79e4dd": {
       "asset_sha256": "439bfe79e4ddad38cce17ae7530d5c06596bac026bc23f762cd4fef5f96d742f",
@@ -7781,6 +7819,8 @@
       "invalid_record_count": 107,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 1,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 2576,
@@ -7790,7 +7830,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-ens-1791679365760-1791682861230-5c6a3edee446": {
       "asset_sha256": "5c6a3edee4463e88cc0a8a498ac673cd03f5fdc30977156b0b0ed133b1c0eaa0",
@@ -7974,6 +8014,8 @@
       "invalid_record_count": 504,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 4,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 9550,
@@ -7983,7 +8025,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-eth-1791676290363-1791676768774-971f5ac32b75": {
       "asset_sha256": "971f5ac32b75eed81ba5cb6c2800b409faf2b0a2c8a9e43315391f25f6ec73be",
@@ -7995,6 +8037,8 @@
       "invalid_record_count": 508,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 2,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 9557,
@@ -8004,7 +8048,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-eth-1791676768863-1791676975578-6b7a0a4d64d8": {
       "asset_sha256": "6b7a0a4d64d83e1fcda55a8a35c720a95885aff80bb874a79dc59014a883263f",
@@ -8420,6 +8464,8 @@
       "invalid_record_count": 534,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 1,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 9525,
@@ -8429,7 +8475,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-fet-1791673323895-1791676461008-bc9d744c7279": {
       "asset_sha256": "bc9d744c72792723a3ac69d0c777f0de26cb28ff1880af47c5749506afb8f076",
@@ -8441,6 +8487,8 @@
       "invalid_record_count": 578,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 1,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 9598,
@@ -8450,7 +8498,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-fet-1791679413723-1791682043550-b45c0749e40a": {
       "asset_sha256": "b45c0749e40a6c7d12d0c6f7ddd4a56c3f5b38034178695a3df284820c4b6596",
@@ -8613,6 +8661,8 @@
       "invalid_record_count": 526,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 1,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 9539,
@@ -8622,7 +8672,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-fil-1791681016334-1791681862334-5eaecf716462": {
       "asset_sha256": "5eaecf71646282b76a3a3b5a83beaa87070efad918e22351e127b867d92b1ddf",
@@ -9114,6 +9164,8 @@
       "invalid_record_count": 781,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 4,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 9578,
@@ -9123,7 +9175,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-hbar-1791676511176-1791677184278-6737d0f4514a": {
       "asset_sha256": "6737d0f4514a68971dd9fa53fadb0474cbeef888403aaa5658c36fb31839f799",
@@ -10490,6 +10542,8 @@
       "invalid_record_count": 342,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 1,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 6357,
@@ -10499,7 +10553,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-layer-1791679323423-1791682820500-ddf1a69d549d": {
       "asset_sha256": "ddf1a69d549d0480a4a40f8f1f6ffce29a255f93cf0231231ab0a6a74e95985e",
@@ -10827,6 +10881,8 @@
       "invalid_record_count": 535,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 2,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 9602,
@@ -10836,7 +10892,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-lit-1791679323523-1791680604007-939091df68fa": {
       "asset_sha256": "939091df68fa7061da3113859067a5c409b1c2cad41941183faca7e8c1990cbe",
@@ -11089,6 +11145,8 @@
       "invalid_record_count": 143,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 0,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 2777,
@@ -11098,7 +11156,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-merl-1791673307781-1791676801389-b92740664156": {
       "asset_sha256": "b92740664156f273c82b188359e7acf453b16eeeee7c8f8f129821b00dfede84",
@@ -11110,6 +11168,8 @@
       "invalid_record_count": 306,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 2,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 5322,
@@ -11119,7 +11179,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-met-1791427995818-1791431489628-d5aff8c819d9": {
       "asset_sha256": "d5aff8c819d98fa57f801ade8d53fed65c69cac56f34f37eaaa471a8e46a58fb",
@@ -11870,6 +11930,8 @@
       "invalid_record_count": 364,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 3,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 5231,
@@ -11879,7 +11941,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-met-1791679365761-1791680632310-1e2c4462fd3e": {
       "asset_sha256": "1e2c4462fd3ec1a0bf53e778f8fc7a6b0eeeb8122931cf6e8202d4747c27a543",
@@ -12270,6 +12332,8 @@
       "invalid_record_count": 404,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 1,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 7690,
@@ -12279,7 +12343,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-moodeng-1791679371279-1791682861035-b2f74816582f": {
       "asset_sha256": "b2f74816582f27e00889b673efec304564f4fddc496f3cd3f7e65faf3b1c42a6",
@@ -12809,6 +12873,8 @@
       "invalid_record_count": 527,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 2,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 9586,
@@ -12818,7 +12884,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-near-1791676364688-1791676958406-588e20da8e9a": {
       "asset_sha256": "588e20da8e9a0696117e089e9b9e954eb8f4664f01b651f7e53497dc2cd27ff5",
@@ -13785,6 +13851,8 @@
       "invalid_record_count": 474,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 1,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 9424,
@@ -13794,7 +13862,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-pendle-1791679371280-1791682861230-699952040051": {
       "asset_sha256": "699952040051ae65fe894a7fb05d7af04147c733e465abbf13c652cb8c4d2fa1",
@@ -14388,6 +14456,8 @@
       "invalid_record_count": 610,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 2,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 9564,
@@ -14397,7 +14467,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-pengu-1791679413948-1791681020926-d38b6eb4ecf4": {
       "asset_sha256": "d38b6eb4ecf41f3e46c7ec5e82878647be9fdab4525b11c177d14da30c607d39",
@@ -14455,6 +14525,8 @@
       "invalid_record_count": 200,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 1,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 4490,
@@ -14464,7 +14536,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-pol-1791673514255-1791676825416-c838a2c9b0a3": {
       "asset_sha256": "c838a2c9b0a35bac3eb3af75519adb43f9d668b09556a36dedfab899535d741d",
@@ -14476,6 +14548,8 @@
       "invalid_record_count": 534,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 1,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 9595,
@@ -14485,7 +14559,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-popcat-1791667695195-1791671194264-d242e8adc479": {
       "asset_sha256": "d242e8adc4793ffd3d51ec65506b329a2ff5cd47eccf41b2091c15fa2bab680a",
@@ -14606,6 +14680,8 @@
       "invalid_record_count": 533,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 2,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 9574,
@@ -14615,7 +14691,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-pump-1791676499565-1791677013468-27d27437a141": {
       "asset_sha256": "27d27437a14149aa00d78466c5356d6c941dc19eeedc92e58cf9d73bad636f9d",
@@ -14941,6 +15017,8 @@
       "invalid_record_count": 991,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 6,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 9586,
@@ -14950,7 +15028,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-pyth-1791676747464-1791676810894-146ce08ef5cc": {
       "asset_sha256": "146ce08ef5cc1c9eb6ae0935df2aaf7a6250cbe73698d2530399bc383caf8cca",
@@ -14962,6 +15040,8 @@
       "invalid_record_count": 12,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 0,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 132,
@@ -14971,7 +15051,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-pyth-1791679365763-1791681920527-6a6f94544e32": {
       "asset_sha256": "6a6f94544e324c96b5a9a8e4780311fdbe47284d152572c25f5224faaed21a43",
@@ -16849,6 +16929,8 @@
       "invalid_record_count": 383,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 2,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 6904,
@@ -16858,7 +16940,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-sky-1791679365764-1791682859903-6105264257b9": {
       "asset_sha256": "6105264257b9c0360300bb786aaffb0d1e19ab4a2f9b469607ecdd59964f5c00",
@@ -18342,6 +18424,8 @@
       "invalid_record_count": 670,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 11,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 9579,
@@ -18351,7 +18435,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-strk-1791676572608-1791676840634-2562ea4313bc": {
       "asset_sha256": "2562ea4313bc4630a28a0256f1b258b8ff27da966ba3f669b0bb6a621010dfad",
@@ -18363,6 +18447,8 @@
       "invalid_record_count": 351,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 2,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 5371,
@@ -18372,7 +18458,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-strk-1791679414069-1791679876087-2dbf6ef3f8bd": {
       "asset_sha256": "2dbf6ef3f8bdac0cc01888bef743bb70b6d10068aa4a4a7b52e8da598f7cd379",
@@ -18943,6 +19029,8 @@
       "invalid_record_count": 366,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 1,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 6723,
@@ -18952,7 +19040,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-stx-1791679365764-1791682861170-c75167998280": {
       "asset_sha256": "c75167998280e0ba35b69c98b0caad5583d263cd54630f04b0d21f4e1885dc1a",
@@ -19029,6 +19117,8 @@
       "invalid_record_count": 481,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 1,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 9571,
@@ -19038,7 +19128,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-sui-1791676306462-1791676805787-bd57bbfefa1b": {
       "asset_sha256": "bd57bbfefa1b0ee95063ef2fc80a30271bd2a887ec917e8eaa2f9061e69e7076",
@@ -19050,6 +19140,8 @@
       "invalid_record_count": 340,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 1,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 5957,
@@ -19059,7 +19151,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-sushi-1791444972741-1791448469879-d89bc25a39ae": {
       "asset_sha256": "d89bc25a39ae634d576b3e8eafcd70885f302d42e1a8bfa5b6560392a35454d2",
@@ -19201,6 +19293,8 @@
       "invalid_record_count": 241,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 0,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 4225,
@@ -19210,7 +19304,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-sushi-1791679505040-1791682993888-13dd9c6c1c12": {
       "asset_sha256": "13dd9c6c1c12e5468f885cd7b9db4138305dd8c92b906c823ebe47e2138a8e98",
@@ -20043,6 +20137,8 @@
       "invalid_record_count": 625,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 2,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 9596,
@@ -20052,7 +20148,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-tia-1791676449962-1791676810909-dc5cf9bd1e6d": {
       "asset_sha256": "dc5cf9bd1e6da02ccedf65fc4001a70f1c73f598a7fa0ec6867dd31a4b264f38",
@@ -20064,6 +20160,8 @@
       "invalid_record_count": 405,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 3,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 6566,
@@ -20073,7 +20171,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-tia-1791679365764-1791679908391-5e31e0196867": {
       "asset_sha256": "5e31e019686749338128aa447529348d430d48ede9c65e950189e137593d8573",
@@ -21234,6 +21332,8 @@
       "invalid_record_count": 537,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 2,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 9595,
@@ -21243,7 +21343,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-w-1791676844291-1791676995795-c5d8164fa6fb": {
       "asset_sha256": "c5d8164fa6fb92e37aa0a797536abc9cb9da75bbaeb8dc15ae878eff385be463",
@@ -22516,6 +22616,8 @@
       "invalid_record_count": 559,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 2,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 9569,
@@ -22525,7 +22627,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-wld-1791676340233-1791676840638-6553e53212f6": {
       "asset_sha256": "6553e53212f66b39b10ac3e7ef1f1d7b47a6db4bac5b367e7e2dd46046712731",
@@ -22537,6 +22639,8 @@
       "invalid_record_count": 353,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 2,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 5947,
@@ -22546,7 +22650,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-wld-1791679414119-1791680203784-8c0302b2675b": {
       "asset_sha256": "8c0302b2675b117a4de7c41512ad2cbab161940cad71ad4321e3c770b4a5f4c8",
@@ -22824,6 +22928,8 @@
       "invalid_record_count": 514,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 0,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 9570,
@@ -22833,7 +22939,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-xrp-1791676481094-1791676805681-fea73adb7281": {
       "asset_sha256": "fea73adb72811ffb659af6b164a2caa92b8c5e6e146d7cee51d038402db93da4",
@@ -22845,6 +22951,8 @@
       "invalid_record_count": 273,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 0,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 4894,
@@ -22854,7 +22962,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-ygg-1791673685480-1791677184135-5c1bb7d2635d": {
       "asset_sha256": "5c1bb7d2635d8a1035e2ce7990fcc3bcc2a59aa3d2f0b6c26f0d250732cdbf3f",
@@ -22973,6 +23081,8 @@
       "invalid_record_count": 545,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 4,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 9586,
@@ -22982,7 +23092,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-zec-1791676626410-1791676995803-82e6296353ac": {
       "asset_sha256": "82e6296353ac0cc216d6adcba62a9d3ff40699d2d3f200257ca6f7657d0dafbd",
@@ -23258,6 +23368,8 @@
       "invalid_record_count": 188,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 0,
+      "quality_status_after": "REJECT",
+      "quality_status_before": "REJECT",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 3510,
@@ -23267,7 +23379,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "cross-venue-derived-capacity-cross-venue-capacity-tape-zeta-1791679505063-1791682999073-e1cd60a78523": {
       "asset_sha256": "e1cd60a78523496799377f283fbbfeab856a5d51d1836d959e711cace24671ac",
@@ -24024,6 +24136,8 @@
       "invalid_record_count": 1966,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 0,
+      "quality_status_after": "PARTIAL",
+      "quality_status_before": "PARTIAL",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 1966,
@@ -24033,7 +24147,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "gate-derived-capacity-capacity-tape-oura-usdt-1790991000882-1790994463982-d566e0bd62dd": {
       "asset_sha256": "d566e0bd62dd6363c46112efe4516d5af0c9c3bfd9808a1ae6aeea59ed948de8",
@@ -24213,6 +24327,8 @@
       "invalid_record_count": 654,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 0,
+      "quality_status_after": "PARTIAL",
+      "quality_status_before": "PARTIAL",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 654,
@@ -24222,7 +24338,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "hyperliquid-derived-capacity-capacity-tape-alt-1790990991598-1790994490730-7014d68394bd": {
       "asset_sha256": "7014d68394bdbf87a6752411020bff71ff7f871ac1dcc435e719f43de3df3277",
@@ -24234,6 +24350,8 @@
       "invalid_record_count": 654,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 0,
+      "quality_status_after": "PARTIAL",
+      "quality_status_before": "PARTIAL",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 654,
@@ -24243,7 +24361,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "hyperliquid-derived-capacity-capacity-tape-bio-1790990991675-1790994490730-8088e6f1c4d2": {
       "asset_sha256": "8088e6f1c4d29e5d4c0ffa0803de14f03701126bb080667b39ba7ee7864c5321",
@@ -24255,6 +24373,8 @@
       "invalid_record_count": 654,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 0,
+      "quality_status_after": "PARTIAL",
+      "quality_status_before": "PARTIAL",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 654,
@@ -24264,7 +24384,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "hyperliquid-derived-capacity-capacity-tape-crv-1790990991676-1790994490731-100ae10d5b4d": {
       "asset_sha256": "100ae10d5b4d57063d6be8ec98a877d5b61bb73e5f4eb265aedd178e6bc2e60f",
@@ -24276,6 +24396,8 @@
       "invalid_record_count": 654,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 0,
+      "quality_status_after": "PARTIAL",
+      "quality_status_before": "PARTIAL",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 654,
@@ -24285,7 +24407,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "hyperliquid-derived-capacity-capacity-tape-eth-1790990991747-1790994490731-9df3a0fd3f43": {
       "asset_sha256": "9df3a0fd3f433e9149048f85701fcf7e6881b580811bcedcb16695ab48aee248",
@@ -24297,6 +24419,8 @@
       "invalid_record_count": 654,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 0,
+      "quality_status_after": "PARTIAL",
+      "quality_status_before": "PARTIAL",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 654,
@@ -24306,7 +24430,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "hyperliquid-derived-capacity-capacity-tape-goat-1790990991810-1790994490731-b8ab764e929c": {
       "asset_sha256": "b8ab764e929c6a180c24edb5c6f393676e67c7ef5f4ae54507b4a9ba3ceec8fb",
@@ -24318,6 +24442,8 @@
       "invalid_record_count": 654,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 0,
+      "quality_status_after": "PARTIAL",
+      "quality_status_before": "PARTIAL",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 654,
@@ -24327,7 +24453,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "hyperliquid-derived-capacity-capacity-tape-gram-1790990991837-1790994490731-fd54e108525e": {
       "asset_sha256": "fd54e108525e77da6422a82f7e049c5b39371d13c88435da07a134e17d3dac10",
@@ -24339,6 +24465,8 @@
       "invalid_record_count": 654,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 0,
+      "quality_status_after": "PARTIAL",
+      "quality_status_before": "PARTIAL",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 654,
@@ -24348,7 +24476,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "hyperliquid-derived-capacity-capacity-tape-iota-1790990991860-1790994490732-899edbe1b492": {
       "asset_sha256": "899edbe1b4924313ea6d854fd1bb0afa2b2f0e75d88afdecac8c850db01b63c4",
@@ -24360,6 +24488,8 @@
       "invalid_record_count": 654,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 0,
+      "quality_status_after": "PARTIAL",
+      "quality_status_before": "PARTIAL",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 654,
@@ -24369,7 +24499,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "hyperliquid-derived-capacity-capacity-tape-jto-1790990991915-1790994490732-ea1bd5d8b32b": {
       "asset_sha256": "ea1bd5d8b32b0aaf0b78930346f50b7869e3c8a8614927abe9f838eb10886de4",
@@ -24381,6 +24511,8 @@
       "invalid_record_count": 654,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 0,
+      "quality_status_after": "PARTIAL",
+      "quality_status_before": "PARTIAL",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 654,
@@ -24390,7 +24522,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "hyperliquid-derived-capacity-capacity-tape-jup-1790990991975-1790994490732-b9287d83a2ae": {
       "asset_sha256": "b9287d83a2aee605aee4e9a68d3ff9a2ce6fdc91098799be395464fc5d3ccd91",
@@ -24402,6 +24534,8 @@
       "invalid_record_count": 654,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 0,
+      "quality_status_after": "PARTIAL",
+      "quality_status_before": "PARTIAL",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 654,
@@ -24411,7 +24545,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "hyperliquid-derived-capacity-capacity-tape-layer-1790990992029-1790994490873-1dabc7b8b7bc": {
       "asset_sha256": "1dabc7b8b7bc09a268f7a9a8a7990cfde03650de988f76647ce9097c8628879e",
@@ -24446,6 +24580,8 @@
       "invalid_record_count": 653,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 0,
+      "quality_status_after": "PARTIAL",
+      "quality_status_before": "PARTIAL",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 653,
@@ -24455,7 +24591,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "hyperliquid-derived-capacity-capacity-tape-lit-1790990992189-1790994490874-ebae7e8df129": {
       "asset_sha256": "ebae7e8df1291a2f93d2dd508d6063c7ea1ab73a9ab004c63b7708f234886f50",
@@ -54225,6 +54361,8 @@
       "invalid_record_count": 4469,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 0,
+      "quality_status_after": "PARTIAL",
+      "quality_status_before": "PARTIAL",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 4469,
@@ -54234,7 +54372,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "okx-derived-capacity-capacity-tape-bio-usdt-swap-1790990992417-1790994490799-f8f3b2db7a31": {
       "asset_sha256": "f8f3b2db7a3115f1f8353c241451a5649cc437ac54685690a4734acb7799fbf4",
@@ -54246,6 +54384,8 @@
       "invalid_record_count": 7020,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 0,
+      "quality_status_after": "PARTIAL",
+      "quality_status_before": "PARTIAL",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 7020,
@@ -54255,7 +54395,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "okx-derived-capacity-capacity-tape-brkb-usdt-swap-1790990992405-1790994489203-fe6d8a1978d2": {
       "asset_sha256": "fe6d8a1978d2d6630a905e95b963329b2d33eda241ae09d0c64495144ae23c1b",
@@ -54460,6 +54600,8 @@
       "invalid_record_count": 1544,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 0,
+      "quality_status_after": "PARTIAL",
+      "quality_status_before": "PARTIAL",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 1544,
@@ -54469,7 +54611,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "okx-derived-capacity-capacity-tape-kii-usdt-swap-1790990992410-1790994490701-bcb5cfefc5f3": {
       "asset_sha256": "bcb5cfefc5f3c312f57c881d9300fedcf9b7bfef97afdbb7521a34b4fdcab3d1",
@@ -54481,6 +54623,8 @@
       "invalid_record_count": 3399,
       "method": "parse_chronology_smoke",
       "out_of_order_count": 0,
+      "quality_status_after": "PARTIAL",
+      "quality_status_before": "PARTIAL",
       "receive_only_context_verified": false,
       "receive_only_snapshot_verified": false,
       "record_count": 3399,
@@ -54490,7 +54634,7 @@
       "trade_count": 0,
       "trade_count_exact": true,
       "verified_from_release": true,
-      "verifier_version": "alina.replay.compatibility.v8"
+      "verifier_version": "alina.replay.compatibility.v9"
     },
     "okx-derived-capacity-capacity-tape-layer-usdt-swap-1790990992580-1790994490699-22b665bdcc52": {
       "asset_sha256": "22b665bdcc52276081283305ad940b75b5a4d119ad41754bcbfa34f7b80a8c84",
