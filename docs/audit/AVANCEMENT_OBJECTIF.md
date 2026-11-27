@@ -3458,3 +3458,18 @@ Le labo a été redémarré avec ce code (PID 37636, même environnement, étude
 - 70 tests passent.
 - **2e passage autonome observé** : lancé seul à 19 h 23 min 49 s.
 
+**27/11, 19 h 35 : 2e passage AUTONOME terminé (code 0), avec un RETOUR ARRIÈRE de méthode décidé SEUL.**
+
+Le banc 6 (graines neuves 6000 à 6047, 4 horizons depuis l'ajout du 48 h) a mesuré la méthode v2 à **11,1 % de fausses découvertes** à 40 bps, au-delà de la limite de 5 %. C'est le risque signalé plus tôt (12,5 %). Règle appliquée : `RETOUR_ARRIERE` vers la variante la plus sûre.
+
+| Méthode | DSR | Fausses découvertes | Rappel |
+|---|---:|---:|---:|
+| v2 | ≥ 0,95 | 11,1 % | 31,2 % |
+| v3 | ≥ 0,975 | 3,1 % | 28,1 % |
+
+La v3 garde les essais effectifs. Les autres variantes donnent entre 3,8 et 14,3 % de faux. `METHODE_COURANTE.json` = v3.
+
+Le labo s'est donc rendu plus STRICT de lui-même dès qu'une mesure a montré trop de faux. Ce sont l'invalidation et le retour arrière automatiques de la méthode, au même titre que ceux des candidats.
+
+Campagne 7 : 292 cellules, N = 167, aucun gel ni nouvelle surveillance. Les 5 challengers restent en suivi PAPER. Champion : AUCUN_TRADE.
+
