@@ -68,6 +68,24 @@ def pid_vivant(pid: int) -> bool:
         return True                         # dans le doute, on NE vole PAS le verrou
 
 
+def meme_processus(pid: int, depuis: float) -> bool | None:
+    """Le processus ``pid`` est-il CELUI qui a pris le verrou a ``depuis`` ? ``None`` = indecidable.
+
+    26/11/2026 -- un scellage manuel lance a 17:01 dure toute la nuit (rotations BBO d'octobre jamais
+    scellees). Le verrou, jamais rafraichi, devenait « perime » a 23:01 alors que son PID etait VIVANT, et le
+    certificateur en continu (toutes les 30 min) l'aurait pris : deux ecrivains sur SOURCES_TRAITEES.json, le
+    cas meme que ce module empeche. Un PID reutilise apres un redemarrage est forcement NE APRES le verrou ;
+    le processus qui a pris le verrou est ne AVANT (mesure : 0,7 s avant).
+    """
+    try:
+        import psutil
+
+        return bool(psutil.Process(int(pid)).create_time() <= float(depuis) + 5.0)
+    except Exception as exc:                                       # noqa: BLE001 -- psutil optionnel
+        _noter_echec("ops/verrou_pid.py:meme_processus", exc)
+        return None
+
+
 def prendre(chemin: Path, *, perime_s: float = PERIME_S_DEFAUT,
             quoi: str = "un passage") -> tuple[bool, str]:
     """``(obtenu, explication)``. Un verrou vivant interdit un second écrivain."""
@@ -85,6 +103,11 @@ def prendre(chemin: Path, *, perime_s: float = PERIME_S_DEFAUT,
     if pid and pid_vivant(pid) and (age is None or age < float(perime_s)):
         return False, (f"{quoi} tourne deja (PID {pid}"
                        + (f", depuis {age / 60:.0f} min" if age is not None else "") + ")")
+    if pid and age is not None and pid_vivant(pid) and meme_processus(pid, depuis) is True:
+        # Plus vieux que `perime_s`, mais c'est bien LE processus qui l'a pris, et il vit : un passage long,
+        # pas un reste de passage tue. Le voler ferait tourner deux ecrivains.
+        return False, (f"{quoi} tourne deja (PID {pid}, depuis {age / 3600:.1f} h : passage long, "
+                       "toujours le meme processus vivant)")
     explication = ""
     if pid:
         explication = (f"verrou PERIME recupere (PID {pid} absent ou plus vieux que "

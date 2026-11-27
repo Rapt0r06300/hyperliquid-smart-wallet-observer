@@ -170,3 +170,18 @@ def test_le_contexte_d_entree_est_enregistre_sans_changer_le_gain() -> None:
     sans = CF.simuler([{**ligne, "px": 100.0}], tape, {VAULT: 1_000_000.0}, frac_tvl=0.0005, stop_bps=400.0,
                       horizon_ms=H, depuis_ms=0, now_ms=20 * H, etiquette="t")["cycles"][0]
     assert sans["realized_usd"] == c["realized_usd"]                                 # le contexte ne change pas le gain
+
+
+def test_un_fill_deja_inscrit_n_est_plus_recompte_sans_prix() -> None:
+    """26/11/2026 : chaque passe recomptait TOUS les fills depuis le début en « sans_prix » (la bande de prix ne couvre
+    que ~4 h 30) : 97 488 affichés pour 98,7 % de fills qui avaient leur prix. Un fill déjà jugé est désormais sauté
+    AVANT d'être compté, sans rien changer aux fills neufs ni à leurs résultats."""
+    tape = {"BTC": [p for p in _tape(2)["BTC"] if p[0] >= 20 * H]}            # bande récente seulement
+    lignes = [_ouverture(5 * H, ident="vieux"), _ouverture(22 * H, ident="neuf")]
+    avant, c_avant = AP.simuler_les_fills(lignes, tape, {VAULT: 1_000_000.0}, debut_ms=0, now_ms=40 * H)
+    apres, c_apres = AP.simuler_les_fills(lignes, tape, {VAULT: 1_000_000.0}, debut_ms=0, now_ms=40 * H,
+                                          deja={"vieux"})
+    assert [r["identite"] for r in apres] == [r["identite"] for r in avant] == ["neuf"]
+    assert apres == avant                                                    # mêmes résultats pour le neuf
+    assert c_avant["sans_prix"] == 45 and c_apres["sans_prix"] == 0          # le vieux n'est plus « sans prix »
+    assert c_apres["deja_inscrits"] == 45

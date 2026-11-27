@@ -3153,3 +3153,176 @@ fournis. Sans collecte, le labo n a toujours pas d episode complet de l entree a
   - Les 11 fills et 102 carnets rattrapés sont dans les rubans vivants mais pas encore au coffre (contrôle à 19:0x). Le Certificateur manuel tient le verrou ; ils seront scellés au premier passage qui suit sa fin. Les fusions, en ajout seul, ne peuvent plus les retirer.
   - Les 14 commits de retard sur GitHub sont des « claims » de campagne du cloud : le prochain AlinaSync ou le prochain push les adopte.
   - Le Certificateur manuel tourne jusqu'au bout (rotations BBO d'octobre jamais scellées, plusieurs heures). Pas d'optimisation lancée : le temps vient de la certification ligne à ligne (environ 4 000 lignes/s), pas d'un rechargement répété.
+
+### Complément 26/11/2026 soir (Claude) — Moteur d'auto-amélioration : le faux « 9 sur 10 sans prix », verrou des longs scellages, bouton OPTIMISE
+
+- **Compteur « sans_prix » du moteur (apprentissage parallèle) : c'était un défaut de comptage, pas un manque de prix.** Chaque passe (toutes les 5 min) re-simulait tous les fills depuis le 22/11, avec une bande allMids limitée à environ 4 h 30. Les fills déjà jugés retombaient donc en « sans_prix » à chaque passe : 97 488 affichés, alors que 98,7 % des ouvertures ont un prix en moins de 30 s (médiane 2,4 s, mesuré sur 6 h).
+  - Correctif : `cycles_fantomes.simuler(..., deja=...)` saute les identités déjà inscrites AVANT de les compter (nouveau compteur `deja_inscrits`).
+  - Preuve : sur les vraies données, l'ancien et le nouveau moteur rendent les mêmes décisions et les mêmes fills (10 clés comparées). « sans_prix » passe de 98 397 à 783 (somme sur 45 variantes, soit environ 17 fills, ceux d'avant le début de la bande actuelle, environ 0,5 %).
+  - Test : `test_un_fill_deja_inscrit_n_est_plus_recompte_sans_prix`. Effet au prochain redémarrage du collecteur userfills, qui héberge le moteur.
+  - Le blocage reste l'absence d'avance : 44 variantes sur 45 éliminées, la dernière à −0,02 USD/cycle.
+- **Verrou des longs scellages** (`ops/verrou_pid.py`). Un verrou de plus de 6 h était déclaré « périmé » même quand son PID vivait. Le Certificateur manuel de 17:01 (toute la nuit) aurait perdu son verrou à 23:01 au profit du Certificateur en continu : deux écrivains sur `SOURCES_TRAITEES.json`. Désormais, un verrou ancien reste valable si c'est le MÊME processus vivant, né avant le verrou (`meme_processus`, psutil ; un PID réutilisé, né après, le perd). Test : `tests/test_verrou_pid_passage_long.py` (4). Actif tout de suite : le Certificateur en continu relance son script à chaque passage.
+- **Bouton `OPTIMISE.cmd` (le 9e)**, dans `tools/optimise.py`, encore local et non poussé. Il enchaîne, tels quels :
+  - contrôles ;
+  - la collecte, ouverte comme un double-clic par l'Explorateur si elle est arrêtée, jamais arrêtée ;
+  - POUSSER-GITHUB, puis AlinaSync, avec repoussée et nouvelle tentative si le refus code 2 vient de Codex ;
+  - les données externes ;
+  - le Certificateur, en ATTENDANT un scellage déjà en cours, qui sinon rendrait 0 sans rien sceller ;
+  - la vérification : recensement avec une passe de plus si besoin, doublons exacts, parité GitHub ;
+  - le labo `once`, l'ETA de collecte, puis le bilan dans `runtime/reports/optimise/DERNIER_PASSAGE.json`.
+  - Déclaré aux 4 endroits. Tests : `tests/test_optimise.py` (13). `--plan` vérifié en fenêtre propre, rc=0.
+  - Reste à faire : les tests de lanceurs et de topologie, arrêtés par manque de mémoire, puis le push.
+
+### PLAN DU 27/11/2026 (décidé le 26/11 au soir, Florent : « comme tu veux »)
+
+1. Vérifier que le Certificateur manuel de 17:01 est terminé. Contrôler que les 11 fills et 102 carnets rattrapés sont bien au coffre.
+2. Relancer les tests de lanceurs et de topologie, arrêtés le 26/11 faute de mémoire, puis **pousser** : OPTIMISE.cmd, le verrou `meme_processus`, le compteur `deja_inscrits`.
+3. **Chasse aux pertes silencieuses** dans tout le projet, sur les trois familles trouvées le 26/11 :
+   - a. les fichiers vivants réécrits (tri + renommage) pendant qu'un collecteur les remplit ;
+   - b. les fichiers à plusieurs écrivains en mode `"a"` (à passer à `ajouter_atomique`) ;
+   - c. les filtres qui retirent des lignes brutes d'un ruban.
+   Commencer par la fusion du ruban **poll** : mesurer par identité ce que `vault_fills_poll.jsonl.avant-fusion.bak` (3,9 Go) contient et que le ruban et le coffre n'ont pas.
+4. Premier vrai passage d'OPTIMISE par double-clic.
+
+### Complément 26/11/2026 nuit (Claude) — Portage couvert sur funding : premier chiffre (Florent : « si tu penses qu'on peut se faire un revenu dessus, oui »)
+
+- **Décision de Florent** : la piste funding/portage est rouverte **en recherche PAPER** (exception à « CopyVault seul »). Aucun ordre.
+- **Mesure (lecture seule, coffre `funding_history`, 1 112 jours, 377 coins, 11/2023 → 11/2026)** : chaque mois, les K coins au funding moyen le plus fort sur les 30 jours PRÉCÉDENTS (couverts sur au moins 90 % des heures) ; on encaisse leur funding des 30 jours suivants. Frais de 18 bps par coin qui entre ou sort. Hypothèses optimistes : couverture parfaite, base ignorée, jambe d'en face disponible.
+  - Tous les coins (K = 3/5/10) : +26 à +35 %/an du notionnel (~13 à 17 %/an du capital à 2 jambes). **Mirage** : la sélection tombe sur des marchés non couvrables (`xyz:NATGAS`, `xyz:SOFTBANK`, `para:AVGO`, CASHCAT, GRIFFAIN…).
+  - **20 gros coins couvrables** (BTC, ETH, SOL, NEAR, DOGE, LINK, SUI, HYPE…) : **+14 à +17 %/an du notionnel, ~7 à 8 %/an du capital, 0 mois perdant sur 36** (K = 3/5). Mais il est en baisse : environ 60 bps/mois en moyenne sur les 6 derniers mois (~4 %/an du capital), et +11 bps le dernier mois.
+- **Lecture** : un revenu régulier mais modeste, du même ordre que HLP (environ 5 %/an récemment). Pas un fort PnL. Cohérent avec l'essai 22 de `GOAL2_CHASSE_ALPHA.md` (funding +2,4 bps/jour, « stratégie de base, pas une copie »).
+- **Suite proposée (27/11)** : une vraie étude du portage couvert, en PAPER. Vrais prix des deux jambes (base), frais réels de la jambe d'en face, marge de sécurité contre les flambées, puis suivi en direct sur quelques semaines. Script du premier chiffre : `carry_premier_chiffre.py`, dans le dossier temporaire de la session (à reprendre dans `tools/`).
+- **Étude du labo `funding_hedged_carry_majors`** (Florent : « sur le labo fait quand même des tests funding »). Module pur `src/hl_observer/backtesting/portage_couvert.py`, règle FIGÉE dans sa docstring avant la mesure. Commande `tools/etude_copiabilite.py --portage`, étape ajoutée au mode copiabilité de `LANCER_LAB_QUANT_COPY_VAULT.cmd`, extracteur `_portage` dans le planificateur. Tests : `tests/test_portage_couvert.py` (8 : causalité, frais aux seuls changements, marché non couvrable jamais choisi, funding négatif, verdicts, planificateur, rapport).
+  - **Premier passage réel (26/11 nuit) : `PROMISING`**, le PREMIER de l'histoire du labo. 36 mois, 20 coins couvrables. Net +129,1 bps/mois du notionnel, IC95 (blocs de 3 mois) [+70,8 ; +194,7]. Validation (dernier tiers) +54,7 bps/mois. ~+10,5 %/an du capital (marge 50 %). Dernier choix : APT, DOGE, LTC, NEAR, SUI. Le plan de recherche le place priorité n°1.
+  - Limites : couverture parfaite, comptant disponible et aucune liquidation sont SUPPOSÉS ; le rendement baisse (validation à la moitié de la moyenne). Selon la règle du labo, il faut le confirmer sur des mois NOUVEAUX. Prochaine étape : un suivi PAPER en direct (vrais prix des deux jambes), mois par mois.
+
+## Complément 27/11/2026 — Moteur de découverte CopyVault (/goal « labo autonome »)
+
+**Correctif d'honnêteté sur le portage (relecture du 26/11 au soir).** Le « PROMISING » de `funding_hedged_carry_majors` est une mesure IN-SAMPLE. K = 5, l'univers de 20 coins et les mêmes 36 mois avaient été regardés avant que la règle soit « figée », et la liste est celle des gros coins d'aujourd'hui. Docstring, rapport et mémoire corrigés. Le planificateur la classe désormais HORS famille CopyVault (`HORS_FAMILLE_COPYVAULT` : priorité 0, jamais « prochaine action »). `--portage` sans funding rend 0 et n'interrompt plus le lanceur du labo.
+
+**OPTIMISE.** `OPTIMISE.cmd` a été mis à la corbeille par Florent le 26/11 à 22:07. Ses inscriptions dans les 4 registres sont commentées et datées. `tools/optimise.py` et son test sont gardés en local, exclus de la poussée par `.git/info/exclude`.
+
+**Ce qui existe maintenant.**
+- `src/hl_observer/backtesting/copy_vault_decouverte.py` (pur) : décisions depuis les épisodes, prédicats causaux, populations, grammaire, juge, mémoire, banc à vérité connue.
+- `copy_vault_champion_challenger.py` (pur).
+- `tools/decouverte_copyvault.py` : `--banc`, `--campagne`, `--suivi`.
+- Étape `copiabilite-decouverte` dans `LANCER_LAB_QUANT_COPY_VAULT.cmd` et extracteur `_decouverte` du planificateur.
+- Tests : `test_copy_vault_decouverte.py` (16), `test_decouverte_copyvault_outil.py` (4, faux coffre de bout en bout).
+- Le juge est RÉUTILISÉ : DSR = `research/deflated_sharpe.py`, PBO = `robustesse_selection.pbo_cscv`, essais = `experimental/registre_essais.py`.
+
+**Grammaire.** 9 dimensions, chacune un mécanisme : action, taille causale, consensus, opposition, tendance 24 h, volatilité, sens du funding, historique dénoué du leader, session. Elles se croisent avec suivre / contrer × 4, 12, 24 h × au plus 2 prédicats. Les croisements de profondeur 2 sont tirés par la mémoire (Thompson). Toutes les cellules sont pré-enregistrées AVANT la mesure, et toutes comptent dans le N du DSR avec les essais antérieurs.
+
+**Populations.** Les 38 vaults sont entrés dans `config/copy_vault_leaders.json` entre le 9 et le 24/11 (historique Git).
+- EXPLORATION : décisions dénouées avant la 1re entrée. Biaisées en faveur de « suivre », elles servent seulement à choisir.
+- VALIDATION : après coupure + embargo de 24 h, leader déjà suivi.
+- SUIVI : après le gel. C'est la seule preuve recevable.
+
+**Garde-fous fixes** (`GARDE_FOUS`, aucune variante de méthode ne peut les affaiblir) : DSR ≥ 0,95, PBO ≤ 0,5, ≥ 20 jours d'exploration et 3 leaders, ≥ 30 jours de suivi avant promotion, Benjamini-Hochberg q = 0,10. Champion par défaut : AUCUN_TRADE. Invalidation si la borne haute de l'IC95 du suivi est < 0 ou si Page-Hinkley détecte une dérive. Un champion invalidé déclenche un retour arrière automatique. Rien n'est appliqué au moteur.
+
+**Auto-amélioration mesurée.** Le banc compare la méthode à ses voisines (un paramètre près, jamais sous les garde-fous) sur des mondes synthétiques NEUFS. Ces mondes gardent les vraies décisions et les vrais prédicats, mais leurs rendements sont inventés et calibrés sur le bruit réel. Les mondes nuls ont une espérance nette nulle partout ; les autres contiennent un avantage planté. Une variante n'est adoptée que si elle gèle plus d'avantages plantés, sans faux gagnant, avec un gain significatif au test exact apparié (McNemar, ≤ 0,10 / nombre de variantes). Sinon : conservée, ou retour arrière si la courante fabrique des faux. Chaque banc écrit aussi une courbe de puissance (effet minimal détectable).
+
+**Premiers chiffres (27/11, lecture seule, écart 8 bps par défaut).**
+- 20 576 décisions, 37 leaders, 91 jours d'exploration, 17 de validation.
+- Copie naïve : −18 à −22 bps par décision après ≈ 27 bps de coûts. La dérive brute du leader, ≈ +9 bps, ne paie pas les coûts.
+- 216 cellules, N = 299, PBO 0,31, aucun gel.
+- 32 cellules « suivre » réfutées, même sur la période flatteuse.
+- Meilleure cellule : Sharpe journalier 0,22 contre 0,33 attendu par le hasard, DSR 0,11.
+- Banc calibré (bruit 171 bps par décision, choc journalier 95 bps) : 0 faux gagnant en monde nul. Un avantage de 40 bps est invisible ; un avantage de 80 bps est vu 1 fois sur 2.
+
+**Trois défauts du juge trouvés et corrigés le jour même.**
+1. La variance des Sharpe venait de toutes les cellules : barre DSR à 0,68/jour. Elle vient maintenant des essais comparables, avec un plancher à 1/(T−1).
+2. Le monde nul était négatif partout, donc trop facile. Son espérance nette est maintenant nulle.
+3. Une « adoption » reposait sur 2/8 contre 4/8 mondes. L'adoption exige maintenant le test apparié.
+
+**Piste réfutée (mesure, 27/11) : couvrir chaque copie par BTC.** Bêta causal sur 30 jours, médiane 1,34. Le bruit journalier ne baisse que de 10 à 14 %, pour 20 à 25 bps de coût en plus par décision. Le bruit est propre à chaque coin, pas au marché. Le levier de puissance n'est donc pas la couverture : c'est plus de jours et des décisions OBSERVÉES en direct.
+
+**Besoins de données (angles morts).**
+- Le drapeau `crossed` (agressif / passif) manque dans les épisodes ; il existe dans `vault_fills_poll`.
+- La profondeur L2 ne couvre que 31 jours.
+- La reconstruction depuis `fills_forward` (depuis 2025-04, ≈ 18 Go de RAM) étendrait l'exploration à 19 mois, quand la machine sera libre.
+
+### Correctif du 27/11, après relecture : juge v2 et chiffres à refaire
+
+⚠ **Les premiers chiffres ci-dessus reposent sur l'écart PAR DÉFAUT de 8 bps et sur le juge v1** : « −18 à −22 bps par décision », « 32 réfutées », « PBO 0,31 ». La dérive brute du leader (≈ +9 bps) est plus petite que l'écart entre un écart de 8 bps et un écart mesuré (0,5 à 2 bps sur les gros coins). Le signe de la copie naïve dépend donc encore de l'hypothèse de coût. Ces chiffres sont à refaire avec les écarts MESURÉS avant d'en tirer quoi que ce soit.
+
+**Juge v2 (`JUGE_VERSION = 2026-11-27.v2`), écrit après avoir vu le réel, déclaré, puis gelé :**
+- variance des Sharpe des essais comparables (même direction, même horizon). Ce changement ASSOUPLIT le DSR ;
+- PBO par (direction, horizon). Il DURCIT le juge : le PBO de 0,31 était flatteur, car il mélangeait « suivre » et « contrer » ;
+- chevauchements retirés : une seule copie tenue par leader, coin et sens, avec `_sans_chevauchement` de l'étude d'événements ;
+- SÉLECTION sur toutes les décisions dénouées avant la campagne : la boucle n'est plus figée sur le 9/11. Nouvelle garde : la part post-entrée ne doit pas être négative ;
+- aucune cellule REFUTEE sans écarts mesurés pour au moins 90 % de ses décisions.
+
+**Corrections de l'outil :**
+- **Essais comptés une seule fois.** N = expériences des autres études + cellules distinctes déjà jugées. Rejuger une cellule n'ajoute pas d'essai.
+- **Rien de neuf, rien d'écrit.** Mêmes données, même méthode et même juge : aucune nouvelle inscription, et la mémoire ne recompte rien.
+- **Mémoire insuffisante pour lire les écarts :** l'outil s'arrête SANS rien écrire, jamais de repli silencieux sur 8 bps.
+- **Erreur imprévue :** elle est journalisée dans `runtime/research_lab/decouverte/DERNIERE_ERREUR.txt` et l'étape rend 0, pour que le reste du labo tourne.
+- **Reçus du dépôt émis :** `forward_freeze_receipt` et `champion_drift_receipt`, au lieu d'un système parallèle.
+
+**Banc v2, dans son propre module `copy_vault_decouverte_banc.py`** (le cœur passait le plafond de 800 lignes) :
+- les méthodes comparées affrontent les MÊMES mondes ;
+- les cellules plantées sont tirées d'un ensemble de référence fixe ;
+- le bruit est calibré par horizon à trois niveaux (jour, jour × leader, décision) ;
+- `verifier_calibrage` compare l'écart-type journalier de la copie naïve synthétique au réel.
+
+L'« effet minimal détectable ≈ 80 bps » venait du banc v1, sous-calibré : il est à remesurer.
+
+**Passage réel du 27/11 à 00 h 20, arrêté par le système faute de mémoire libre** (Certificateur et collecte en cours). Il n'a RIEN écrit : ni essai, ni ligne de registre, ni état. La lecture des 5,8 Go de carnets s'est terminée avant l'arrêt : les 3 875 shards sont en cache, donc le prochain passage sera court. À relancer sur demande de Florent, quand la mémoire sera libre.
+
+**Biais déclarés en plus :**
+- **Survivant :** 317 adresses dans l'historique de la liste suivie, des épisodes pour les seuls 38 vaults encore suivis.
+- **Plafond de l'API :** 10 000 fills par adresse (voir `docs/audit/RECHERCHE_DECOUVERTE_2026-11-27.md`).
+
+**Banc v2 remesuré (27/11, lecture seule, table en cache).**
+
+*Calibrage.* La décomposition en trois niveaux est faussée par les queues épaisses : les niveaux jour et jour × leader ressortent à 0, et la copie naïve synthétique est 65 % trop bruitée à 24 h. Le bruit est donc recalé sur l'écart-type journalier réel de la copie naïve. Vérification sur une graine neuve, synthétique contre réel :
+
+| Horizon | Synthétique (bps) | Réel (bps) |
+|---|---:|---:|
+| 4 h | 32,7 | 39,5 |
+| 12 h | 63,6 | 57,4 |
+| 24 h | 68,6 | 78,0 |
+
+*Puissance de la méthode v1, sur 12 mondes par taille d'avantage planté :*
+
+| Avantage planté (bps/décision) | Rappel | Fausses découvertes |
+|---:|---:|---:|
+| 40 | 25 % | 0 % |
+| 80 | 75 % | 0 % |
+| 160 | 83 % | 4 % |
+| 320 | 92 % | — |
+
+Aucun monde nul ne gèle quoi que ce soit.
+
+*Lecture.* Le labo voit de façon fiable un avantage d'environ 80 à 160 bps par décision. Un avantage de 40 bps, qui suffirait à dépasser les coûts, lui échappe 3 fois sur 4 : sous ce seuil, la limite vient des données, pas de la méthode.
+
+**Plafond de fills vérifié.** 16 des 38 vaults ont au moins 9 000 fills, et le plus actif en a 31 395 : le plafond de 10 000 n'est donc pas strict. Mais l'historique des vaults les plus actifs commence plus tard (18/09 contre 10/08). Biais de couverture déclaré : ces vaults sont sous-représentés au début de l'exploration.
+
+### 27/11 après-midi : premières campagnes ÉCRITES (Certificateur manuel fini)
+
+**Le passage « arrêté » de 00 h 20 ne l'était pas.** Le système a coupé le shell, mais le processus Python a continué seul. Il a écrit vers 00 h 24, avec le juge v1, la « campagne 1 » : 216 essais au registre, une ligne au registre des expériences, la mémoire et un rapport. Le compte rendu « rien n'a été écrit » était faux, car vérifié trop tôt. Ces essais restent comptés dans le N du DSR (registre append-only) : c'est honnête.
+
+**Campagne 2 (juge v2, écarts MESURÉS pour 317 coins).**
+- Sous surveillance : 204 s, pic à 0,71 Go.
+- 219 cellules, N = 377, aucun gel, champion AUCUN_TRADE.
+- Copie naïve, en bps par décision sur la sélection :
+  - suivre : −7,4 à 4 h (IC95 [−14,8 ; −0,4]), −15,6 à 12 h, −8,1 à 24 h ;
+  - contrer : −17,8 à 4 h.
+- 10 cellules « suivre » réfutées, sur coûts mesurés, même sur la période flatteuse.
+- PBO par groupe : de 0,27 à 0,81.
+
+**Juge v3 : palier SURVEILLANCE (repérage → confirmation par le suivi), décidé après la campagne 2 et déclaré.**
+- Pourquoi : avec la porte DSR ≥ 0,95, rien ne pouvait être gelé sous environ 160 bps, et le suivi ne démarrait jamais.
+- La règle : les 5 meilleures cellules SAINES au rang du DSR, avec le PBO de leur groupe ≤ 0,5, passent en suivi PAPER. Elles sont promues seulement par les règles inchangées (30 jours, IC95 > 0, Benjamini-Hochberg, mieux que le champion).
+- Au plus 20 suivis actifs.
+
+**Campagne 3 (juge v3).**
+- 152 s, pic à 0,72 Go. 222 cellules, N = 440 : les croisements tirés par la mémoire changent, donc de nouvelles hypothèses s'ajoutent. Aucun gel.
+- **Aucune cellule en surveillance** : le PBO dépasse 0,5 dans les SIX groupes (0,56 à 0,83). Dans chaque groupe, la meilleure cellule en échantillon passe plus d'une fois sur deux sous la médiane hors échantillon : le classement est du bruit.
+- Verdict MORE_DATA, sans avantage démontré.
+- Le banc recalé voit 80 bps à 87,5 % et 160 bps à 100 %, sans faux gagnant.
+- Mécanisme récurrent mais non prouvé : le leader qui va CONTRE la tendance du coin sur 24 h. Seul, il donne +18,8 bps sur 108 jours et 38 leaders, et +32,2 bps après le choix des leaders.
+
+**Liquidations.** La famille `liquidation` du coffre vient à 99,9 % d'Ironflow (externe) : 1,30 M de lignes, contre 1 819 de nos relevés `userFills.liquidation`. Une dimension « cascade » n'est donc PAS construite : elle reposerait sur une source externe non validée pour SAFE.
+
+**Poussée.** Le code est prêt, 249 tests passent. Mon terminal ne peut pas exécuter de `.cmd` : le bac à sable de l'assistant bloque, et le désactiver m'est interdit. C'est Florent qui pousse, par double-clic sur `POUSSER-GITHUB.cmd`.

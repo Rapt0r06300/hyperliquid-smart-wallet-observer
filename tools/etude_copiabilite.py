@@ -44,6 +44,7 @@ from hl_observer.backtesting import copy_vault_roles_familles as ROLES  # noqa: 
 from hl_observer.backtesting import coffre_tranches as TRANCHES  # noqa: E402
 from hl_observer.backtesting import copy_vault_order_intent as intentions  # noqa: E402
 from hl_observer.backtesting import copy_vault_persistence as persistence  # noqa: E402
+from hl_observer.backtesting import portage_couvert as portage  # noqa: E402
 from hl_observer.backtesting import copy_vault_replication_paper as replication  # noqa: E402
 from hl_observer.backtesting import copy_vault_research_planner as planificateur  # noqa: E402
 from hl_observer.collection.vault_portfolio_history import fusionner_points  # noqa: E402
@@ -2081,6 +2082,74 @@ def render_persistence_report(report: dict[str, Any], identity: dict[str, Any]) 
     return "\n".join(lignes)
 
 
+def run_portage(root: Path, *, write: bool = True) -> dict[str, Any]:
+    """Portage couvert sur funding (hypothese ``funding_hedged_carry_majors``, regle figee dans portage_couvert.py)."""
+    started = time.time()
+    config = portage.PortageConfig()
+    shards, excluded = select_shards(root, {"funding_history": ""})
+    if not shards["funding_history"]:
+        return {"status": "UNMEASURABLE",
+                "reason": "aucun historique de funding au coffre : collecte funding_history puis le Certificateur"}
+    identity = experiment_identity(root, shards, config, "portage|funding_history")
+    identity["source_sha256"]["portage_couvert.py"] = _sha256_file(Path(portage.__file__))
+    identity["corpus_tier"] = portage.EVIDENCE_TIER
+    report = _jsonable(portage.etudier(load_funding(shards["funding_history"], cache_dir=root / CACHE_DIR), config))
+    p = report["primary"]
+    print(f"[portage] {report['inputs']['coins']} coins ({report['inputs']['coins_couvrables_vus']} couvrables), "
+          f"{p.get('mois', 0)} mois ; net {p.get('net_moyen_bps_mois_notionnel')} bps/mois du notionnel, "
+          f"~{p.get('net_par_an_pct_du_capital')} %/an du capital ; dernier choix {p.get('dernier_choix')}", flush=True)
+    run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ") + "-portage"
+    result = {
+        "run_id": run_id, "identity": identity, "integrity_excluded_shards": excluded,
+        "elapsed_seconds": round(time.time() - started, 1), "evidence_tier": portage.EVIDENCE_TIER,
+        "donnees_consommees": donnees_consommees(shards, {
+            "funding_history": "taux de funding horaires publies : ce que paie un short perp couvert"}),
+        "report": report,
+    }
+    if write:
+        out_dir = root / REPORT_DIR / run_id
+        _atomic_write_json(out_dir / "resultat.json", result)
+        (out_dir / "RAPPORT.md").write_text(render_portage_report(report, identity), encoding="utf-8")
+        ledger = {
+            "run_id": run_id, **identity, "evidence_tier": portage.EVIDENCE_TIER,
+            "hypotheses_tested": report["hypotheses_tested"], "verdicts": report["verdicts"],
+            "config": report["config"], "inputs": report["inputs"], "primary": report["primary"],
+            "economically_proven": False,
+        }
+        result["ledger_record_sha256"] = append_ledger(root / REPORT_DIR / "EXPERIENCES.ndjson", ledger)
+    return result
+
+
+def render_portage_report(report: dict[str, Any], identity: dict[str, Any]) -> str:
+    p, v = report["primary"], report["verdicts"][0]
+    lignes = [
+        "# Portage couvert sur funding (short perp Hyperliquid + comptant ailleurs)", "",
+        f"- Statut des preuves : **{portage.EVIDENCE_TIER}** -- historique publie relu, exploratoire, PAPER.",
+        "- ⚠ **Mesure IN-SAMPLE** : la regle (K, univers de 20 coins) a ete choisie apres avoir vu ces memes mois ; "
+        "seuls des mois posterieurs au 26/11/2026 pourront la confirmer. Hors famille CopyVault, jamais promue.",
+        f"- Verdict `{v['hypothesis']}` : **{v['status']}** -- {v['reason']}",
+        f"- Regle : chaque {report['config']['fenetre_jours']} jours, les {report['config']['k']} coins couvrables au "
+        f"funding le plus fort sur la periode PRECEDENTE ; frais {report['config']['frais_rotation_bps']} bps par "
+        f"entree ou sortie ; marge {report['config']['marge']:.0%} du notionnel.", "",
+        "| mesure | valeur |", "|---|---|",
+        f"| periodes mesurees | {p.get('mois')} |",
+        f"| net moyen (bps/mois du notionnel) | {p.get('net_moyen_bps_mois_notionnel')} |",
+        f"| IC95 (blocs de {report['config']['bloc_mois']} mois) | {p.get('intervalle_bps_mois_notionnel')} |",
+        f"| net par an, en % du capital | {p.get('net_par_an_pct_du_capital')} |",
+        f"| validation (dernier tiers, bps/mois) | {p.get('validation_moyenne_bps_mois')} |",
+        f"| mois negatifs / pire mois (bps) | {p.get('mois_negatifs')} / {p.get('pire_mois_bps')} |",
+        f"| 6 derniers mois (bps) | {p.get('six_derniers_mois_bps')} |",
+        f"| dernier choix | {', '.join(p.get('dernier_choix') or [])} |", "",
+        "## Hypotheses optimistes declarees", "",
+        *[f"- {h}" for h in report["hypotheses_declarees"]], "",
+        "## Pour information (meme regle, autre K, jamais un verdict)", "",
+        *[f"- K = {k} : {r.get('net_moyen_bps_mois_notionnel')} bps/mois, ~{r.get('net_par_an_pct_du_capital')} %/an "
+          f"du capital, IC95 {r.get('intervalle_bps_mois_notionnel')}" for k, r in report["par_k_informatif"].items()],
+        "", f"Experience `{identity.get('experiment_id')}` · code `{identity.get('code_head')}`.",
+    ]
+    return "\n".join(lignes) + "\n"
+
+
 def run_persistance(root: Path, *, write: bool = True) -> dict[str, Any]:
     """Le classement passé d'un vault prédit-il son rendement suivant ? (courbes ``vault_portfolio``)."""
 
@@ -2188,6 +2257,8 @@ def main(argv: list[str] | None = None) -> int:
                              "l'avance, et que valait un ordre jumeau ? (famille leader_orders)")
     parser.add_argument("--bougies", choices=tuple(CANDLE_INTERVALS_MS), default="5m",
                         help="avec --retrospectif : 5m (17 jours) ou 1h (208 jours d'histoire)")
+    parser.add_argument("--portage", action="store_true",
+                        help="portage couvert sur funding (short perp + comptant), PAPER, exploratoire")
     parser.add_argument("--persistance", action="store_true",
                         help="le classement passé d'un vault prédit-il son rendement suivant ? "
                              "(courbes valeur / PnL publiées par vaultDetails, famille vault_portfolio)")
@@ -2245,6 +2316,17 @@ def main(argv: list[str] | None = None) -> int:
         for verdict in result["report"]["verdicts"]:
             print(f"[verdict ouvertures agressives] {verdict['hypothesis']}: {verdict['status']} — {verdict.get('reason')}")
         print("[FIN] étude d'événements exploratoire ; aucune rentabilité n'est prouvée.")
+        return 0
+    if args.portage:
+        result = run_portage(root, write=not args.sans_ecriture)
+        if "report" not in result:
+            # Etude HORS famille CopyVault : sans historique de funding (coffre neuf, cloud), elle ne mesure rien
+            # mais ne doit JAMAIS interrompre les etapes CopyVault qui la suivent dans le lanceur du labo.
+            print(f"[{result['status']}] {result['reason']} (etape ignoree, le labo continue)")
+            return 0
+        for verdict in result["report"]["verdicts"]:
+            print(f"[verdict portage] {verdict['hypothesis']}: {verdict['status']} — {verdict.get('reason')}")
+        print("[FIN] portage couvert (historique publie, exploratoire, PAPER) ; aucune rentabilite n'est prouvee.")
         return 0
     if args.persistance:
         result = run_persistance(root, write=not args.sans_ecriture)

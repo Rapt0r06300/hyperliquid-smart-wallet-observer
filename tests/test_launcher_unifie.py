@@ -177,6 +177,7 @@ def test_la_racine_contient_uniquement_les_lanceurs_principaux_et_alinasync():
         "ETA_COLLECTE.cmd",
         # 23/11/2026 : donnees externes gratuites recoupees -> coffre (etiquetees EXTERNE, rien de payant).
         "COFFRE_DONNEES_EXTERNES.cmd",
+        # 26/11/2026 : OPTIMISE.cmd -- RETIRE : OPTIMISE.cmd mis a la corbeille par Florent le 26/11/2026 a 22:07 (« laisse tomber ») ; tools/optimise.py garde, non branche.
     }
     assert {name for name in cmd_racine if name in ENTRYPOINT_ROLES} == cmd_racine   # tous classés
     assert (RACINE / "ALINA_SYNC_COMPLETE.sh").is_file()

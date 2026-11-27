@@ -67,6 +67,35 @@ def test_le_verrou_du_rattrapage_et_celui_du_coffre_sont_DEUX_fichiers():
 
 
 # ─────────────── le scelleur refuse de doubler, sans rougir ───────────────
+def test_lecture_jsonl_publie_octets_et_lignes_pendant_un_gros_fichier(tmp_path):
+    source = tmp_path / "gros.jsonl"
+    ligne = b'{"v":"' + (b"x" * (2 * 1024 * 1024)) + b'"}\n'
+    source.write_bytes(ligne)
+    progression = []
+
+    lecteur = SC._lire_lignes(
+        source,
+        progression=lambda octets, lignes: progression.append((octets, lignes)),
+    )
+    assert next(lecteur).startswith('{"v":')
+    assert progression
+    assert progression[-1] == (len(ligne), 1)
+
+
+def test_hash_source_publie_la_progression_des_blocs(tmp_path):
+    source = tmp_path / "hash.jsonl"
+    contenu = b"z" * (5 * 1024 * 1024)
+    source.write_bytes(contenu)
+    progression = []
+
+    digest = SC._sha256_contenu_source(
+        source, progression=lambda octets: progression.append(octets)
+    )
+    assert len(digest) == 64
+    assert progression[-1] == len(contenu)
+
+
+# ─────────────── le scelleur refuse de doubler, sans rougir ───────────────
 def test_un_scellage_deja_en_cours_fait_RIEN_A_FAIRE_et_non_une_erreur(tmp_path, capsys, monkeypatch):
     (tmp_path / "runtime" / "data").mkdir(parents=True)
     (tmp_path / SC.VERROU_RELPATH).write_text(json.dumps({"pid": os.getpid(), "ts": time.time()}),

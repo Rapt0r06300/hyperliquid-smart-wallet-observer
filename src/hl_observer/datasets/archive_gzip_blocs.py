@@ -24,7 +24,7 @@ import os
 import time
 import zlib
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 SCHEMA_INDEX = "hypersmart.archive_gzip_blocs.v1"
 SUFFIXE_INDEX = ".idx.json"
@@ -46,7 +46,8 @@ def _remplacer(tmp: Path, cible: Path, essais: int = 8) -> None:
             time.sleep(0.25 * (i + 1))
 
 
-def compresser(source: Path, cible: Path | None = None, *, bloc: int = BLOC_DEFAUT, niveau: int = 6) -> dict[str, Any]:
+def compresser(source: Path, cible: Path | None = None, *, bloc: int = BLOC_DEFAUT, niveau: int = 6,
+               progression: Callable[[str, int, int], None] | None = None) -> dict[str, Any]:
     """Écrit ``source`` en archive par blocs + index, VÉRIFIÉE. Ne touche pas à la source. Rend l'index."""
     source = Path(source)
     cible = Path(cible) if cible is not None else source.with_name(source.name + ".gz")
@@ -57,7 +58,19 @@ def compresser(source: Path, cible: Path | None = None, *, bloc: int = BLOC_DEFA
     h_clair = hashlib.sha256()
     blocs: list[list[int]] = []
     pos = 0
+    lus_source = dernier_rapport = 0
+    dernier_temps_rapport = time.monotonic()
+
+    def publier(phase: str, faits: int, total: int) -> None:
+        if progression is None:
+            return
+        try:
+            progression(phase, faits, total)
+        except Exception:  # noqa: BLE001 — la télémétrie ne doit jamais interrompre l'archivage
+            pass
+
     try:
+        publier("COMPRESSION_SOURCE", 0, avant.st_size)
         with source.open("rb") as src, tmp.open("wb") as out:
             tampon = bytearray()
 
@@ -74,19 +87,33 @@ def compresser(source: Path, cible: Path | None = None, *, bloc: int = BLOC_DEFA
             for ligne in src:                       # une ligne n'est JAMAIS coupée entre deux blocs
                 h_clair.update(ligne)
                 tampon += ligne
+                lus_source += len(ligne)
                 if len(tampon) >= bloc:
                     vider()
+                maintenant = time.monotonic()
+                if lus_source - dernier_rapport >= 8 * 1024 * 1024 or maintenant - dernier_temps_rapport >= 1.0:
+                    publier("COMPRESSION_SOURCE", lus_source, avant.st_size)
+                    dernier_rapport, dernier_temps_rapport = lus_source, maintenant
             vider()
+            publier("COMPRESSION_SOURCE", lus_source, avant.st_size)
             out.flush()
             os.fsync(out.fileno())
         apres = source.stat()
         if (apres.st_size, apres.st_mtime_ns) != (avant.st_size, avant.st_mtime_ns) or pos != avant.st_size:
             raise RuntimeError(f"source modifiee pendant la compression : {source}")
         h_verif, n = hashlib.sha256(), 0
+        dernier_rapport = 0
+        dernier_temps_rapport = time.monotonic()
+        publier("VERIFICATION_ARCHIVE", 0, pos)
         with gzip.open(tmp, "rb") as g:                # relecture COMPLÈTE par un lecteur gzip standard
             for morceau in iter(lambda: g.read(1 << 20), b""):
                 h_verif.update(morceau)
                 n += len(morceau)
+                maintenant = time.monotonic()
+                if n - dernier_rapport >= 8 * 1024 * 1024 or maintenant - dernier_temps_rapport >= 1.0:
+                    publier("VERIFICATION_ARCHIVE", n, pos)
+                    dernier_rapport, dernier_temps_rapport = n, maintenant
+        publier("VERIFICATION_ARCHIVE", n, pos)
         if n != pos or h_verif.hexdigest() != h_clair.hexdigest():
             raise RuntimeError(f"verification de l'archive echouee : {source}")
         index = {"schema": SCHEMA_INDEX, "source": source.name, "taille_clair": pos,
@@ -103,11 +130,12 @@ def compresser(source: Path, cible: Path | None = None, *, bloc: int = BLOC_DEFA
         raise
 
 
-def remplacer_par_archive(source: Path, *, bloc: int = BLOC_DEFAUT, niveau: int = 6) -> dict[str, Any]:
+def remplacer_par_archive(source: Path, *, bloc: int = BLOC_DEFAUT, niveau: int = 6,
+                           progression: Callable[[str, int, int], None] | None = None) -> dict[str, Any]:
     """Compresse puis RETIRE la source en clair, seulement si l'archive vérifiée en redonne chaque octet."""
     source = Path(source)
     avant = source.stat()
-    index = compresser(source, bloc=bloc, niveau=niveau)
+    index = compresser(source, bloc=bloc, niveau=niveau, progression=progression)
     apres = source.stat()
     if (apres.st_size, apres.st_mtime_ns) != (avant.st_size, avant.st_mtime_ns):
         raise RuntimeError(f"source modifiee apres compression, conservee : {source}")

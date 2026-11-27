@@ -59,6 +59,8 @@ ZONES: tuple[Zone, ...] = (
     Zone("datasets", "MAGASIN", "jeux SAFE / rejetés / quarantaine du pipeline SAFE"),
     Zone("catalog", "MAGASIN", "catalogue SAFE (campagnes, Git est la source)"),
     Zone("runtime/research_lab/data/goal2_cache", "DERIVE", "caches de recherche calculés depuis le coffre"),
+    Zone("runtime/research_lab/data/decouverte_cache", "DERIVE",
+         "table des decisions du moteur de decouverte, recalculee depuis le coffre (cle = SHA des shards lus)"),
     Zone("runtime/research_lab/data/copiabilite_cache", "DERIVE",
          "caches du labo (fills, demi-écarts, mids, funding) recalculés depuis le coffre, clés = SHA-256 des shards"),
     Zone("runtime/data/sessions", "DERIVE", "sessions de démonstration portables (fixtures de fumée)"),
@@ -98,6 +100,9 @@ ZONES: tuple[Zone, ...] = (
 OPERATIONNELS = {
     "poll_cadence_plan.ndjson": "plan de cadence du sondage des leaders (slots_userfills)",
     "userfills_pages.ndjson": "affectation des vaults aux pages du sondage (slots_userfills)",
+    # 27/11/2026 : registre APPEND-ONLY des essais du labo (pre-enregistrement + resultat, alimente le N du DSR) ;
+    # ecrit par experimental/registre_essais.py, chemin historique dans runtime/data. Ce n'est pas une collecte.
+    "registre_essais.jsonl": "registre append-only des essais du labo (N du Deflated Sharpe Ratio)",
 }
 #: 11/11/2026 12:20:45 (heure de Paris) -- commit 391efb93b1a3 : depuis, `tools/archiver_tapes.py` ne déplace un ruban
 #: dans `runtime/archive/session_<horodate locale>` QUE si l'état du coffre connaît exactement son contenu (SHA-256

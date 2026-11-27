@@ -108,6 +108,33 @@ def _ordres(record: Mapping[str, Any]) -> Preuve | None:
             "note": "précondition d'information (part des exécutions visible à l'avance), pas un gain"}
 
 
+def _portage(record: Mapping[str, Any]) -> Preuve | None:
+    p = record.get("primary") or {}
+    if p.get("effet_bps_jour_capital") is None:
+        return None
+    return {"effet": p["effet_bps_jour_capital"], "intervalle": p.get("intervalle_bps_jour_capital"),
+            "niveau": 0.95, "unite": "bps_par_jour",
+            "usd_par_jour": p["effet_bps_jour_capital"] / 1e4 * PAPER_EQUITY_USD,
+            "capital_usd_de_la_mesure": PAPER_EQUITY_USD, "jours": int(p.get("jours") or 0),
+            "jours_requis": int(p.get("jours_requis") or 360),
+            "note": "portage couvert sur funding (short perp + comptant), net de frais, couverture parfaite supposee"}
+
+
+def _decouverte(record: Mapping[str, Any]) -> Preuve | None:
+    """27/11/2026 : moteur de decouverte -- le meilleur candidat (gele, sinon meilleur DSR), lu en VALIDATION.
+
+    Aucun montant en USD : il dependrait du nombre de decisions copiees par jour, que la campagne ne mesure pas ;
+    jamais fabrique (la priorite reste donc nulle tant que le suivi apres gel n'a rien prouve)."""
+    p = record.get("primary") or {}
+    if p.get("effet_bps_par_decision") is None:
+        return None
+    return {"effet": p["effet_bps_par_decision"], "intervalle": p.get("intervalle_bps_par_decision"),
+            "niveau": 0.95, "unite": "bps_par_decision", "usd_par_jour": None,
+            "jours": int(p.get("jours") or 0), "jours_requis": int(p.get("jours_requis") or 30),
+            "note": (f"moteur de decouverte : {p.get('direction')} {p.get('horizon_h')} h {p.get('predicats')}, "
+                     f"{'gele' if p.get('gele') else 'non gele'}, validation (leader deja suivi)")}
+
+
 EXTRACTEURS: dict[str, Callable[[Mapping[str, Any]], Preuve | None]] = {
     "copy_vault_leader_skill_persistence": _persistance,
     "copy_vault_leader_selection_model": _modele,
@@ -116,6 +143,8 @@ EXTRACTEURS: dict[str, Callable[[Mapping[str, Any]], Preuve | None]] = {
     "copy_vault_aggressive_open_drift": _ouvertures,
     "copy_vault_aggressive_open_selected_leaders": _selection,
     "copy_vault_leader_order_intent": _ordres,
+    "funding_hedged_carry_majors": _portage,          # 26/11/2026 : portage couvert, rouvert en PAPER
+    "copy_vault_discovery_engine": _decouverte,       # 27/11/2026 : moteur de decouverte (campagnes + suivi)
 }
 HYPOTHESE_CANONIQUE = {
     "copy_vault_slow_replication_350usd": "copy_vault_slow_replication_paper",
@@ -151,6 +180,11 @@ def _lecture(preuve: Preuve) -> dict[str, Any]:
     return sortie
 
 
+#: 26/11/2026 : hypotheses mesurees par le labo mais HORS famille CopyVault (la seule active). Elles restent listees,
+#: avec leur mesure, mais n'ont JAMAIS de priorite ni de « prochaine action » dans ce plan, et rien ne les promeut.
+HORS_FAMILLE_COPYVAULT = frozenset({"funding_hedged_carry_majors"})
+
+
 def build_plan(records: Iterable[Mapping[str, Any]], *, capital_usd: float = PAPER_EQUITY_USD) -> dict[str, Any]:
     """Plan de recherche depuis les enregistrements du registre (dans l'ordre d'écriture)."""
     derniers: dict[str, tuple[Mapping[str, Any], Mapping[str, Any]]] = {}
@@ -183,7 +217,9 @@ def build_plan(records: Iterable[Mapping[str, Any]], *, capital_usd: float = PAP
         else:
             usd_sceptique = None
         priorite = 0.0
-        if statut not in ("REJECTED", "UNMEASURABLE") and usd_sceptique is not None and mesure["p_positif_sceptique"] is not None:
+        hors_famille = hypothese in HORS_FAMILLE_COPYVAULT
+        if (not hors_famille and statut not in ("REJECTED", "UNMEASURABLE") and usd_sceptique is not None
+                and mesure["p_positif_sceptique"] is not None):
             attente = 1.0 + (restants or 0) / HORIZON_DE_PATIENCE_JOURS
             priorite = mesure["p_positif_sceptique"] * max(0.0, usd_sceptique) / attente
         # Lecture en quatre cas : prometteur, fragile, données insuffisantes, absence d'avantage démontré.
@@ -209,6 +245,9 @@ def build_plan(records: Iterable[Mapping[str, Any]], *, capital_usd: float = PAP
                       if restants else "relancer l'étude : l'échantillon exigé est atteint, l'intervalle ne tranche pas encore")
         else:
             action = ACTIONS.get(statut, "relancer l'étude")
+        if hors_famille:
+            action = ("HORS famille CopyVault : piste de recherche PAPER séparée, mesurée en échantillon déjà vu ; "
+                      "jamais prioritaire ni promue par ce plan, à confirmer uniquement sur des mois nouveaux")
         if usd_mesure is not None and not au_capital_du_plan and statut not in ("REJECTED",):
             action += (f" ; montant mesuré sur {capital_mesure if capital_mesure is not None else 'un capital inconnu'}"
                        f" USD, non transposable : remesurer au capital paper de {capital_usd:.0f} USD")
@@ -222,7 +261,7 @@ def build_plan(records: Iterable[Mapping[str, Any]], *, capital_usd: float = PAP
             "p_positif": mesure["p_positif"], "p_positif_sceptique": mesure["p_positif_sceptique"],
             "jours_mesures": jours, "jours_requis": requis or None,
             "jours_pour_trancher": mesure["jours_pour_trancher"], "jours_restants": restants,
-            "priorite": round(priorite, 6), "action": action,
+            "priorite": round(priorite, 6), "action": action, "hors_famille_copyvault": hors_famille,
         })
     # priorité d'abord ; à priorité égale, ce qui peut encore apprendre quelque chose le plus vite
     lignes.sort(key=lambda ligne: (-ligne["priorite"], LECTURES.index(ligne["lecture"]),
@@ -282,4 +321,5 @@ def render_plan(plan: Mapping[str, Any]) -> str:
     return "\n".join(lignes)
 
 
-__all__ = ["A_PRIORI", "EXTRACTEURS", "LECTURES", "SCHEMA_VERSION", "build_plan", "render_plan"]
+__all__ = ["A_PRIORI", "EXTRACTEURS", "HORS_FAMILLE_COPYVAULT", "LECTURES", "SCHEMA_VERSION", "build_plan",
+           "render_plan"]

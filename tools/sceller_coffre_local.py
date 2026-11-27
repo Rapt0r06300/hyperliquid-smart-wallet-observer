@@ -35,7 +35,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -270,7 +270,7 @@ def _sha256_fichier(path: Path) -> str:
     return h.hexdigest()
 
 
-def _sha256_contenu_source(path: Path) -> str:
+def _sha256_contenu_source(path: Path, *, progression: Callable[[int], None] | None = None) -> str:
     """Empreinte du contenu logique d'un ruban, pas de son emballage gzip.
 
     Le registre de reprise identifie un ruban par les octets JSONL décompressés. Une
@@ -280,9 +280,19 @@ def _sha256_contenu_source(path: Path) -> str:
     """
     h = hashlib.sha256()
     ouvrir = gzip.open if path.suffix == ".gz" else open
+    lus = 0
     with ouvrir(path, "rb") as handle:
-        for bloc in iter(lambda: handle.read(4 * 1024 * 1024), b""):
+        while True:
+            bloc = handle.read(4 * 1024 * 1024)
+            if not bloc:
+                break
             h.update(bloc)
+            lus += len(bloc)
+            if progression is not None:
+                try:
+                    progression(lus)
+                except Exception:  # noqa: BLE001 - le suivi ne doit jamais interrompre le scellage
+                    pass
     return h.hexdigest()
 
 
@@ -313,35 +323,63 @@ class _SortieHachee(io.RawIOBase):
         self._brut.flush()
 
 
-def _lire_lignes(path: Path, *, debut: int = 0, fin: int | None = None) -> Iterator[str]:
+def _lire_lignes(path: Path, *, debut: int = 0, fin: int | None = None,
+                 progression: Callable[[int, int], None] | None = None) -> Iterator[str]:
     """Lignes du fichier ; pour un ruban texte, uniquement les octets ``[debut, fin)``.
 
     ``fin`` est une frontière de ligne figée au début du scellage : une ligne encore en cours
     d'écriture par un collecteur n'est ni lue ni mise en quarantaine, elle sera scellée au
     passage suivant."""
+    lus = lignes = dernier_lus = 0
+    derniere_publication = time.monotonic()
+
+    def decoder(handle, restant: int | None = None):
+        nonlocal lus, lignes, dernier_lus, derniere_publication
+        while True:
+            brut = handle.readline()
+            if not brut:
+                break
+            if restant is not None:
+                if len(brut) > restant:
+                    break
+                restant -= len(brut)
+            lus += len(brut)
+            lignes += 1
+            maintenant = time.monotonic()
+            if progression is not None and (
+                lus - dernier_lus >= 1 * 1024 * 1024 or maintenant - derniere_publication >= 1.0
+            ):
+                try:
+                    progression(lus, lignes)
+                except Exception:  # noqa: BLE001 - diagnostic best-effort
+                    pass
+                dernier_lus, derniere_publication = lus, maintenant
+            yield brut.decode("utf-8", errors="replace")
+        if progression is not None and (lus != dernier_lus or lignes == 0):
+            try:
+                progression(lus, lignes)
+            except Exception:  # noqa: BLE001 - diagnostic best-effort
+                pass
+            dernier_lus, derniere_publication = lus, time.monotonic()
+
     if path.suffix == ".gz":
         # archive tournante : flux décompressé, complet (aucune ligne en cours d'écriture)
         with gzip.open(path, "rb") as handle:
             if debut > 0:
                 handle.seek(debut)
-            for brut in handle:
-                yield brut.decode("utf-8", errors="replace")
+            yield from decoder(handle)
         return
     with path.open("rb") as handle:
         handle.seek(max(0, debut))
         restant = None if fin is None else max(0, fin - max(0, debut))
-        for brut in handle:
-            if restant is not None:
-                if len(brut) > restant:
-                    break
-                restant -= len(brut)
-            yield brut.decode("utf-8", errors="replace")
+        yield from decoder(handle, restant)
 
 
-def _sha256_prefixe(path: Path, octets: int) -> str:
+def _sha256_prefixe(path: Path, octets: int, *, progression: Callable[[int], None] | None = None) -> str:
     """SHA-256 des ``octets`` premiers octets (identité d'un préfixe déjà scellé)."""
     h = hashlib.sha256()
     restant = max(0, int(octets))
+    lus = 0
     ouvrir = gzip.open if path.suffix == ".gz" else open   # .gz : préfixe du flux décompressé
     with ouvrir(path, "rb") as handle:
         while restant > 0:
@@ -349,7 +387,13 @@ def _sha256_prefixe(path: Path, octets: int) -> str:
             if not bloc:
                 raise OSError(f"source raccourcie pendant le hash du prefixe : {path}")
             h.update(bloc)
+            lus += len(bloc)
             restant -= len(bloc)
+            if progression is not None:
+                try:
+                    progression(lus)
+                except Exception:  # noqa: BLE001 - le suivi ne doit jamais interrompre le scellage
+                    pass
     return h.hexdigest()
 
 
@@ -401,7 +445,8 @@ def _prefixes_connus(source: Path, etat: dict[str, Any], version: int) -> list[t
 
 
 def _reprise_append_only(source: Path, fin: int | None, etat: dict[str, Any], *, essais: int = 5,
-                         version: int = 1) -> int:
+                         version: int = 1,
+                         progression: Callable[[int, int], None] | None = None) -> int:
     """Offset à partir duquel sceller : fin du plus long préfixe DÉJÀ scellé de ce ruban.
 
     Un ruban de collecte ne fait que grossir : si ses N premiers octets ont le SHA-256 d'un
@@ -422,13 +467,15 @@ def _reprise_append_only(source: Path, fin: int | None, etat: dict[str, Any], *,
             candidats.sort(key=lambda c: (abs(c[0] - longueur), -c[0]))
         for octets, sha in candidats[:max(essais, 8)]:
             try:
-                if _sha256_prefixe(source, octets) == sha:
+                cb = (lambda lus, total=octets: progression(lus, total)) if progression else None
+                if _sha256_prefixe(source, octets, progression=cb) == sha:
                     return octets
             except OSError:
                 continue                     # archive plus courte que ce prefixe : ce n'est pas le sien
         return 0
     for octets, sha in candidats[:essais]:
-        if _sha256_prefixe(source, octets) == sha:
+        cb = (lambda lus, total=octets: progression(lus, total)) if progression else None
+        if _sha256_prefixe(source, octets, progression=cb) == sha:
             return octets
     return 0
 
@@ -540,6 +587,7 @@ def sceller_fichier(
     debut_octets: int = 0, fin_octets: int | None = None, rattrapage: bool = False,
     expected_source_sha256: str | None = None, source_snapshot_octets: int | None = None,
     contenus_coffre: set | None = None,
+    progression_cb: Callable[[str, int, int | None, int | None], None] | None = None,
 ) -> dict[str, Any] | None:
     """Certifie un fichier source, écrit le shard scellé + la quarantaine.
 
@@ -568,6 +616,17 @@ def sceller_fichier(
     ts_max: int | None = None
     quar_handle = None
     ecrits = 0
+    if source.suffix == ".gz":
+        longueur, exacte = _longueur_claire(source)
+        total_logique = longueur if exacte else None
+    else:
+        borne = source.stat().st_size if fin_octets is None else int(fin_octets)
+        total_logique = max(0, borne - max(0, int(debut_octets)))
+
+    def progression_lignes(octets_lus: int, lignes_lues: int) -> None:
+        if progression_cb is not None:
+            progression_cb("LECTURE JSONL", octets_lus, total_logique, lignes_lues)
+
     shard_final = shard_abs
     shard_abs = shard_final.with_name(f".{shard_final.name}.partial")
     h_shard = hashlib.sha256()
@@ -576,7 +635,10 @@ def sceller_fichier(
              _SortieHachee(_octets_shard, h_shard) as _relais, \
              gzip.GzipFile(fileobj=_relais, mode="wb", compresslevel=NIVEAU_GZIP) as _gz, \
              io.TextIOWrapper(_gz, encoding="utf-8", newline="\n") as sortie:
-            for brut in _lire_lignes(source, debut=debut_octets, fin=fin_octets):
+            for brut in _lire_lignes(
+                source, debut=debut_octets, fin=fin_octets,
+                progression=progression_lignes if progression_cb is not None else None,
+            ):
                 brut = brut.strip()
                 if not brut:
                     continue
@@ -634,8 +696,18 @@ def sceller_fichier(
             if expected_source_sha256 is not None:
                 if source_snapshot_octets is None:
                     raise ValueError("source_snapshot_octets manquant")
-                after_sha = (_sha256_contenu_source(source) if source.suffix == ".gz"
-                             else _sha256_prefixe(source, source_snapshot_octets))
+                if source.suffix == ".gz":
+                    def progresser_hash_final(lus: int) -> None:
+                        if progression_cb is not None:
+                            progression_cb("VÉRIFICATION FINALE", lus, total_logique, None)
+                    after_sha = _sha256_contenu_source(source, progression=progresser_hash_final)
+                else:
+                    def progresser_prefixe_final(lus: int) -> None:
+                        if progression_cb is not None:
+                            progression_cb("VÉRIFICATION FINALE", lus, source_snapshot_octets, None)
+                    after_sha = _sha256_prefixe(
+                        source, source_snapshot_octets, progression=progresser_prefixe_final
+                    )
                 if after_sha != expected_source_sha256:
                     raise RuntimeError(f"source modifiee pendant la certification : {source}")
     except BaseException:
@@ -700,13 +772,33 @@ def _cle_fichier(chemin) -> str:
     return os.path.normcase(os.path.abspath(str(chemin)))
 
 
-def collecter_fichiers(root: Path, *, tout: bool, log=None) -> list[tuple[Path, str, str]]:
+def collecter_fichiers(root: Path, *, tout: bool, log=None,
+                       progression_cb: Callable[[dict[str, Any]], None] | None = None
+                       ) -> list[tuple[Path, str, str]]:
     """Liste des (fichier, famille, source) à certifier.
 
     En mode ``tout``, le scan élague les dossiers de ``_EXCLUS`` et émet un
     battement régulier (jamais de blocage silencieux), avec un garde-fou dur.
     """
     trouves: list[tuple[Path, str, str]] = []
+    vus_entrees = 0
+    vus_dossiers = 0
+    dernier_battement = 0.0
+
+    def battre(force: bool = False) -> None:
+        nonlocal dernier_battement
+        maintenant = time.monotonic()
+        if progression_cb is None or (not force and maintenant - dernier_battement < 1.0):
+            return
+        try:
+            progression_cb({"stage": "SCAN", "scan_entrees_vues": vus_entrees,
+                            "scan_donnees_trouvees": len(trouves), "scan_dossiers_vus": vus_dossiers,
+                            "progression_ms": int(time.time() * 1000)})
+        except Exception:  # noqa: BLE001 — le suivi n'est pas une dépendance du scellage
+            pass
+        dernier_battement = maintenant
+
+    battre(force=True)
     # 19/11/2026 -- CE BLOC TOURNE AUSSI EN MODE --tout. Avant, il etait garde par
     # `if not tout`, et --tout partait en scan recursif en elaguant _EXCLUS, qui
     # contient `history` ET `research_lab` : --tout scellait donc MOINS que le mode
@@ -722,7 +814,15 @@ def collecter_fichiers(root: Path, *, tout: bool, log=None) -> list[tuple[Path, 
                 # une archive tournante passe AVANT le ruban actif homonyme : elle contient ce
                 # que le ruban actif avait déjà fait sceller, la reprise par préfixe doit la
                 # reconnaître avant que l'état du ruban actif ne soit remplacé.
-                entrees += sorted((root / data).iterdir(),
+                dossier = root / data
+                vus_dossiers += 1
+                with os.scandir(dossier) as scan:
+                    locales = []
+                    for entree in scan:
+                        locales.append(Path(entree.path))
+                        vus_entrees += 1
+                        battre()
+                entrees += sorted(locales,
                                   key=lambda e: (_tronc(e.name), not e.name.endswith(".gz"), e.name))
             except OSError:
                 continue
@@ -741,7 +841,9 @@ def collecter_fichiers(root: Path, *, tout: bool, log=None) -> list[tuple[Path, 
                 trouves.append((p, info[0], info[1]))
             except OSError:
                 continue
+            battre()
         if not tout:
+            battre(force=True)
             return trouves
     # --tout : scan récursif borné via os.scandir. Sur Windows, DirEntry.stat()
     # est MIS EN CACHE par scandir -> aucun appel système par fichier, donc rapide
@@ -749,12 +851,11 @@ def collecter_fichiers(root: Path, *, tout: bool, log=None) -> list[tuple[Path, 
     # Les dossiers de collecte sont deja inventories ci-dessus : on ne les
     # recense pas deux fois (un meme ruban scelle en double est du travail perdu).
     deja_vus = {_cle_fichier(c) for c, _fam, _src in trouves}
-    vus_dossiers = 0
-    vus_entrees = 0
     pile = [str(root)]
     while pile:
         dossier = pile.pop()
         vus_dossiers += 1
+        battre()
         if vus_dossiers > _MAX_DOSSIERS_SCAN:
             if log is not None:
                 _log(log, f"   [!] scan arrete a {vus_dossiers:,} dossiers (garde-fou).")
@@ -796,6 +897,7 @@ def collecter_fichiers(root: Path, *, tout: bool, log=None) -> list[tuple[Path, 
                     continue
     if log is not None:
         _log(log, f"   -> scan termine : {vus_dossiers:,} dossiers, {len(trouves):,} fichier(s) de donnees.")
+    battre(force=True)
     return trouves
 
 
@@ -1056,6 +1158,85 @@ def _ecrire_statut(root: Path, **champs: Any) -> None:
         pass
 
 
+class _ProgressionFichier:
+    """Publie un battement par seconde et une projection explicite pendant les lectures longues."""
+
+    def __init__(self, root: Path, *, batch_id: str, fichier: str, index: int, nombre: int,
+                 total_source: int, source_terminee: int, taille_source: int,
+                 debut_lot: float) -> None:
+        self.root = root
+        self.batch_id = batch_id
+        self.fichier = fichier
+        self.index = index
+        self.nombre = nombre
+        self.total_source = max(1, int(total_source))
+        self.source_terminee = max(0, int(source_terminee))
+        self.taille_source = max(0, int(taille_source))
+        self.debut_lot = debut_lot
+        self.phase = ""
+        self.derniere_publication = 0.0
+        self.echantillons: list[tuple[float, int]] = []
+
+    def publier(self, phase: str, octets_lus: int, total_logique: int | None = None,
+                lignes_lues: int | None = None) -> None:
+        maintenant = time.monotonic()
+        octets_lus = max(0, int(octets_lus))
+        if phase != self.phase:
+            self.phase = phase
+            self.echantillons.clear()
+            self.derniere_publication = 0.0
+        elif self.echantillons and octets_lus < self.echantillons[-1][1]:
+            self.echantillons.clear()
+        # Écritures atomiques bornées : au plus une par seconde et par phase.
+        if maintenant - self.derniere_publication < 1.0:
+            return
+        self.echantillons.append((maintenant, octets_lus))
+        self.echantillons = [e for e in self.echantillons if maintenant - e[0] <= 5.0]
+        debit_fichier = None
+        if len(self.echantillons) >= 2:
+            dt = self.echantillons[-1][0] - self.echantillons[0][0]
+            if dt > 0:
+                debit_fichier = max(0.0, (self.echantillons[-1][1] - self.echantillons[0][1]) / dt / 1048576)
+
+        exact = isinstance(total_logique, int) and total_logique > 0
+        fraction = min(1.0, octets_lus / total_logique) if exact else 0.0
+        equiv_faits = min(self.total_source, self.source_terminee + int(self.taille_source * fraction))
+        pct_confirme = min(100.0, self.source_terminee / self.total_source * 100.0)
+        pct_estime = min(100.0, equiv_faits / self.total_source * 100.0)
+        elapsed = max(0.0, maintenant - self.debut_lot)
+        eta = None
+        debit_lot = None
+        if elapsed > 0 and equiv_faits > 0:
+            debit_lot = equiv_faits / elapsed / 1048576
+            eta = max(0.0, elapsed * (self.total_source - equiv_faits) / equiv_faits)
+        _ecrire_statut(
+            self.root,
+            active=True,
+            stage="CERTIFICATION",
+            batch_id=self.batch_id,
+            i=self.index,
+            n=self.nombre,
+            fichier=self.fichier,
+            fichier_phase=phase,
+            fichier_octets_lus=octets_lus,
+            fichier_octets_total=total_logique if exact else None,
+            fichier_pct=round(fraction * 100.0, 1) if exact else None,
+            fichier_lignes_lues=lignes_lues,
+            fichier_debit_mo_s=round(debit_fichier, 2) if debit_fichier is not None else None,
+            octets_faits=self.source_terminee,
+            octets_total=self.total_source,
+            octets_estimes_faits=equiv_faits,
+            pct_confirme=round(pct_confirme, 1),
+            pct_estime=round(pct_estime, 1),
+            pct=round(pct_estime, 1),
+            debit_mo_s=round(debit_lot, 2) if debit_lot is not None else None,
+            eta_s=round(eta, 1) if eta is not None else None,
+            eta_updated_ms=int(time.time() * 1000) if eta is not None else None,
+            progression_ms=int(time.time() * 1000),
+        )
+        self.derniere_publication = maintenant
+
+
 def boucler(argv: list[str], intervalle_s: float, *, limite_passes: int = 0,
             dormir=None, horloge=None) -> int:
     """Certifie en continu : une passe, attente, recommence.
@@ -1138,7 +1319,13 @@ def main(argv: list[str] | None = None) -> int:
     batch_id = f"{_horodate()}_{uuid4().hex[:8]}"  # unique même si 2 runs/seconde
     _ecrire_statut(root, active=True, stage="SCAN", batch_id=batch_id, pct=0.0,
                    i=0, n=0, fichier="", octets_faits=0, octets_total=0,
-                   eta_s=0.0, debit_mo_s=0.0, termine=False, code=None, resume=None)
+                   pct_confirme=0.0, pct_estime=0.0, octets_estimes_faits=0,
+                   fichier_phase="RECENSEMENT", fichier_octets_lus=0,
+                   fichier_octets_total=None, fichier_pct=None, fichier_lignes_lues=0,
+                   fichier_debit_mo_s=None, eta_s=None, eta_updated_ms=None, debit_mo_s=0.0,
+                   progression_ms=int(time.time() * 1000),
+                   scan_entrees_vues=0, scan_donnees_trouvees=0, scan_dossiers_vus=0,
+                   termine=False, code=None, resume=None)
 
     log_dir = root / LOG_RELDIR
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -1169,12 +1356,16 @@ def main(argv: list[str] | None = None) -> int:
         _log(log, "")
         portee = "TOUT le projet" if args.tout else "la collecte en cours (runtime/data)"
         _log(log, f"ETAPE 1/3 - Je cherche les donnees dans : {portee}")
-        fichiers = collecter_fichiers(root, tout=args.tout, log=log)
+        def progression_scan(mesure: dict[str, Any]) -> None:
+            _ecrire_statut(root, active=True, termine=False, batch_id=batch_id, **mesure)
+
+        fichiers = collecter_fichiers(root, tout=args.tout, log=log, progression_cb=progression_scan)
         if args.tout:
             # Le scan récursif saute ``research_lab`` (où vit la microstructure) : sans ce retour
             # explicite aux dossiers de collecte, le mode par défaut du lanceur ne la verrait jamais.
             deja = {str(f[0]) for f in fichiers}
-            fichiers += [f for f in collecter_fichiers(root, tout=False) if str(f[0]) not in deja]
+            fichiers += [f for f in collecter_fichiers(root, tout=False, progression_cb=progression_scan)
+                         if str(f[0]) not in deja]
         if args.archives:
             deja = {str(f[0]) for f in fichiers}
             laisses = 0
@@ -1246,7 +1437,12 @@ def main(argv: list[str] | None = None) -> int:
         t0 = time.monotonic()
         faits_octets = 0
         _ecrire_statut(root, active=True, stage="CERTIFICATION", n=n,
-                       octets_total=total_octets, pct=0.0, i=0)
+                       octets_total=total_octets, pct=0.0, pct_confirme=0.0,
+                       pct_estime=0.0, octets_estimes_faits=0, pct_mode="CONFIRME_ET_FICHIER",
+                       i=0, fichier_phase="PREPARATION", fichier_octets_lus=0,
+                       fichier_octets_total=None, fichier_pct=None, fichier_lignes_lues=0,
+                       fichier_debit_mo_s=None, eta_s=None, eta_updated_ms=None,
+                       progression_ms=int(time.time() * 1000))
         for i, (source, famille, source_tag) in enumerate(fichiers, 1):
             try:
                 src_etat = _etat_source(source)
@@ -1257,24 +1453,46 @@ def main(argv: list[str] | None = None) -> int:
             # --now-ms reste une horloge fixe injectable pour les tests/replays.
             source_cutoff_ms = args.now_ms if args.now_ms else int(time.time() * 1000)
             taille = src_etat["taille"]
+            if source.suffix == ".gz":
+                taille_logique, exacte = _longueur_claire(source)
+                total_logique = taille_logique if exacte else None
+            else:
+                total_logique = taille
             pct = faits_octets / total_octets * 100
             ecoule = time.monotonic() - t0
             eta = (ecoule * (total_octets - faits_octets) / faits_octets) if faits_octets else 0
             tete = f"[{pct:4.0f}% | {i}/{n} | reste ~{_fmt_duree(eta)}]"
             _log(log, f"{tete} {source.name}  ({taille / 1048576:.1f} Mo)")
             _ecrire_statut(root, active=True, stage="CERTIFICATION", i=i, n=n,
-                           fichier=source.name, pct=round(pct, 1),
+                           fichier=source.name, pct=round(pct, 1), pct_confirme=round(pct, 1),
+                           pct_estime=round(pct, 1), octets_estimes_faits=faits_octets,
                            octets_faits=faits_octets, octets_total=total_octets,
-                           eta_s=round(eta, 1), batch_id=batch_id,
+                           eta_s=round(eta, 1) if faits_octets else None,
+                           eta_updated_ms=int(time.time() * 1000) if faits_octets else None,
+                           progression_ms=int(time.time() * 1000), batch_id=batch_id,
+                           fichier_phase="PREPARATION", fichier_octets_lus=0,
+                           fichier_octets_total=total_logique, fichier_pct=0.0,
+                           fichier_lignes_lues=0, fichier_debit_mo_s=None,
                            debit_mo_s=round((faits_octets / 1048576) / ecoule, 2) if ecoule > 0 else 0.0)
+            suivi_fichier = _ProgressionFichier(
+                root, batch_id=batch_id, fichier=source.name, index=i, nombre=n,
+                total_source=total_octets, source_terminee=faits_octets,
+                taille_source=taille, debut_lot=t0,
+            )
+
+            def progression_hash_source(lus: int) -> None:
+                suivi_fichier.publier("HASH SOURCE", lus, total_logique)
+
             cle_src = str(source.relative_to(root)) if root in source.parents else str(source)
             # Le hash et la lecture portent sur le même préfixe d'un ruban vivant.
-            sha_src = (_sha256_contenu_source(source) if source.suffix == ".gz"
-                       else _sha256_prefixe(source, taille))
+            sha_src = (_sha256_contenu_source(source, progression=progression_hash_source)
+                       if source.suffix == ".gz"
+                       else _sha256_prefixe(source, taille, progression=progression_hash_source))
             ancien = etat.get(cle_src)
             version = version_certificateur(source.name)
             if ancien and ancien.get("sha256") == sha_src and int(ancien.get("certif_version", 1)) >= version:
                 _log(log, "        deja certifie (inchange depuis la derniere fois) - je passe.")
+                suivi_fichier.publier("DÉJÀ CERTIFIÉ", total_logique or taille, total_logique)
                 faits_octets += taille
                 continue
             debut, fin = 0, None
@@ -1291,6 +1509,7 @@ def main(argv: list[str] | None = None) -> int:
                                      "meme_contenu_que": jumeau, "certif_version": version,
                                      "prefixe_octets": etat[jumeau].get("prefixe_octets"),
                                      "prefixe_sha256": etat[jumeau].get("prefixe_sha256")}
+                    suivi_fichier.publier("DOUBLON VÉRIFIÉ", total_logique or taille, total_logique)
                     faits_octets += taille
                     continue
                 # ``fin`` fige la lecture à la taille observée maintenant ; ``frontiere`` (dernier
@@ -1311,7 +1530,12 @@ def main(argv: list[str] | None = None) -> int:
                         # tests/test_archive_gzip_blocs.py. Ce que `_lire_lignes` promettait déjà : « une ligne
                         # encore en cours d'écriture n'est ni lue ni mise en quarantaine ».
                         fin = frontiere
-                debut = _reprise_append_only(source, frontiere, etat, version=version)
+                debut = _reprise_append_only(
+                    source, frontiere, etat, version=version,
+                    progression=lambda lus, total: suivi_fichier.publier(
+                        "VÉRIFICATION PRÉFIXE", lus, total
+                    ),
+                )
                 rattrapage = False
                 if version > 1 and not debut and frontiere is not None:
                     # Règle de certification corrigée : je relis TOUT le ruban, mais les lignes
@@ -1363,6 +1587,7 @@ def main(argv: list[str] | None = None) -> int:
                 debut_octets=debut, fin_octets=fin, rattrapage=rattrapage,
                 expected_source_sha256=sha_src, source_snapshot_octets=taille,
                 contenus_coffre=contenus_coffre,
+                progression_cb=suivi_fichier.publier,
             )
             faits_octets += taille
             if entree is not None:
@@ -1392,7 +1617,10 @@ def main(argv: list[str] | None = None) -> int:
             if fin is not None:
                 # identité du préfixe scellé : base de la reprise incrémentale au prochain passage
                 etat[cle_src]["prefixe_octets"] = frontiere
-                etat[cle_src]["prefixe_sha256"] = _sha256_prefixe(source, frontiere)
+                etat[cle_src]["prefixe_sha256"] = _sha256_prefixe(
+                    source, frontiere,
+                    progression=lambda lus: suivi_fichier.publier("HASH PRÉFIXE FINAL", lus, frontiere),
+                )
             if entrees_manifeste:
                 # POINT DE REPRISE après chaque fichier : manifeste, index et état sont écrits
                 # (atomiquement) au fur et à mesure. Une interruption — Ctrl+C, coupure, arrêt du
@@ -1658,13 +1886,28 @@ COMPRESSION_TAILLE_MIN = 256 * 1024
 COMPRESSION_RAPPORT = Path("runtime") / "coffre_certifie" / "COMPRESSION.json"
 
 
-def _compresser_un(chemin: str) -> dict[str, Any]:
+def _compresser_un(chemin: str, progression_path: str | None = None) -> dict[str, Any]:
     """Travailleur (processus separe) : un ruban -> archive gzip par blocs VERIFIEE, puis retrait du clair."""
     from hl_observer.datasets import archive_gzip_blocs as A
     p = Path(chemin)
     avant = p.stat().st_size
+
+    def progression(phase: str, faits: int, total: int) -> None:
+        if not progression_path:
+            return
+        path = Path(progression_path)
+        temporaire = path.with_suffix(".partial")
+        try:
+            temporaire.write_text(json.dumps({
+                "phase": phase, "octets_faits": int(faits), "octets_total": int(total),
+                "updated_ms": int(time.time() * 1000),
+            }), encoding="utf-8")
+            temporaire.replace(path)
+        except OSError:
+            pass  # télémetrie best-effort : elle ne doit jamais interrompre la compression
+
     try:
-        idx = A.remplacer_par_archive(p)
+        idx = A.remplacer_par_archive(p, progression=progression if progression_path else None)
         return {"fichier": chemin, "octets_clair": avant, "octets_archive": idx["octets_archive"],
                 "sha256_clair": idx["sha256_clair"], "statut": "COMPRESSE"}
     except Exception as exc:  # noqa: BLE001 - chaque refus est NOMME dans le rapport, la source reste intacte
@@ -1672,38 +1915,159 @@ def _compresser_un(chemin: str) -> dict[str, Any]:
 
 
 def compresser_rubans_figes(root: Path, *, age_min_s: float = 600.0, travailleurs: int = 3,
-                            maintenant: float | None = None) -> dict[str, Any]:
+                            maintenant: float | None = None,
+                            progression_cb: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
     """Compresse SANS PERTE (gzip par blocs indexe, relecture integrale verifiee) les rubans en clair figes des
     dossiers ``DOSSIERS_COMPRESSIBLES``. Le certificateur relit ces archives (prefixe du flux decompresse) et le
     lecteur de preuves y retrouve chaque ligne a son offset d'origine. Rend un bilan ; n'echoue jamais en silence."""
-    from concurrent.futures import ProcessPoolExecutor
+    from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
+    import shutil
+    from uuid import uuid4
 
     t = time.time() if maintenant is None else maintenant
     candidats: list[Path] = []
+    tailles: dict[str, int] = {}
     ignores: dict[str, int] = {}
+    scan_count = 0
+    dernier_scan = 0.0
+
+    def publier(champs: dict[str, Any]) -> None:
+        if progression_cb is not None:
+            try:
+                progression_cb(champs)
+            except Exception:  # noqa: BLE001 — diagnostic best-effort
+                pass
+
+    publier({"stage": "COMPRESSION_SCAN", "compression_scannes": 0,
+             "compression_candidats": 0, "compression_octets_total": 0,
+             "compression_faits": 0, "compression_octets_traites": 0,
+             "compression_octets_compressees": 0, "compression_en_traitement": 0,
+             "compression_actifs": [], "compression_pct_estime": None,
+             "eta_s": None, "eta_updated_ms": None})
     for base in DOSSIERS_COMPRESSIBLES:
-        for f in sorted((root / base).rglob("*.jsonl")) if (root / base).is_dir() else ():
+        # Parcours progressif : trier tout le rglob avant la première mise à jour rendait
+        # l'écran muet pendant l'inventaire des gros répertoires. L'ordre final est stabilisé
+        # plus bas pour les reçus; l'ordre du scan n'a aucune incidence sur l'admission.
+        for f in (root / base).rglob("*.jsonl") if (root / base).is_dir() else ():
+            scan_count += 1
             try:
                 st = f.stat()
             except OSError:
-                continue
-            if st.st_size < COMPRESSION_TAILLE_MIN:
-                ignores["trop_petit"] = ignores.get("trop_petit", 0) + 1
-            elif t - st.st_mtime < age_min_s:
-                ignores["modifie_recemment"] = ignores.get("modifie_recemment", 0) + 1
-            elif f.with_name(f.name + ".gz").exists():
-                ignores["archive_homonyme_deja_presente"] = ignores.get("archive_homonyme_deja_presente", 0) + 1
-            else:
-                candidats.append(f)
+                st = None
+            if st is not None:
+                if st.st_size < COMPRESSION_TAILLE_MIN:
+                    ignores["trop_petit"] = ignores.get("trop_petit", 0) + 1
+                elif t - st.st_mtime < age_min_s:
+                    ignores["modifie_recemment"] = ignores.get("modifie_recemment", 0) + 1
+                elif f.with_name(f.name + ".gz").exists():
+                    ignores["archive_homonyme_deja_presente"] = ignores.get("archive_homonyme_deja_presente", 0) + 1
+                else:
+                    candidats.append(f)
+                    tailles[str(f)] = int(st.st_size)
+            maintenant = time.monotonic()
+            if maintenant - dernier_scan >= 1.0:
+                publier({"stage": "COMPRESSION_SCAN", "compression_scannes": scan_count,
+                         "compression_candidats": len(candidats),
+                         "compression_octets_total": sum(tailles.values()),
+                         "compression_en_traitement": 0, "compression_actifs": []})
+                dernier_scan = maintenant
+    publier({"stage": "COMPRESSION_SCAN", "compression_scannes": scan_count,
+             "compression_candidats": len(candidats),
+             "compression_octets_total": sum(tailles.values()),
+             "compression_en_traitement": 0, "compression_actifs": []})
+
     resultats: list[dict[str, Any]] = []
     if candidats:
-        with ProcessPoolExecutor(max_workers=max(1, int(travailleurs))) as pool:
-            for r in pool.map(_compresser_un, [str(c) for c in sorted(candidats, key=lambda p: -p.stat().st_size)]):
-                resultats.append(r)
-                etat = "ok " if r["statut"] == "COMPRESSE" else "!! "
-                print(f"[coffre] compression {etat}{Path(r['fichier']).name} : {r['octets_clair'] / 1e6:,.0f} Mo -> "
-                      f"{(r.get('octets_archive') or r['octets_clair']) / 1e6:,.0f} Mo  {'' if etat == 'ok ' else r['statut']}",
-                      flush=True)
+        progression_dir = root / COFFRE_RELDIR / ".compression-live" / uuid4().hex
+        progression_dir.mkdir(parents=True, exist_ok=True)
+        tries: list[tuple[float, float]] = []
+        dernier_etat = 0.0
+        dernier_travail = -1.0
+        total_source = sum(tailles.values())
+        total_travail = float(total_source)
+        ordre = sorted(candidats, key=lambda p: -tailles[str(p)])
+        try:
+            with ProcessPoolExecutor(max_workers=max(1, int(travailleurs))) as pool:
+                futures = {}
+                progression_paths: dict[str, Path] = {}
+                for index, candidat in enumerate(ordre):
+                    progress_path = progression_dir / f"{index:06d}.json"
+                    progression_paths[str(candidat)] = progress_path
+                    future = pool.submit(_compresser_un, str(candidat), str(progress_path))
+                    futures[future] = candidat
+                pending = set(futures)
+                while pending:
+                    finis, pending = wait(pending, timeout=0.5, return_when=FIRST_COMPLETED)
+                    for future in finis:
+                        candidat = futures[future]
+                        try:
+                            resultat = future.result()
+                        except Exception as exc:  # le fichier source reste en clair si le worker échoue
+                            resultat = {"fichier": str(candidat), "octets_clair": tailles[str(candidat)],
+                                        "statut": f"CONSERVE_EN_CLAIR : worker {type(exc).__name__}: {exc}"}
+                        resultats.append(resultat)
+                        etat = "ok " if resultat["statut"] == "COMPRESSE" else "!! "
+                        print(f"[coffre] compression {etat}{Path(resultat['fichier']).name} : "
+                              f"{resultat['octets_clair'] / 1e6:,.0f} Mo -> "
+                              f"{(resultat.get('octets_archive') or resultat['octets_clair']) / 1e6:,.0f} Mo  "
+                              f"{'' if etat == 'ok ' else resultat['statut']}", flush=True)
+
+                    maintenant = time.monotonic()
+                    if maintenant - dernier_etat < 0.8 and pending:
+                        continue
+                    travail = sum(float(tailles.get(r["fichier"], r["octets_clair"])) for r in resultats)
+                    actifs: list[str] = []
+                    for future in pending:
+                        candidat = futures[future]
+                        path = progression_paths[str(candidat)]
+                        try:
+                            mesure = json.loads(path.read_text(encoding="utf-8"))
+                            total = max(1, int(mesure.get("octets_total") or tailles[str(candidat)]))
+                            faits = min(total, max(0, int(mesure.get("octets_faits") or 0)))
+                            phase = str(mesure.get("phase") or "")
+                            fraction = (0.5 * faits / total if phase == "COMPRESSION_SOURCE"
+                                        else 0.5 + 0.5 * faits / total if phase == "VERIFICATION_ARCHIVE" else 0.0)
+                            travail += tailles[str(candidat)] * min(1.0, fraction)
+                            if phase:
+                                actifs.append(f"{candidat.name} [{phase.lower().replace('_', ' ')}]")
+                            else:
+                                actifs.append(candidat.name)
+                        except (OSError, ValueError, TypeError):
+                            actifs.append(candidat.name)
+                    travail = min(float(total_source), travail)
+                    progression_nouvelle = travail > dernier_travail
+                    if progression_nouvelle:
+                        tries.append((maintenant, travail))
+                        tries = [e for e in tries if maintenant - e[0] <= 8.0]
+                        dernier_travail = travail
+                    debit = eta = None
+                    if len(tries) >= 2:
+                        dt = tries[-1][0] - tries[0][0]
+                        delta = tries[-1][1] - tries[0][1]
+                        if dt > 0 and delta > 0:
+                            debit = delta / dt / 1048576
+                            eta = max(0.0, (total_source - travail) / (delta / dt))
+                    pct = 100.0 * travail / total_source if total_source else 100.0
+                    mesure_live = {
+                        "stage": "COMPRESSION", "compression_scannes": scan_count,
+                        "compression_candidats": len(candidats), "compression_faits": len(resultats),
+                        "compression_octets_total": total_source,
+                        "compression_octets_traites": sum(int(r["octets_clair"]) for r in resultats),
+                        "compression_octets_compressees": sum(int(r["octets_clair"]) for r in resultats
+                                                               if r["statut"] == "COMPRESSE"),
+                        "compression_en_traitement": len(pending), "compression_actifs": actifs,
+                        "compression_pct_estime": round(pct, 1), "pct": round(pct, 1),
+                        "compression_debit_mo_s": round(debit, 2) if debit is not None else None,
+                    }
+                    if progression_nouvelle:
+                        mesure_live["progression_ms"] = int(time.time() * 1000)
+                        mesure_live["eta_s"] = round(eta, 1) if eta is not None else None
+                        mesure_live["eta_updated_ms"] = int(time.time() * 1000) if eta is not None else None
+                    publier(mesure_live)
+                    dernier_etat = maintenant
+            resultats.sort(key=lambda r: r["fichier"])
+        finally:
+            shutil.rmtree(progression_dir, ignore_errors=True)
     faits = [r for r in resultats if r["statut"] == "COMPRESSE"]
     bilan = {"genere_ms": int(time.time() * 1000), "candidats": len(candidats), "compresses": len(faits),
              "conserves_en_clair": [r for r in resultats if r["statut"] != "COMPRESSE"],
@@ -1715,6 +2079,15 @@ def compresser_rubans_figes(root: Path, *, age_min_s: float = 600.0, travailleur
         {**bilan, "fichiers": [{k: r[k] for k in ("fichier", "octets_clair", "octets_archive", "sha256_clair")}
                                for r in faits]}]
     _ecrire_json_atomique(root / COMPRESSION_RAPPORT, historique)
+    publier({"stage": "COMPRESSION_TERMINEE", "compression_scannes": scan_count,
+             "compression_candidats": len(candidats), "compression_faits": len(resultats),
+             "compression_octets_total": sum(tailles.values()),
+             "compression_octets_traites": sum(int(r["octets_clair"]) for r in resultats),
+             "compression_octets_compressees": sum(int(r["octets_clair"]) for r in faits),
+             "compression_en_traitement": 0, "compression_actifs": [],
+             "compression_pct_estime": 100.0, "pct": 100.0,
+             "eta_s": 0.0, "eta_updated_ms": int(time.time() * 1000),
+             "progression_ms": int(time.time() * 1000)})
     print(f"[coffre] compression : {len(faits)} ruban(s), {bilan['octets_avant'] / 1e9:.2f} Go -> "
           f"{bilan['octets_apres'] / 1e9:.2f} Go ; conserves en clair : {len(bilan['conserves_en_clair'])} ; "
           f"ignores : {ignores}", flush=True)
@@ -1741,8 +2114,48 @@ def _aiguiller(nettoye: list[str], intervalle: float) -> int:
     nettoye, compression, age_min = _extraire_compression(nettoye)
     if compression:
         code = 0 if compression == "compresser-seulement" else main(nettoye)
-        bilan = compresser_rubans_figes(_racine_des_args(nettoye), age_min_s=60.0 * age_min)
-        return code if code else (1 if bilan["conserves_en_clair"] else 0)
+        from uuid import uuid4
+        root = _racine_des_args(nettoye).resolve()
+        batch_id = f"{_horodate()}_compression_{uuid4().hex[:8]}"
+        _ecrire_statut(root, active=True, termine=False, stage="COMPRESSION_SCAN",
+                       batch_id=batch_id, pct=0.0, pct_confirme=0.0, pct_estime=0.0,
+                       i=0, n=0, fichier="", fichier_phase="", fichier_octets_lus=0,
+                       fichier_octets_total=None, fichier_pct=None, fichier_lignes_lues=0,
+                       fichier_debit_mo_s=None, octets_faits=0, octets_total=0,
+                       compression_scannes=0, compression_candidats=0, compression_faits=0,
+                       compression_octets_total=0, compression_octets_traites=0,
+                       compression_octets_compressees=0, compression_en_traitement=0,
+                       compression_actifs=[], compression_pct_estime=None,
+                       compression_debit_mo_s=None, eta_s=None, eta_updated_ms=None,
+                       progression_ms=int(time.time() * 1000), code=None)
+
+        def publier_compression(mesure: dict[str, Any]) -> None:
+            champs = {k: v for k, v in mesure.items() if k != "progression_ms"}
+            champs.update(active=True, termine=False, batch_id=batch_id)
+            if mesure.get("progression_ms") is not None:
+                champs["progression_ms"] = mesure["progression_ms"]
+            _ecrire_statut(root, **champs)
+
+        try:
+            bilan = compresser_rubans_figes(root, age_min_s=60.0 * age_min,
+                                            progression_cb=publier_compression)
+        except KeyboardInterrupt:
+            _ecrire_statut(root, active=False, termine=True, code=130,
+                           stage="COMPRESSION INTERROMPUE — source conservée si non vérifiée",
+                           eta_s=None, compression_en_traitement=0)
+            print("[coffre] Compression interrompue proprement ; les sources non vérifiées restent en clair.",
+                  flush=True)
+            return 130
+        code_final = code if code else (1 if bilan["conserves_en_clair"] else 0)
+        _ecrire_statut(root, active=False, termine=True, code=code_final,
+                       stage="TERMINE" if code_final == 0 else "COMPRESSION/SCELLEMENT À CORRIGER",
+                       pct=100.0, compression_pct_estime=100.0,
+                       compression_faits=int(bilan["compresses"] + len(bilan["conserves_en_clair"])),
+                       compression_candidats=int(bilan["candidats"]),
+                       compression_en_traitement=0, compression_actifs=[],
+                       eta_s=0.0, eta_updated_ms=int(time.time() * 1000),
+                       progression_ms=int(time.time() * 1000))
+        return code_final
     if intervalle <= 0:
         try:
             return main(nettoye)

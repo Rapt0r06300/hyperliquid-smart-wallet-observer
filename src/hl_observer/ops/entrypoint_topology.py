@@ -53,6 +53,11 @@ ENTRYPOINT_ROLES: dict[str, EntrypointRole] = {
     # absent du coffre, etiquete EXTERNE. Aucun ordre, aucune cle, aucun collecteur touche. Declare aux quatre
     # endroits le jour meme (ici, ROOT_SUPPORT_ENTRYPOINTS, le test de politique, le registre du harnais).
     "COFFRE_DONNEES_EXTERNES.cmd": EntrypointRole.MAINTENANCE,
+    # 26/11/2026 — OPTIMISE.cmd (le 9e bouton) : un seul lanceur qui enchaine, tels quels, POUSSER-GITHUB, AlinaSync, les
+    # donnees externes gratuites, le Certificateur (rattrapage + coffre compacte) puis verifie qu'aucune donnee
+    # ne manque. PAPER, aucun ordre ; il ne demarre ni n'arrete aucun collecteur. Declare aux quatre endroits.
+    # RETIRE : OPTIMISE.cmd mis a la corbeille par Florent le 26/11/2026 a 22:07 (« laisse tomber ») ; tools/optimise.py garde, non branche.
+    # "OPTIMISE.cmd": EntrypointRole.MAINTENANCE,
     # AlinaSync is also a supported root entrypoint, separate from the four main CMD roles.
     # Remaining commands are support/compatibility tools kept under tools/launchers/.
     "tools/launchers/Alina-restore.cmd": EntrypointRole.COMPAT,
@@ -130,6 +135,8 @@ ROOT_SUPPORT_ENTRYPOINTS = {
     "ETA_COLLECTE.cmd",
     # 23/11/2026 — donnees externes gratuites -> coffre (voir ENTRYPOINT_ROLES ci-dessus).
     "COFFRE_DONNEES_EXTERNES.cmd",
+    # 26/11/2026 — la chaine complete jusqu au coffre. RETIRE : OPTIMISE.cmd mis a la corbeille par Florent le 26/11/2026 a 22:07 (« laisse tomber ») ; tools/optimise.py garde, non branche.
+    # "OPTIMISE.cmd",
 }
 
 OFFICIAL_ENTRYPOINTS = {

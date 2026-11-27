@@ -92,6 +92,11 @@ REGISTRE: list[tuple[str, str, list[str], float, str]] = [
     # tests/test_coffre_donnees_externes.py::test_le_plan_n_ecrit_rien) : categorie `sur`.
     ("COFFRE_EXTERNE_plan",   "COFFRE_DONNEES_EXTERNES.cmd",       ["--plan"],    90,   "sur"),
     ("COFFRE_EXTERNE",        "COFFRE_DONNEES_EXTERNES.cmd",       [],          3600,   "lourd"),
+    # 26/11/2026 — OPTIMISE : `--plan` fait les controles et affiche le plan, RIEN n est lance : `sur`.
+    # Le passage complet pousse sur GitHub (effet externe) : `danger`, jamais en auto.
+    # RETIRE : OPTIMISE.cmd mis a la corbeille par Florent le 26/11/2026 a 22:07 (« laisse tomber ») ; tools/optimise.py garde, non branche.
+    # ("OPTIMISE_plan",         "OPTIMISE.cmd",                      ["--plan"],    120,   "sur"),
+    # ("OPTIMISE",              "OPTIMISE.cmd",                      [],             0,   "danger"),
     # Dangereux : effets externes -> jamais en auto.
     ("POUSSER_GITHUB",        "POUSSER-GITHUB.cmd",          [],             0,   "danger"),
     ("Installer_Noeud_HL",    "Installer Noeud HL.cmd",            [],             0,   "danger"),

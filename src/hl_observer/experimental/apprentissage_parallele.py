@@ -107,7 +107,8 @@ def simuler_les_fills(lignes, tape, tvl, *, debut_ms: float, now_ms: float, noti
         # chaque variante ne résout que les fills assez vieux pour l'horizon le PLUS LONG : tous les fills
         # inscrits le sont donc pour toutes les variantes à la fois (aucune ne voit un futur que l'autre n'a pas)
         sim = CF.simuler(lignes, tape, tvl, frac_tvl=v[0], stop_bps=v[1], horizon_ms=v[2], depuis_ms=debut_ms,
-                         now_ms=now_ms - (HORIZON_MAX - v[2]), notional_usd=notional_usd, etiquette=etiquette(v))
+                         now_ms=now_ms - (HORIZON_MAX - v[2]), notional_usd=notional_usd, etiquette=etiquette(v),
+                         deja=deja)
         for k, n in sim["compte"].items():
             comptes[k] = comptes.get(k, 0) + n
         for c in sim["cycles"]:

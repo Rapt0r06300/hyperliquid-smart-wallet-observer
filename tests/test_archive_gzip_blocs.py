@@ -53,6 +53,18 @@ def test_l_archive_redonne_chaque_octet_et_se_lit_avec_un_gzip_standard(tmp_path
     assert src.exists()                                                              # compresser ne retire rien
 
 
+def test_la_compression_publie_la_progression_de_l_ecriture_et_de_la_verification(tmp_path):
+    src = tmp_path / "progression.jsonl"
+    _ruban(src, 2000)
+    progression = []
+    A.compresser(src, bloc=8 * 1024, progression=lambda phase, faits, total:
+                 progression.append((phase, faits, total)))
+    assert {p[0] for p in progression} >= {"COMPRESSION_SOURCE", "VERIFICATION_ARCHIVE"}
+    for phase in ("COMPRESSION_SOURCE", "VERIFICATION_ARCHIVE"):
+        lignes = [p for p in progression if p[0] == phase]
+        assert lignes[-1][1] == lignes[-1][2] == src.stat().st_size
+
+
 def test_chaque_ligne_se_relit_a_son_offset_d_origine(tmp_path):
     src = tmp_path / "x.jsonl"
     lignes = _ruban(src, 2000)
@@ -128,6 +140,26 @@ def test_un_ruban_scelle_puis_compresse_n_est_jamais_redepose(tmp_path):
     assert bilan["octets_apres"] < bilan["octets_avant"]
     assert S.main(["--root", str(tmp_path), "--now-ms", str(NOW), "--archives", "--nom", "asset_ctx_tape.jsonl.gz"]) == 0
     assert sum(s["deposes"] for s in json.loads(index.read_text(encoding="utf-8"))["shards"]) == 2000   # rien de neuf
+
+
+def test_aiguillage_garde_un_statut_vivant_pendant_toute_la_compression(tmp_path, monkeypatch):
+    import sceller_coffre_local as S
+
+    statuts = []
+    monkeypatch.setattr(S, "_ecrire_statut", lambda root, **champs: statuts.append(dict(champs)))
+    monkeypatch.setattr(S, "_extraire_compression", lambda args: (args, "compresser-seulement", 10.0))
+    def compresser(root, *, age_min_s, progression_cb):
+        progression_cb({"stage": "COMPRESSION_SCAN", "compression_scannes": 4,
+                         "compression_candidats": 1, "compression_octets_total": 1000})
+        assert statuts[-1]["active"] is True and statuts[-1]["termine"] is False
+        progression_cb({"stage": "COMPRESSION", "compression_scannes": 4,
+                         "compression_candidats": 1, "compression_faits": 1,
+                         "compression_octets_total": 1000, "compression_octets_traites": 1000})
+        assert statuts[-1]["active"] is True and statuts[-1]["termine"] is False
+        return {"conserves_en_clair": [], "compresses": 1, "candidats": 1}
+    monkeypatch.setattr(S, "compresser_rubans_figes", compresser)
+    assert S._aiguiller(["--root", str(tmp_path)], 0) == 0
+    assert statuts[-1]["active"] is False and statuts[-1]["termine"] is True
 
 
 def _deposes(root: Path) -> int:

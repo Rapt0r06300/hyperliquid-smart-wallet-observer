@@ -74,8 +74,13 @@ def tvl_par_vault(root: Path) -> dict[str, float]:
 def simuler(lignes: Sequence[Mapping[str, Any]], tape: Mapping[str, Sequence[tuple[int, float]]],
             tvl: Mapping[str, float], *, frac_tvl: float, stop_bps: float, horizon_ms: float,
             depuis_ms: float, now_ms: float, notional_usd: float = 20.0, cout_bps: float = COUT_BPS,
-            etiquette: str = "") -> dict[str, Any]:
-    """Les cycles fantômes RÉSOLUS d'une variante, plus le compte de ce qui ne l'est pas (et pourquoi)."""
+            etiquette: str = "", deja: set[str] | None = None) -> dict[str, Any]:
+    """Les cycles fantômes RÉSOLUS d'une variante, plus le compte de ce qui ne l'est pas (et pourquoi).
+
+    ``deja`` (26/11/2026) : identités déjà jugées à une passe précédente. Elles sont sautées AVANT d'être
+    comptées : sans cela, chaque passe (toutes les 5 min, sur une bande de prix de ~4 h 30 seulement) recomptait
+    tous les fills depuis le début en « sans_prix » -- 97 488 sur 110 376 affichés, alors que 98,7 % des
+    ouvertures ont un prix en moins de 30 s."""
     ouvertures, clotures = [], {}
     for x in lignes:
         cote = _cote(x.get("dir"))
@@ -92,6 +97,8 @@ def simuler(lignes: Sequence[Mapping[str, Any]], tape: Mapping[str, Sequence[tup
     index = {c: [p[0] for p in s] for c, s in tape.items()}
     cycles: list[dict[str, Any]] = []
     compte = {"declenchements": 0, "trop_recents": 0, "sans_prix": 0, "non_resolue": 0, "doublons": 0}
+    if deja is not None:
+        compte["deja_inscrits"] = 0
     vus: set[str] = set()
     for recu, (vault, coin, cote), x in sorted(ouvertures, key=lambda e: e[0]):
         if recu < depuis_ms:
@@ -113,6 +120,9 @@ def simuler(lignes: Sequence[Mapping[str, Any]], tape: Mapping[str, Sequence[tup
             compte["doublons"] += 1                          # plusieurs fills d'un même ordre : un seul cycle
             continue
         vus.add(identite)
+        if deja is not None and identite in deja:
+            compte["deja_inscrits"] += 1                   # jugé à une passe précédente : ni recompté ni refait
+            continue
         compte["declenchements"] += 1
         if recu > now_ms - horizon_ms - MARGE_RESOLUTION_MS:
             compte["trop_recents"] += 1                      # pas encore résolu QUEL QUE SOIT son sort : attendu

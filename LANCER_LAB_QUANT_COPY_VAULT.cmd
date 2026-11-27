@@ -125,6 +125,17 @@ if not "!STEP_RC!"=="0" (set "RC=!STEP_RC!" & goto :done)
 set "STEP_RC=!ERRORLEVEL!"
 call "%~dp0tools\launcher_log.cmd" "LANCER_LAB_QUANT_COPY_VAULT" RESULT lab-step "copiabilite-persistence" "!STEP_RC!"
 if not "!STEP_RC!"=="0" (set "RC=!STEP_RC!" & goto :done)
+  rem 26/11/2026 : portage couvert sur funding (short perp + comptant ailleurs), rouvert en recherche PAPER.
+  "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\etude_copiabilite.py" --portage
+set "STEP_RC=!ERRORLEVEL!"
+call "%~dp0tools\launcher_log.cmd" "LANCER_LAB_QUANT_COPY_VAULT" RESULT lab-step "copiabilite-portage" "!STEP_RC!"
+if not "!STEP_RC!"=="0" (set "RC=!STEP_RC!" & goto :done)
+  rem 27/11/2026 : moteur de decouverte CopyVault -- banc a verite connue (la methode ne change que si elle decouvre
+  rem mieux sans faux gagnants), campagne (cellules pre-enregistrees, DSR + PBO, au plus 5 gels), suivi PAPER des gels.
+  "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\decouverte_copyvault.py"
+set "STEP_RC=!ERRORLEVEL!"
+call "%~dp0tools\launcher_log.cmd" "LANCER_LAB_QUANT_COPY_VAULT" RESULT lab-step "copiabilite-decouverte" "!STEP_RC!"
+if not "!STEP_RC!"=="0" (set "RC=!STEP_RC!" & goto :done)
   rem Compte PAPER de 350 USD tenant le portefeuille observe d'un leader : frais, ecart, funding,
   rem ordre minimal de 10 USD, delai - et ce que coute chaque friction.
   "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\etude_copiabilite.py" --replication-350
