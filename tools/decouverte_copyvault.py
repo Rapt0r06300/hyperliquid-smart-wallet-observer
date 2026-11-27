@@ -26,6 +26,7 @@ import re
 import subprocess
 import sys
 import time
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -48,6 +49,14 @@ ETAT_DIR = Path("runtime/research_lab/decouverte")
 CACHE_DIR = Path("runtime/research_lab/data/decouverte_cache")
 RAPPORTS = Path("runtime/reports/copy_vault_quant_lab/decouverte")
 CONFIG_LEADERS = "config/copy_vault_leaders.json"
+#: Hypotheses DECLAREES : un mecanisme vu en exploration, inscrit UNE fois avec sa date, juge SEULEMENT sur des
+#: decisions posterieures a sa declaration, par les memes regles de promotion que tout challenger (30 jours, IC95 > 0,
+#: Benjamini-Hochberg, mieux que le champion). Ajouter une ligne ici = une hypothese de plus dans la correction BH.
+HYPOTHESES_DECLAREES = (
+    {"direction": "suivre", "horizon_h": 24, "predicats": (("tendance", "contre"),), "declaree_le": "2026-11-27",
+     "pourquoi": "mecanisme recurrent des campagnes 2 et 3 : le leader qui va CONTRE la tendance 24 h du coin "
+                 "(+18,8 bps par decision en selection, +32,2 post-entree, 38 leaders) ; non prouve (PBO > 0,5)"},
+)
 COST_MODEL = "taker4.5+demi_ecart_mesure_ou_8+glissement1+funding_porte.v1"
 EXEC_MODEL = "backfill_obs+60s+60s_bougie_1h_suivante.v1"
 
@@ -186,11 +195,22 @@ def methode_courante(root: Path) -> D.Methode:
     return m if m.respecte_les_garde_fous() else D.Methode()
 
 
-def faire_banc(root: Path, table: pd.DataFrame, *, config: D.DecouverteConfig, write: bool, mondes: int) -> dict[str, Any]:
+def faire_banc(root: Path, table: pd.DataFrame, *, config: D.DecouverteConfig, write: bool, mondes: int,
+               confirmer: str | None = None) -> dict[str, Any]:
     journal = root / ETAT_DIR / "METHODES.ndjson"
     version_banc = (sum(1 for x in journal.read_text(encoding="utf-8").splitlines() if x.strip()) + 1) if journal.is_file() else 1
     t = time.time()
-    decision = B.ameliorer_methode(table, methode_courante(root), config, version_banc=version_banc, mondes=mondes)
+    courante = methode_courante(root)
+    variantes = None
+    if confirmer:                                   # « champ=valeur » : UNE hypothese de methode annoncee avant le test
+        champ, _, brut = confirmer.partition("=")
+        valeur = {"true": True, "false": False}.get(brut.strip().lower(), brut.strip())
+        if champ not in courante.as_dict() or champ == "version":
+            raise ValueError(f"--confirmer : champ de methode inconnu {champ!r}")
+        typ = type(getattr(courante, champ))
+        variantes = [replace(courante, **{champ: valeur if typ is bool else typ(valeur)}, version=courante.version + 1)]
+    decision = B.ameliorer_methode(table, courante, config, version_banc=version_banc, mondes=mondes, variantes=variantes)
+    decision["confirmation"] = confirmer
     retenue = D.Methode(**decision["methode_retenue"])
     decision["puissance"] = B.puissance(table, retenue, config, graines=list(range(version_banc * 1000 + 500,
                                         version_banc * 1000 + 500 + max(4, mondes // 2))),
@@ -264,6 +284,15 @@ def faire_campagne(root: Path, table: pd.DataFrame, meta: dict[str, Any], *, con
     place = max(0, 20 - actifs)                       # au plus 20 suivis actifs : la correction BH reste lisible
     etat = CC.enregistrer_geles(etat, rapport.get("surveillance", [])[:place], gel_ms=gel_ms, campagne=run_id,
                                 methode_version=methode.version, palier="SURVEILLANCE")
+    par_id = {r["id"]: r for r in rapport["resultats"]}
+    declarees = []
+    for h in HYPOTHESES_DECLAREES:
+        c = D._cellule(h["direction"], h["horizon_h"], h["predicats"])
+        mesure = par_id.get(c["id"], {})
+        declarees.append({**c, "predicats": [list(p) for p in c["predicats"]], "selection": mesure.get("selection", {}),
+                          "dsr": mesure.get("dsr")})
+    etat = CC.enregistrer_geles(etat, declarees, gel_ms=gel_ms, campagne=run_id, methode_version=methode.version,
+                                palier="HYPOTHESE_DECLAREE")
     _ecrire_json(root / ETAT_DIR / "CHAMPION_CHALLENGER.json", etat)
     out = root / RAPPORTS / run_id
     _ecrire_json(out / "resultat.json", E._jsonable(resultat))
@@ -364,9 +393,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--banc", action="store_true")
     parser.add_argument("--campagne", action="store_true")
     parser.add_argument("--suivi", action="store_true")
-    parser.add_argument("--mondes", type=int, default=12)
+    # 27/11 : 48 mondes par taille d'avantage (96 paires) -- en dessous, le banc ne peut presque jamais prouver un gain
+    # du niveau mesure pour le nombre effectif d'essais (9 contre 0 sur 96 paires) ; ~7 min, au plus toutes les 6 h.
+    parser.add_argument("--mondes", type=int, default=48)
     parser.add_argument("--sans-ecarts-mesures", action="store_true", help="ne lit pas les carnets (8 bps partout)")
     parser.add_argument("--sans-ecriture", action="store_true")
+    parser.add_argument("--confirmer", default=None, metavar="CHAMP=VALEUR",
+                        help="banc de CONFIRMATION d'une seule variante de methode annoncee (ex. essais_effectifs=true)")
     args = parser.parse_args(argv)
     try:
         return _main(args)
@@ -403,7 +436,7 @@ def _main(args: argparse.Namespace) -> int:
     print(f"[decouverte] table {meta.get('cache')} : {len(table):,} decisions {pops}", flush=True)
     write = not args.sans_ecriture
     if args.banc or tous:
-        faire_banc(root, table, config=config, write=write, mondes=args.mondes)
+        faire_banc(root, table, config=config, write=write, mondes=args.mondes, confirmer=args.confirmer)
     if args.campagne or tous:
         faire_campagne(root, table, meta, config=config, write=write)
     if args.suivi or tous:

@@ -131,3 +131,35 @@ def test_une_erreur_imprevue_ne_bloque_pas_le_labo(tmp_path, capsys, monkeypatch
     assert T.main(["--root", str(tmp_path)]) == 0
     assert "[ERREUR]" in capsys.readouterr().out
     assert "panne simulee" in (tmp_path / T.ETAT_DIR / "DERNIERE_ERREUR.txt").read_text(encoding="utf-8")
+
+
+
+def test_hypothese_declaree_inscrite_une_fois_et_suivie(tmp_path):
+    _faux_coffre(tmp_path)
+    assert T.main(["--root", str(tmp_path), "--campagne", "--suivi", "--sans-ecarts-mesures"]) == 0
+    etat = json.loads((tmp_path / T.ETAT_DIR / "CHAMPION_CHALLENGER.json").read_text(encoding="utf-8"))
+    declarees = [c for c in etat["challengers"].values() if c.get("palier") == "HYPOTHESE_DECLAREE"]
+    assert len(declarees) == len(T.HYPOTHESES_DECLAREES) and declarees[0]["etat"] in ("GELE", "SUIVI")
+
+
+def test_la_boucle_du_labo_relance_le_moteur_seulement_quand_il_faut(tmp_path):
+    sys.path.insert(0, str(RACINE / "tools"))
+    import alina_quant_lab_console as LAB
+
+    appels = []
+    (tmp_path / "runtime/coffre_certifie").mkdir(parents=True)
+    index = tmp_path / "runtime/coffre_certifie/LOCAL_INDEX.json"
+    index.write_text("{}", encoding="utf-8")
+    lancer = lambda cmd: appels.append(cmd) or 0                                   # noqa: E731
+    assert LAB._decouverte_periodique(tmp_path, maintenant=10_000.0, lancer=lancer)["lance"] is True
+    assert LAB._decouverte_periodique(tmp_path, maintenant=10_600.0, lancer=lancer)["lance"] is False   # rien de neuf
+    index.write_text('{"a": 1}', encoding="utf-8")
+    assert LAB._decouverte_periodique(tmp_path, maintenant=10_900.0, lancer=lancer)["lance"] is False   # trop tot
+    assert LAB._decouverte_periodique(tmp_path, maintenant=12_000.0, lancer=lancer)["lance"] is True    # neuf, 30 min
+    assert LAB._decouverte_periodique(tmp_path, maintenant=12_000.0 + 6 * 3600, lancer=lancer)["lance"] is True
+    assert len(appels) == 3 and appels[0][-1] == str(tmp_path)
+
+    def casse(_cmd):
+        raise OSError("panne")
+
+    assert LAB._decouverte_periodique(tmp_path, maintenant=99_999_999.0, lancer=casse)["lance"] is True  # jamais d'exception

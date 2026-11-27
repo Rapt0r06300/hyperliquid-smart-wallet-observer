@@ -1748,6 +1748,40 @@ def _local_safe_watch_fingerprint(root: Path, watch_files: list[str]) -> str:
     return digest.hexdigest()
 
 
+def _decouverte_periodique(root: Path, *, maintenant: float | None = None, lancer=None) -> dict[str, object]:
+    """27/11/2026 -- BOUCLE PERMANENTE du moteur de decouverte CopyVault, dans la boucle continue du labo (aucun
+    processus de plus). Il est relance quand le coffre a change (au plus toutes les 30 min), sinon toutes les 6 h, dans
+    un SOUS-PROCESSUS isole : son echec ne peut jamais arreter la boucle. Le moteur lui-meme n'ecrit rien quand rien n'a
+    change (memes donnees, meme methode, meme juge). PAPER, lecture seule du coffre."""
+    maintenant = time.time() if maintenant is None else maintenant
+    etat_path = root / "runtime" / "research_lab" / "decouverte" / "BOUCLE_LABO.json"
+    index = root / "runtime" / "coffre_certifie" / "LOCAL_INDEX.json"
+    try:
+        etat = json.loads(etat_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        etat = {}
+    try:
+        empreinte = f"{index.stat().st_mtime_ns}:{index.stat().st_size}"
+    except OSError:
+        return {"lance": False, "raison": "coffre LOCAL absent"}
+    depuis = maintenant - float(etat.get("dernier_lancement", 0.0))
+    neuf = empreinte != etat.get("empreinte_coffre")
+    if not ((neuf and depuis >= 1800) or depuis >= 6 * 3600):
+        return {"lance": False, "raison": "rien de neuf ou trop tot", "depuis_s": round(depuis)}
+    lancer = lancer or (lambda cmd: subprocess.run(cmd, cwd=str(root), timeout=3600, check=False).returncode)
+    try:
+        code = lancer([sys.executable, "-X", "utf8", str(root / "tools" / "decouverte_copyvault.py"), "--root", str(root)])
+    except Exception as erreur:  # noqa: BLE001 -- le moteur ne doit jamais interrompre la boucle du labo
+        code = f"{type(erreur).__name__}: {erreur}"
+    etat = {"dernier_lancement": maintenant, "empreinte_coffre": empreinte, "dernier_code": code}
+    try:
+        etat_path.parent.mkdir(parents=True, exist_ok=True)
+        etat_path.write_text(json.dumps(etat), encoding="utf-8")
+    except OSError:
+        pass
+    return {"lance": True, "code": code}
+
+
 def _run_continuous_safe_lab(
     report_dir: Path, *, run_id: str, head: str, continuous: bool,
 ) -> int:
@@ -1853,6 +1887,11 @@ def _run_continuous_safe_lab(
         if history_error is not None:
             raise RuntimeError("IMMUTABLE_IMPROVEMENT_HISTORY_UNREADABLE: " + history_error)
         while True:
+            if continuous:
+                passage = _decouverte_periodique(ROOT)
+                if passage.get("lance"):
+                    print(f"[DECOUVERTE] moteur de decouverte relance (code {passage.get('code')}) ; voir "
+                          "runtime/reports/copy_vault_quant_lab/decouverte", flush=True)
             update_summary(live={"stage": "VÉRIFICATION SAFE LOCALE", "message": "contrôle SHA-256 des shards CopyVault présents"})
             persist()
             safe_inputs = _materialiser_safe(

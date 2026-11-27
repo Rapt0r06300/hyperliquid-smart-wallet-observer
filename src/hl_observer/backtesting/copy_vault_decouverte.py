@@ -131,6 +131,10 @@ class Methode:
     pbo_max: float = 0.5
     explo_min_jours: int = 20
     exiger_bat_naif: bool = True
+    # 27/11 : N du DSR = nombre EFFECTIF d'essais (Li & Ji 2005, valeurs propres de la correlation des series
+    # journalieres des cellules) au lieu du nombre brut ; les cellules imbriquees ne sont pas independantes.
+    # Desactive par defaut : seul le banc a verite connue peut l'adopter (gain significatif, sans faux gagnant).
+    essais_effectifs: bool = False
 
     def respecte_les_garde_fous(self) -> bool:
         return (self.dsr_seuil >= GARDE_FOUS["dsr_min"] and self.pbo_max <= GARDE_FOUS["pbo_max"]
@@ -530,6 +534,28 @@ def benjamini_hochberg(p: Mapping[str, float], q: float) -> set[str]:
 
 # =========================================================================== campagne
 
+def essais_effectifs_li_ji(series: Sequence[tuple[np.ndarray, np.ndarray]], jours: np.ndarray) -> float | None:
+    """Nombre effectif de tests independants (Li & Ji 2005) : somme de I(l >= 1) + (l - floor(l)) sur les valeurs
+    propres l de la matrice de correlation des series journalieres (jours absents = moyenne de la cellule)."""
+    if jours.size < 3 or len(series) < 2:
+        return None
+    index = {int(j): i for i, j in enumerate(jours.tolist())}
+    colonnes = []
+    for js, xs in series:
+        if xs.size < 3:
+            continue
+        col = np.full(jours.size, float(xs.mean()))
+        for j, x in zip(js.tolist(), xs.tolist()):
+            if int(j) in index:
+                col[index[int(j)]] = x
+        if np.std(col) > 0:
+            colonnes.append(col)
+    if len(colonnes) < 2:
+        return None
+    valeurs = np.abs(np.linalg.eigvalsh(np.corrcoef(np.vstack(colonnes))))
+    return float(np.sum((valeurs >= 1.0) + (valeurs - np.floor(valeurs))))
+
+
 def _part_couts_mesures(table: pd.DataFrame, masque: np.ndarray) -> float:
     if "ecart_mesure" not in table.columns or not masque.any():
         return 0.0
@@ -559,11 +585,14 @@ def juger_campagne(table: pd.DataFrame, cellules: Sequence[Mapping[str, Any]], m
     blocs = np.array_split(jours_sel, config.blocs_pbo) if jours_sel.size >= config.blocs_pbo else []
     resultats: list[dict[str, Any]] = []
     matrices: dict[tuple[str, int], list[list[float]]] = {}
+    toutes_series: list[tuple[np.ndarray, np.ndarray]] = []
     for c in cellules:
         m = masque_cellule(table, c, cache) if n else np.zeros(0, dtype=bool)
         v = valeurs.get(f"{c['direction']}_{c['horizon_h']}", np.zeros(0))
         connu = np.isfinite(v) if v.size else np.zeros(0, dtype=bool)
         js, xs = serie_journaliere(v, jour, unite, m & sel)
+        if methode.essais_effectifs:
+            toutes_series.append((js, xs))
         r = {"id": c["id"], "direction": c["direction"], "horizon_h": c["horizon_h"],
              "predicats": [list(p) for p in c["predicats"]], "selection": resumer(xs, config, avec_bootstrap=not rapide),
              "n_decisions_selection": int((m & sel & connu).sum()),
@@ -581,6 +610,10 @@ def juger_campagne(table: pd.DataFrame, cellules: Sequence[Mapping[str, Any]], m
         resultats.append(r)
     # DSR : N = TOUS les essais ; variance = essais COMPARABLES (meme direction, meme horizon), plancher 1/(T-1)
     n_essais = int(essais_anterieurs) + len(cellules)
+    m_eff = essais_effectifs_li_ji(toutes_series, jours_sel) if methode.essais_effectifs else None
+    if m_eff is not None and cellules:
+        # meme proportion pour les essais anterieurs (leurs series ne sont pas relues) ; jamais moins d'un essai
+        n_essais = max(1, int(round((int(essais_anterieurs) + len(cellules)) * min(1.0, m_eff / len(cellules)))))
     par_groupe: dict[tuple[str, int], list[float]] = {}
     for r in resultats:
         s = r["selection"].get("sharpe_jour", float("nan"))
@@ -652,7 +685,7 @@ def juger_campagne(table: pd.DataFrame, cellules: Sequence[Mapping[str, Any]], m
         r["validation_bh_retenue"] = r["id"] in retenus_bh
     pires = [x["pbo"] for x in pbo_groupes.values() if x.get("pbo") is not None]
     return {"schema": SCHEMA, "juge_version": JUGE_VERSION, "methode": methode.as_dict(), "n_cellules": len(cellules),
-            "n_essais_dsr": n_essais, "variance_sharpes_par_groupe": {f"{g[0]}_{g[1]}h": v for g, v in sorted(var_groupe.items())},
+            "n_essais_dsr": n_essais, "essais_effectifs_li_ji": m_eff, "variance_sharpes_par_groupe": {f"{g[0]}_{g[1]}h": v for g, v in sorted(var_groupe.items())},
             "variance_sharpes_anterieurs": var_anterieurs, "pbo_par_groupe": pbo_groupes,
             "pbo": {"pbo": max(pires) if pires else None, "lecture": "le PIRE des groupes (direction, horizon)"},
             "geles": [r for r in resultats if r["id"] in geles],

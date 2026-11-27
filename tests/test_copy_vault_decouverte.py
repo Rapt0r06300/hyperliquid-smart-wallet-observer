@@ -172,7 +172,7 @@ def test_banc_a_verite_connue_et_amelioration_sans_affaiblissement():
     dec = B.ameliorer_methode(table, D.Methode(profondeur=1), cfg, version_banc=1, mondes=2, calibrage=CAL)
     # toutes les methodes affrontent les MEMES mondes : une seule liste de cellules plantees, tiree d'une reference fixe
     assert len(dec["cellules_plantees"]) == 2
-    assert all(len(v["banc"]["touches_par_monde"]) == 2 for v in dec["variantes"])
+    assert all(len(v["banc"]["touches_par_monde"]) == 2 * 2 for v in dec["variantes"])     # 2 mondes x 2 tailles
     assert dec["decision"] in {"CONSERVEE", "ADOPTEE", "RETOUR_ARRIERE", "AUCUNE_VARIANTE_SURE",
                                "CONSERVEE_GAIN_NON_SIGNIFICATIF"}
     assert D.Methode(**dec["methode_retenue"]).respecte_les_garde_fous()
@@ -321,3 +321,29 @@ def test_la_surveillance_repere_mais_ne_promeut_jamais_sans_suivi():
     etat, ev = CC.evaluer(etat, _suivi(100, 40, 0.0, seed=3), now_ms=300 * J)
     assert etat["champion"] == CC.AUCUN_TRADE and not any(e["evenement"] == "PROMOTION" for e in ev)
     assert etat["challengers"]["c1"]["palier"] == "SURVEILLANCE"
+
+
+
+def test_essais_effectifs_li_ji():
+    rng = np.random.default_rng(0)
+    jours = np.arange(60)
+    base = rng.normal(0, 1, 60)
+    identiques = [(jours, base.copy()) for _ in range(10)]                # 10 copies d'une meme serie : 1 essai
+    assert D.essais_effectifs_li_ji(identiques, jours) == pytest.approx(1.0, abs=1e-6)
+    independantes = [(jours, rng.normal(0, 1, 60)) for _ in range(10)]    # independantes : pres de 10
+    assert 7.0 <= D.essais_effectifs_li_ji(independantes, jours) <= 10.0
+    r = D.juger_campagne(_table(seed=11), D.generer_cellules(D.Methode(profondeur=1), D.DecouverteConfig()),
+                         D.Methode(profondeur=1, essais_effectifs=True), D.DecouverteConfig())
+    assert r["essais_effectifs_li_ji"] is not None and r["n_essais_dsr"] <= r["n_cellules"]
+
+
+
+def test_confirmation_d_une_seule_variante_annoncee():
+    table = _table(seed=12)
+    cfg = D.DecouverteConfig(tirages=200)
+    var = [D.Methode(profondeur=1, essais_effectifs=True, version=2)]
+    dec = B.ameliorer_methode(table, D.Methode(profondeur=1), cfg, version_banc=3, mondes=2, calibrage=CAL, variantes=var)
+    assert len(dec["variantes"]) == 1 and dec["variantes"][0]["methode"]["essais_effectifs"] is True
+    with pytest.raises(ValueError):
+        B.ameliorer_methode(table, D.Methode(), cfg, version_banc=3, mondes=1, calibrage=CAL,
+                            variantes=[D.Methode(dsr_seuil=0.5)])

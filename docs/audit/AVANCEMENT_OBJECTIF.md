@@ -3348,3 +3348,36 @@ Le banc accepte maintenant n'importe quel juge (`evaluer_methode(..., juge=, gen
 Le labo applique la même règle à ses propres méthodes : ses 3 bancs ont tous rendu « CONSERVEE_GAIN_NON_SIGNIFICATIF ». Sous environ 80 bps par décision, la limite reste le nombre de jours de données.
 
 **Poussée.** Faite par le moteur de `POUSSER-GITHUB` (`tools/alina_git_code_sync.py --root … --git git`, son mode code). Commit `74c2ca6` sur `main`, SHA local = SHA GitHub. Il contient 28 chemins, dont le travail en attente d'un autre agent sur le Certificateur et `suivi_coffre` ; ses 175 tests passaient avant la poussée. OPTIMISE en est exclu.
+
+### 27/11 après-midi : vraie amélioration de méthode, boucle permanente, hypothèse déclarée
+
+**Nombre EFFECTIF d'essais dans le DSR (Li & Ji 2005).** Les cellules imbriquées ne sont pas indépendantes : sur le réel, les 216 cellules valent **60 essais effectifs** (valeurs propres de la corrélation des séries journalières). L'option `Methode.essais_effectifs` est ajoutée, désactivée par défaut, et ajoutée aux variantes du banc.
+
+Mesure préalable sur 48 mondes identiques, bruit calé sur le réel (`runtime/research_lab/decouverte/EXPERIENCE_ESSAIS_EFFECTIFS.json`) :
+
+| Avantage planté | Rappel, N brut | Rappel, N effectif | Mondes trouvés par l'effectif seul / par le brut seul | Test apparié | Fausses découvertes (effectif) |
+|---:|---:|---:|---:|---:|---:|
+| 40 bps | 16,7 % | 27,1 % | 5 / 0 | p = 0,031 | 0 |
+| 80 bps | 56,2 % | 64,6 % | 4 / 0 | p = 0,063 | 1,6 % |
+
+- Aucun faux gain dans les mondes nuls.
+- Sur les deux tailles réunies : 9 contre 0, soit p ≈ 0,002.
+
+L'adoption n'est pas décidée à la main : c'est le banc du labo qui tranche. Il juge désormais chaque méthode sur PLUSIEURS tailles d'avantage (40 et 80 bps, mondes mis bout à bout pour le test apparié), avec sa règle Bonferroni sur toutes les variantes.
+
+**Boucle permanente, sans processus de plus.** `_decouverte_periodique` est appelée en tête de chaque tour de la boucle continue du labo (`alina_quant_lab_console.py`, mode « safe » du double-clic).
+- Elle relance `tools/decouverte_copyvault.py` dans un sous-processus isolé : quand le coffre a changé (au plus toutes les 30 min), sinon toutes les 6 h.
+- Son échec ne peut pas arrêter la boucle.
+- Son état est dans `runtime/research_lab/decouverte/BOUCLE_LABO.json`.
+- 167 tests de la console et du labo continu passent.
+
+**Hypothèse DÉCLARÉE suivie en PAPER.** `HYPOTHESES_DECLAREES` (dans l'outil, datées) contient une hypothèse : suivre 24 h quand le leader va CONTRE la tendance du coin, le mécanisme récurrent des campagnes 2 et 3.
+- Elle est inscrite une fois, sous le palier `HYPOTHESE_DECLAREE`.
+- Elle n'est jugée que sur des décisions postérieures à sa déclaration, avec les règles de promotion inchangées.
+
+**Passage écrit avec un banc de 48 mondes (27/11, 14 h 30) : arrêté par ma surveillance** après 390 s. La mémoire libre de la machine était descendue à 0,71 Go, sous le seuil de 0,8 Go. Le pic du moteur, lui, est resté à 0,72 Go. La mémoire était prise par le collecteur `native_venues` (5,6 Go), le passage du Certificateur en continu et un `git status` de Codex (1,65 + 0,69 Go). Rien n'a été écrit : METHODES.ndjson a toujours 3 lignes, et la dernière campagne date de 13 h 54.
+
+Le banc du moteur passe désormais à 48 mondes par défaut, ce qui donne 96 paires pour le test apparié. La boucle du labo refera la décision d'adoption d'elle-même, au plus toutes les 6 h. Elle n'est pas faite à la main.
+
+**Poussée différée.** Codex fait un `git status` sur le même dépôt, et deux `git` orphelins traînent depuis le 24/11. Une poussée en parallèle risquerait un conflit de verrou ; or une poussée coupée est pire qu'une poussée en retard. En attente localement : l'option `essais_effectifs`, le banc multi-tailles, la boucle permanente, l'hypothèse déclarée, les tests et cette page.
+

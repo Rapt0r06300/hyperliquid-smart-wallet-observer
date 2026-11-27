@@ -200,7 +200,7 @@ def puissance(table: pd.DataFrame, methode: D.Methode, config: D.DecouverteConfi
 def voisines(m: D.Methode) -> list[D.Methode]:
     """Variantes a UN parametre pres, toutes dans les garde-fous (jamais plus laxistes que les seuils fixes)."""
     options = {"profondeur": (1, 2), "predicats_croises": (4, 6, 8), "explo_min_jours": (20, 30),
-               "dsr_seuil": (0.95, 0.975), "pbo_max": (0.5, 0.4)}
+               "dsr_seuil": (0.95, 0.975), "pbo_max": (0.5, 0.4), "essais_effectifs": (False, True)}
     sortie = []
     for champ, valeurs in options.items():
         for v in valeurs:
@@ -211,17 +211,38 @@ def voisines(m: D.Methode) -> list[D.Methode]:
     return sortie
 
 
+def _evaluer_tailles(table: pd.DataFrame, methode: D.Methode, config: D.DecouverteConfig, *, graines: Sequence[int],
+                     plantees: Sequence[Mapping[str, Any]], calibrage: Mapping[str, Any],
+                     deltas: Sequence[float]) -> dict[str, Any]:
+    """Une methode doit trouver des avantages de plusieurs tailles : mondes de chaque taille mis bout a bout (le test
+    apparie porte sur len(graines) x len(deltas) paires), rappel moyen, PIRE taux de fausses decouvertes."""
+    parties = [evaluer_methode(table, methode, config, graines=graines, plantees=plantees, calibrage=calibrage,
+                               delta_bps=float(d)) for d in deltas]
+    if any(p["rappel"] is None for p in parties):
+        return parties[0]
+    return {"rappel": float(np.mean([p["rappel"] for p in parties])), "fdr": max(p["fdr"] for p in parties),
+            "mondes_nuls_avec_faux": max(p["mondes_nuls_avec_faux"] for p in parties),
+            "touches_par_monde": [x for p in parties for x in p["touches_par_monde"]],
+            "par_taille": {str(int(d)): {k: p[k] for k in ("rappel", "fdr", "mondes_nuls_avec_faux")}
+                           for d, p in zip(deltas, parties)}, "mondes": len(graines), "deltas": list(deltas)}
+
+
 def ameliorer_methode(table: pd.DataFrame, courante: D.Methode, config: D.DecouverteConfig, *, version_banc: int,
-                      mondes: int = 12, fdr_max: float = 0.05, marge_rappel: float = 0.05, delta_bps: float = 40.0,
-                      calibrage: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    """Courante contre voisines, sur des mondes NEUFS (graines jamais servies) et IDENTIQUES pour toutes."""
+                      mondes: int = 12, fdr_max: float = 0.05, marge_rappel: float = 0.05,
+                      deltas: Sequence[float] = (40.0, 80.0),
+                      calibrage: Mapping[str, Any] | None = None,
+                      variantes: Sequence[D.Methode] | None = None) -> dict[str, Any]:
+    """Courante contre voisines, sur des mondes NEUFS (graines jamais servies) et IDENTIQUES pour toutes, a plusieurs
+    tailles d'avantage plante. ``variantes`` : CONFIRMATION d'une hypothese de methode annoncee avant le test (Bonferroni
+    sur ce seul nombre) ; sinon toutes les voisines. Une variante hors garde-fous est refusee."""
+    if variantes is not None and not all(v.respecte_les_garde_fous() for v in variantes):
+        raise ValueError("variante refusee : elle affaiblit un garde-fou")
     graines = list(range(version_banc * 1000, version_banc * 1000 + mondes))
     calibrage = calibrage if calibrage is not None else calibrer_banc(table, config)
     plantees = tirer_plantees(cellules_reference(table, config), graines)
-    base = evaluer_methode(table, courante, config, graines=graines, plantees=plantees, calibrage=calibrage,
-                           delta_bps=delta_bps)
-    essais = [(v, evaluer_methode(table, v, config, graines=graines, plantees=plantees, calibrage=calibrage,
-                                  delta_bps=delta_bps)) for v in voisines(courante)]
+    base = _evaluer_tailles(table, courante, config, graines=graines, plantees=plantees, calibrage=calibrage, deltas=deltas)
+    essais = [(v, _evaluer_tailles(table, v, config, graines=graines, plantees=plantees, calibrage=calibrage,
+                                   deltas=deltas)) for v in (voisines(courante) if variantes is None else variantes)]
     sures = [(v, e) for v, e in essais if e["rappel"] is not None and e["fdr"] <= fdr_max
              and e["mondes_nuls_avec_faux"] <= fdr_max]
     courante_sure = base["rappel"] is not None and base["fdr"] <= fdr_max and base["mondes_nuls_avec_faux"] <= fdr_max
@@ -244,7 +265,7 @@ def ameliorer_methode(table: pd.DataFrame, courante: D.Methode, config: D.Decouv
     return {"schema": SCHEMA, "decision": decision, "methode_retenue": choix.as_dict(), "courante": courante.as_dict(),
             "banc_courante": base, "variantes": [{"methode": v.as_dict(), "banc": e} for v, e in essais],
             "graines": [graines[0], graines[-1]], "version_banc": version_banc, "calibrage": calibrage,
-            "verification_calibrage": verifier_calibrage(table, config, calibrage), "delta_plante_bps": delta_bps,
+            "verification_calibrage": verifier_calibrage(table, config, calibrage), "deltas_plantes_bps": list(deltas),
             "cellules_plantees": [p["id"] for p in plantees], "juge_version": D.JUGE_VERSION}
 
 
